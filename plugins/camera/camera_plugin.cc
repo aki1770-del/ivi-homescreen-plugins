@@ -132,7 +132,7 @@ std::string CameraPlugin::get_camera_lens_facing(
   return std::move(lensFacing);
 }
 
-ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
+ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras_bc() {
   spdlog::debug("[camera_plugin] availableCameras:");
 
   const auto cameras = g_camera_manager->cameras();

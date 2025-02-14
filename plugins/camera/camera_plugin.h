@@ -45,7 +45,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   ~CameraPlugin() override;
 
     // Returns the names of all of the available capture devices.
-    ErrorOr<flutter::EncodableList> GetAvailableCameras() override;
+    ErrorOr<flutter::EncodableList> GetAvailableCameras_bc() override;
     // Creates a camera instance for the given device name and settings.
     void Create(const std::string& camera_name,
                 const PlatformMediaSettings& settings,

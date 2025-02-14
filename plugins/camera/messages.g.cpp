@@ -246,7 +246,7 @@ void CameraApi::SetUp(
     if (api != nullptr) {
       channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
         try {
-          ErrorOr<EncodableList> output = api->GetAvailableCameras();
+          ErrorOr<EncodableList> output = api->GetAvailableCameras_bc();
           if (output.has_error()) {
             reply(WrapError(output.error()));
             return;

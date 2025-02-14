@@ -112,10 +112,10 @@ CameraSession::CameraSession(flutter::PluginRegistrar* plugin_registrar,
 
   spdlog::debug("[camera_plugin] Controls:");
   for (const auto& [id, info] : camera_->controls()) {
-    // SPDLOG_DEBUG("\t[{}] {}", id->name(), info.toString());
-    printType(id->name() + ": min", info.min().type(), info.min());
-    printType(id->name() + ": max", info.max().type(), info.max());
-    printType(id->name() + ": default", info.def().type(), info.def());
+    SPDLOG_DEBUG("\t[{}] {}", id->name(), info.toString());
+    //printType(id->name() + ": min", info.min().type(), info.min());
+    //printType(id->name() + ": max", info.max().type(), info.max());
+    //printType(id->name() + ": default", info.def().type(), info.def());
   }
 
   spdlog::debug("[camera_plugin] Properties:");
