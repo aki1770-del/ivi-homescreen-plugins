@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Toyota Connected North America
+ * Copyright 2023-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,19 @@
  * limitations under the License.
  */
 
-#ifndef FLUTTER_PLUGIN_COMMON_COMMON_H_
-#define FLUTTER_PLUGIN_COMMON_COMMON_H_
+#ifndef PLUGINS_COMMON_GLIB_SETTINGS_H_
+#define PLUGINS_COMMON_GLIB_SETTINGS_H_
 
-#include "logging.h"
+#include <string>
 
-#include "json/json_utils.h"
-#include "shared_library/shared_library.h"
-#include "string/string_tools.h"
-#include "time/time_tools.h"
-#include "tools/command.h"
-#include "tools/encodable.h"
-#include "tools/hexdump.h"
-#include "uuid/uuidxx.h"
+namespace plugin_common_glib {
 
-#endif  // FLUTTER_PLUGIN_COMMON_COMMON_H_
+std::string ReadGSettingsKey(const std::string& schema, const std::string& key);
+
+bool SetGSettingsKey(const std::string& schema,
+                     const std::string& key,
+                     const std::string& value);
+
+}  // namespace plugin_common_glib
+
+#endif  // PLUGINS_COMMON_GLIB_SETTINGS_H_
