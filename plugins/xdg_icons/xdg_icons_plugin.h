@@ -35,7 +35,7 @@ class XdgIconsPlugin final : public flutter::Plugin, public XdgIconsApi {
 
   ~XdgIconsPlugin() override;
 
-  ErrorOr<flutter::EncodableMap> LookupIcon(
+  ErrorOr<flutter::EncodableValue> LookupIcon(
       const flutter::EncodableMap& map) override;
 
   // Disallow copy and assign.
@@ -58,7 +58,8 @@ class XdgIconsPlugin final : public flutter::Plugin, public XdgIconsApi {
 
   std::optional<std::string> FindIcon(const std::string& icon,
                                       int size,
-                                      int scale);
+                                      int scale,
+                                      const std::string& theme);
 
   static bool DirectoryMatchesSize(int icon_size, int icon_scale);
 

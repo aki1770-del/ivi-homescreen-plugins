@@ -103,6 +103,10 @@ void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine) {
   WebrtcPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
+#if ENABLE_PLUGIN_XDG_ICONS
+  XdgIonsPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
 }
 
 void PluginsAoiPlatformViewCreate(

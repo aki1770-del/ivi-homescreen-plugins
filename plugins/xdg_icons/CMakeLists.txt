@@ -23,6 +23,7 @@ add_library(plugin_xdg_icons STATIC
 target_include_directories(plugin_xdg_icons PRIVATE include)
 
 target_link_libraries(plugin_xdg_icons PUBLIC
-        flutter
         platform_homescreen
+        plugin_common
+        plugin_common_glib
 )

@@ -20,7 +20,7 @@
 
 #include "xdg_icons_plugin.h"
 
-void XdgIconsPluginCApiRegisterWithRegistrar(
+void XdgIonsPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   plugin_xdg_icons::XdgIconsPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()

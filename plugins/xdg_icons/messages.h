@@ -84,7 +84,7 @@ class XdgIconsApi {
   XdgIconsApi& operator=(const XdgIconsApi&) = delete;
   virtual ~XdgIconsApi() = default;
 
-  virtual ErrorOr<flutter::EncodableMap> LookupIcon(
+  virtual ErrorOr<flutter::EncodableValue> LookupIcon(
       const flutter::EncodableMap& map) = 0;
 
   // The codec used by DesktopWindowApi.

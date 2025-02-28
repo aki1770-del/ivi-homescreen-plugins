@@ -21,8 +21,11 @@ endif ()
 
 pkg_check_modules(GLIB IMPORTED_TARGET glib-2.0 gio-2.0)
 if (GLIB_FOUND)
-    add_library(plugin_common_glib STATIC glib/main_loop.cc glib/settings.cc)
+    add_library(plugin_common_glib STATIC
+            glib/main_loop.cc
+            glib/settings.cc
+    )
     target_include_directories(plugin_common_glib PUBLIC . ${PROJECT_BINARY_DIR})
-    target_link_libraries(plugin_common_glib PUBLIC PkgConfig::GLIB toolchain::toolchain)
+    target_link_libraries(plugin_common_glib PUBLIC flutter PkgConfig::GLIB spdlog toolchain::toolchain)
     add_sanitizers(plugin_common_glib)
 endif ()

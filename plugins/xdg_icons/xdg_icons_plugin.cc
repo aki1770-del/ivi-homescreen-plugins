@@ -3,12 +3,12 @@
 #include <flutter/plugin_registrar.h>
 
 #include <fstream>
-#include <memory>
 
 #include "common/common.h"
 #include "common/glib/settings.h"
 
 #include "messages.h"
+#include "plugins/common/inipp.h"
 
 namespace plugin_xdg_icons {
 
@@ -29,20 +29,129 @@ XdgIconsPlugin::~XdgIconsPlugin() = default;
 std::vector<uint8_t> ReadFileIntoVector(const std::string& filename) {
   std::ifstream file(filename, std::ios::binary);
   if (!file) {
-    throw std::runtime_error("Failed to open file: " + filename);
+    spdlog::error("[xdg_icons] Failed to open file: {}", filename);
+    return {};
   }
 
-  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),
-                             std::istreambuf_iterator<char>());
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)),
+                                   std::istreambuf_iterator<char>());
 
   std::vector<uint8_t> list;
+  list.reserve(bytes.size());
   for (const auto& byte : bytes) {
     list.emplace_back(static_cast<std::uint8_t>(byte));
   }
   return list;
 }
 
-ErrorOr<flutter::EncodableMap> XdgIconsPlugin::LookupIcon(
+std::vector<fs::path> GetIconThemePaths(const std::string& theme) {
+  std::vector<fs::path> icon_paths;
+
+  // Add $HOME/.icons to the vector if present
+  if (const char* home = std::getenv("HOME")) {
+    fs::path home_path(home);
+    home_path /= ".icons";
+    home_path /= theme;
+    if (exists(home_path)) {
+      icon_paths.emplace_back(home_path);
+    }
+  }
+
+  // Add each path in $XDG_DATA_DIRS if present
+  if (const char* xdg_data_dirs = std::getenv("XDG_DATA_DIRS")) {
+    std::string xdg_data_dirs_str(xdg_data_dirs);
+    size_t start = 0;
+    size_t end = xdg_data_dirs_str.find(':');
+    while (end != std::string::npos) {
+      std::string dir = xdg_data_dirs_str.substr(start, end - start);
+      fs::path path(dir);
+      path /= "icons";
+      path /= theme;
+      if (exists(path)) {
+        icon_paths.emplace_back(path);
+      }
+      start = end + 1;
+      end = xdg_data_dirs_str.find(':', start);
+    }
+    std::string dir = xdg_data_dirs_str.substr(start);
+    fs::path path(dir);
+    path /= "icons";
+    path /= theme;
+    if (exists(path)) {
+      icon_paths.emplace_back(path);
+    }
+  }
+
+  // Add /usr/share/pixmaps/icons if present
+  fs::path path("/usr/share/pixmaps");
+  path /= "icons";
+  path /= theme;
+  if (exists(path)) {
+    icon_paths.emplace_back(path);
+  }
+
+  for (const auto& it : icon_paths) {
+    spdlog::debug("icon path: {}", it.string());
+  }
+
+  return icon_paths;
+}
+
+std::vector<std::string> ParseIniString(const std::string& input,
+                                        char delimiter) {
+  std::vector<std::string> result;
+  std::stringstream ss(input);
+  std::string item;
+
+  while (std::getline(ss, item, delimiter)) {
+    if (!item.empty()) {
+      result.push_back(item);
+    }
+  }
+
+  return result;
+}
+
+// NOLINTNEXTLINE
+void GetThemePaths(const std::string& theme, std::vector<std::string>& paths) {
+  std::vector<fs::path> theme_paths = GetIconThemePaths(theme);
+  for (const auto& theme_path : theme_paths) {
+    fs::path theme_filepath = theme_path / "index.theme";
+    if (!exists(theme_filepath)) {
+      continue;
+    }
+
+    // Parse the theme file
+    inipp::Ini<char> ini;
+    std::ifstream f(theme_filepath.string().c_str(), std::ios::binary);
+    if (!f) {
+      spdlog::error("[xdg_icons] Failed to open theme file: {}",
+                    theme_filepath.string());
+      return;
+    }
+    ini.parse(f);
+    f.close();
+
+    std::string inherits = ini.sections["Icon Theme"].at("Inherits");
+    auto inherit_themes = ParseIniString(inherits, ',');
+    for (const auto& it : inherit_themes) {
+      spdlog::debug("Inherits themes: {}", it);
+    }
+
+    std::string directories = ini.sections["Icon Theme"].at("Directories");
+    auto theme_directories = ParseIniString(directories, ',');
+
+    for (const auto& it : theme_directories) {
+      fs::path dir = theme_path;
+      dir /= it;
+      if (is_directory(dir) && exists(dir)) {
+        paths.emplace_back(dir.string());
+      }
+    }
+  }
+}
+
+ErrorOr<flutter::EncodableValue> XdgIconsPlugin::LookupIcon(
     const flutter::EncodableMap& map) {
   if (map.empty()) {
     return FlutterError("argument_error", "no arguments provided");
@@ -79,8 +188,8 @@ ErrorOr<flutter::EncodableMap> XdgIconsPlugin::LookupIcon(
     spdlog::debug("{}={}", k, v);
   }
 
-  if (icon_name.empty() || size.empty() || scale.empty()) {
-    spdlog::error("[XDG Icons] Missing key in map");
+  if (icon_name.empty()) {
+    spdlog::error("[XDG Icons] Missing icon name in args");
     return FlutterError("argument_error", "missing key in map");
   }
 
@@ -97,25 +206,41 @@ ErrorOr<flutter::EncodableMap> XdgIconsPlugin::LookupIcon(
   }
 
   int icon_size = 0;
-  try {
-    icon_size = std::stoi(size);
-  } catch (const std::invalid_argument& e) {
-    std::cerr << "[xdg_icons] Invalid argument: " << e.what() << std::endl;
-    return FlutterError("argument_error", "invalid argument");
-  } catch (const std::out_of_range& e) {
-    std::cerr << "[xdg_icons] Out of range: " << e.what() << std::endl;
-    return FlutterError("argument_error", "out of range");
+  if (!size.empty()) {
+    try {
+      icon_size = std::stoi(size);
+    } catch (const std::invalid_argument& e) {
+      std::cerr << "[xdg_icons] Invalid argument: " << e.what() << std::endl;
+      return FlutterError("argument_error", "invalid argument");
+    } catch (const std::out_of_range& e) {
+      std::cerr << "[xdg_icons] Out of range: " << e.what() << std::endl;
+      return FlutterError("argument_error", "out of range");
+    }
   }
 
-  int icon_scale = 0;
-  try {
-    icon_scale = std::stoi(scale);
-  } catch (const std::invalid_argument& e) {
-    std::cerr << "[xdg_icons] Invalid argument: " << e.what() << std::endl;
-    return FlutterError("argument_error", "invalid argument");
-  } catch (const std::out_of_range& e) {
-    std::cerr << "[xdg_icons] Out of range: " << e.what() << std::endl;
-    return FlutterError("argument_error", "out of range");
+  int icon_scale = 1;
+  if (!scale.empty()) {
+    try {
+      icon_scale = std::stoi(scale);
+    } catch (const std::invalid_argument& e) {
+      std::cerr << "[xdg_icons] Invalid argument: " << e.what() << std::endl;
+      return FlutterError("argument_error", "invalid argument");
+    } catch (const std::out_of_range& e) {
+      std::cerr << "[xdg_icons] Out of range: " << e.what() << std::endl;
+      return FlutterError("argument_error", "out of range");
+    }
+  }
+
+  fs::path icon_path = icon_name + ".png";
+
+  std::vector<std::string> paths;
+  GetThemePaths(theme, paths);
+  for (const auto& p : paths) {
+    fs::path p1(p);
+    p1 /= icon_path;
+    if (exists(p1)) {
+      spdlog::debug("icon found: {}", p1.string());
+    }
   }
 
   auto result = FindIconHelper(icon_name, icon_size, icon_scale, theme);
@@ -126,19 +251,15 @@ ErrorOr<flutter::EncodableMap> XdgIconsPlugin::LookupIcon(
 
   const auto data = ReadFileIntoVector(result.value());
   flutter::EncodableMap response = {
-      {flutter::EncodableValue("baseScale"),
-       flutter::EncodableValue(static_cast<double>(1))},
-      {flutter::EncodableValue("baseSize"),
-       flutter::EncodableValue(static_cast<double>(1))},
+      {flutter::EncodableValue("baseScale"), flutter::EncodableValue(1.0)},
+      {flutter::EncodableValue("baseSize"), flutter::EncodableValue(1.0)},
       {flutter::EncodableValue("fileName"),
        flutter::EncodableValue(result.value().c_str())},
-      {flutter::EncodableValue("isSymbolic"),
-       flutter::EncodableValue(static_cast<bool>(false))},
+      {flutter::EncodableValue("isSymbolic"), flutter::EncodableValue(false)},
       {flutter::EncodableValue("data"),
-       flutter::EncodableValue(
-           std::string(*data.data(), data.size()).c_str())}};
+       flutter::EncodableValue(std::string(data.begin(), data.end()))}};
 
-  return response;
+  return flutter::EncodableValue(response);
 }
 
 // NOLINTNEXTLINE
@@ -169,10 +290,9 @@ std::optional<std::string> XdgIconsPlugin::FindIconHelper(
 
 std::optional<std::string> XdgIconsPlugin::FindIcon(const std::string& icon,
                                                     const int size,
-                                                    const int scale) {
-  const std::string userSelectedTheme =
-      "user_selected_theme";  // Replace with actual user selected theme
-  auto filename = FindIconHelper(icon, size, scale, userSelectedTheme);
+                                                    const int scale,
+                                                    const std::string& theme) {
+  auto filename = FindIconHelper(icon, size, scale, theme);
   if (filename) {
     return filename;
   }
@@ -190,44 +310,7 @@ std::optional<std::string> XdgIconsPlugin::LookupIcon(
     const int size,
     const int scale,
     const std::string& theme) {
-  std::vector<std::string> subdirs = {/* theme subdir list */};
-  std::vector<std::string> directories = {/* basename list */};
-  std::vector<std::string> extensions = {"png", "svg", "xpm"};
-
-  for (const auto& subdir : subdirs) {
-    for (const auto& directory : directories) {
-      for (const auto& extension : extensions) {
-        if (DirectoryMatchesSize(size, scale)) {
-          fs::path filename = fs::path(directory) / theme / subdir /
-                              (iconname + "." + extension);
-          if (exists(filename)) {
-            return filename.string();
-          }
-        }
-      }
-    }
-  }
-
-  int minimal_size = std::numeric_limits<int>::max();
-  std::optional<std::string> closest_filename;
-
-  for (const auto& subdir : subdirs) {
-    for (const auto& directory : directories) {
-      for (const auto& extension : extensions) {
-        fs::path filename =
-            fs::path(directory) / theme / subdir / (iconname + "." + extension);
-        if (exists(filename)) {
-          if (const int distance = DirectorySizeDistance(size, scale);
-              distance < minimal_size) {
-            closest_filename = filename.string();
-            minimal_size = distance;
-          }
-        }
-      }
-    }
-  }
-
-  return closest_filename;
+  return {};
 }
 
 std::optional<std::string> XdgIconsPlugin::LookupFallbackIcon(

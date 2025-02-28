@@ -3,13 +3,12 @@
 #include <gio/gio.h>
 #include <string>
 
-#include <plugins/common/common.h>
+#include "plugins/common/common.h"
 
 namespace plugin_common_glib {
 
 std::string ReadGSettingsKey(const std::string& schema,
                              const std::string& key) {
-  GError* error = nullptr;
   GSettings* settings = g_settings_new(schema.c_str());
   if (!settings) {
     spdlog::error("Failed to create GSettings object for schema: {}", schema);
