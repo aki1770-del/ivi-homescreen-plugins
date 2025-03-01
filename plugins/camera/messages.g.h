@@ -173,7 +173,7 @@ class CameraApi {
   CameraApi& operator=(const CameraApi&) = delete;
   virtual ~CameraApi() {}
   // Returns the names of all of the available capture devices.
-  virtual ErrorOr<flutter::EncodableList> GetAvailableCameras_bc() = 0;
+  virtual ErrorOr<flutter::EncodableList> GetAvailableCameras() = 0;
   // Creates a camera instance for the given device name and settings.
   virtual void Create(
     const std::string& camera_name,
@@ -207,10 +207,6 @@ class CameraApi {
   virtual void ResumePreview(
     int64_t camera_id,
     std::function<void(std::optional<FlutterError> reply)> result) = 0;
-
-  virtual void setExposureMode(
-  int64_t camera_id,
-  std::function<void(std::optional<FlutterError> reply)> result) = 0;
 
   // The codec used by CameraApi.
   static const flutter::StandardMessageCodec& GetCodec();

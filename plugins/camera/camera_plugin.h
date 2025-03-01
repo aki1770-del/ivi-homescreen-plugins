@@ -27,7 +27,6 @@
 #include "camera_context.h"
 
 #include "event_channel.h"
-//#include "messages.h"
 #include "messages.g.h"
 #include "plugins/common/common.h"
 
@@ -45,7 +44,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   ~CameraPlugin() override;
 
     // Returns the names of all of the available capture devices.
-    ErrorOr<flutter::EncodableList> GetAvailableCameras_bc() override;
+    ErrorOr<flutter::EncodableList> GetAvailableCameras() override;
     // Creates a camera instance for the given device name and settings.
     void Create(const std::string& camera_name,
                 const PlatformMediaSettings& settings,
@@ -78,11 +77,6 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
     void ResumePreview(
         int64_t camera_id,
         std::function<void(std::optional<FlutterError> reply)> result) override;
-
-    void setExposureMode(
-        int64_t camera_id,
-        std::function<void(std::optional<FlutterError> reply)> result) override;
-
     /*
     // Creates a camera instance for the given device name and settings.
     void Create(const std::string& camera_name,

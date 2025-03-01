@@ -26,3 +26,17 @@ void CameraPluginCApiRegisterWithRegistrar(
       flutter::PluginRegistrarManager::GetInstance()
           ->GetRegistrar<flutter::PluginRegistrarDesktop>(registrar));
 }
+/*
+#include "include/camera/camera_plugin_c_api.h"
+
+#include "flutter/plugin_registrar_homescreen.h"
+
+#include "camera_plugin.h"
+
+void CameraPluginCApiRegisterWithRegistrar(
+    FlutterDesktopPluginRegistrarRef registrar) {
+  camera_plugin::CameraPlugin::RegisterWithRegistrar(
+      flutter::PluginRegistrarManager::GetInstance()
+          ->GetRegistrar<flutter::PluginRegistrarDesktop>(registrar));
+}
+*/

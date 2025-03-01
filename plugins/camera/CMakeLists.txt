@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(CAMERA IMPORTED_TARGET REQUIRED libcamera)
+pkg_check_modules(PIPEWIRE REQUIRED libpipewire-0.3)
+
 include(FindJPEG)
 
 add_library(plugin_camera STATIC
@@ -35,6 +38,7 @@ add_library(plugin_camera STATIC
 target_include_directories(plugin_camera PUBLIC
         include
         ${JPEG_INCLUDE_DIRS}
+        ${PIPEWIRE_INCLUDE_DIRS}
 )
 
 target_link_libraries(plugin_camera PUBLIC
@@ -43,6 +47,7 @@ target_link_libraries(plugin_camera PUBLIC
         flutter
         platform_homescreen
         plugin_common
+        ${PIPEWIRE_LIBRARIES}
 )
 
 if (JPEG_FOUND)

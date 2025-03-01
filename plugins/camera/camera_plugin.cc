@@ -27,6 +27,74 @@
 
 #include "plugins/common/common.h"
 
+#include <pipewire/pipewire.h>
+#include <iostream>
+#include <vector>
+#include <string>
+extern "C" {
+#include <pipewire/pipewire.h>
+}
+
+struct CameraInfo {
+  uint32_t id;
+  std::string name;
+};
+
+// Global vector to store camera info
+std::vector<CameraInfo> cameras;
+
+// Callback function for detecting cameras
+void on_global(void *data, uint32_t id, uint32_t permissions,
+               const char *type, uint32_t version, const struct spa_dict *props) {
+  if (!props) return;
+
+  const char *media_class = spa_dict_lookup(props, "media.class");
+  const char *name = spa_dict_lookup(props, "node.description");
+
+  if (media_class && std::string(media_class) == "Video/Source") {
+    std::cout << "Found camera: " << (name ? name : "Unknown") << " (id: " << id << ")" << std::endl;
+    cameras.push_back({id,name ? name: "Unknown"});
+  }
+}
+
+// Function to enumerate cameras using PipeWire
+std::vector<CameraInfo> enumerate_cameras() {
+  cameras.clear();  // Clear previous entries
+
+  pw_init(nullptr, nullptr);
+
+  pw_main_loop *loop = pw_main_loop_new(nullptr);
+  pw_context *context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
+  pw_core *core = pw_context_connect(context, nullptr, 0);
+  pw_registry *registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+
+  spa_hook registry_listener;
+  static const pw_registry_events registry_events = {
+    PW_VERSION_REGISTRY_EVENTS,
+    .global = on_global,
+};
+
+  pw_registry_add_listener(registry, &registry_listener, &registry_events, nullptr);
+
+  // Run the main loop briefly to gather device info
+  //pw_main_loop_run(loop);
+  int timeout_ms = 1000;
+  int elapsed_ms = 0;
+  while (elapsed_ms < timeout_ms) {
+    pw_loop_iterate(pw_main_loop_get_loop(loop), 100);
+    elapsed_ms += 100;
+  }
+  // Cleanup
+  spa_hook_remove(&registry_listener);
+  pw_proxy_destroy(reinterpret_cast<pw_proxy *>(registry));
+  pw_core_disconnect(core);
+  pw_context_destroy(context);
+  pw_main_loop_destroy(loop);
+
+  return cameras;
+}
+
+
 using namespace plugin_common;
 
 namespace camera_plugin {
@@ -132,18 +200,16 @@ std::string CameraPlugin::get_camera_lens_facing(
   return std::move(lensFacing);
 }
 
-ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras_bc() {
+ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
+  std::vector<CameraInfo> pwcameras = enumerate_cameras();
   spdlog::debug("[camera_plugin] availableCameras:");
-
-  const auto cameras = g_camera_manager->cameras();
   flutter::EncodableList list;
-  for (auto const& camera : cameras) {
-    std::string id = camera->id();
-    //   std::string lensFacing = get_camera_lens_facing(camera);
-    //   int64_t sensorOrientation = 0;
+  for (auto& camera : pwcameras) {
+    std::string id = std::to_string(camera.id);
+    std::string name = camera.name;
+
     spdlog::debug("\tid: {}", id);
-    //    spdlog::debug("\tlensFacing: {}", lensFacing);
-    //    spdlog::debug("\tsensorOrientation: {}", sensorOrientation);
+    spdlog::debug("\tname: {}", name);
     list.emplace_back(flutter::EncodableValue(std::move(id)));
   }
   return list;
@@ -260,17 +326,6 @@ void CameraPlugin::ResumePreview(
   result({});
 }
 
-void CameraPlugin::setExposureMode(
-    const int64_t camera_id,
-    const std::function<void(std::optional<FlutterError> reply)> result) {
-  //const auto camera =
-  //g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  const auto camera = g_camera_sessions[camera_id];
-  //camera->resumePreview();
-  camera->setExposureOffset(5000);
-
-  result({});
-}
 /*
 void CameraPlugin::Create(
     const std::string& camera_name,
