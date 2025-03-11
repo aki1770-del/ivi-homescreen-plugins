@@ -28,6 +28,11 @@
 #include "plugins/common/common.h"
 
 #include <pipewire/pipewire.h>
+#include <pipewire/core.h>
+#include <pipewire/properties.h>
+#include <spa/param/param.h>
+#include <spa/param/video/format-utils.h>
+#include <jpeglib.h>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -220,7 +225,9 @@ void CameraPlugin::Create(
     const PlatformMediaSettings& settings,
     const std::function<void(ErrorOr<int64_t> reply)> result) {
   spdlog::debug("[camera_plugin] create:");
-
+  spdlog::debug("\tname: {}", camera_name);
+  result(std::stoll(camera_name));
+/*
   if(CameraName_TextureId.find(camera_name)==CameraName_TextureId.end()) {
     auto camera = std::make_shared<CameraSession>(
     registrar_, camera_name.c_str(), settings,
@@ -237,6 +244,7 @@ void CameraPlugin::Create(
   else {
     result(CameraName_TextureId[camera_name]);
   }
+  */
 }
 
 void CameraPlugin::Initialize(
