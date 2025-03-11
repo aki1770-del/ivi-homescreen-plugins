@@ -36,6 +36,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <SDL2/SDL.h>
+
 extern "C" {
 #include <pipewire/pipewire.h>
 }
@@ -47,6 +49,26 @@ struct CameraInfo {
 
 // Global vector to store camera info
 std::vector<CameraInfo> cameras;
+
+// For streaming
+static constexpr int WIDTH  = 640;
+static constexpr int HEIGHT = 480;
+
+// SDL objects
+static SDL_Window*   g_window   = nullptr;
+static SDL_Renderer* g_renderer = nullptr;
+static SDL_Texture*  g_texture  = nullptr;
+
+// Buffer for decoded frames
+static std::unique_ptr<uint8_t[]> g_decodedBuffer;
+static std::mutex                 g_frameMutex;
+static std::atomic<bool>          g_newFrameAvailable(false);
+
+// PipeWire streaming objects
+static pw_main_loop* g_pwLoop    = nullptr;
+static pw_context*   g_pwContext = nullptr;
+static pw_core*      g_pwCore    = nullptr;
+static pw_stream*    g_pwStream  = nullptr;
 
 // Callback function for detecting cameras
 void on_global(void *data, uint32_t id, uint32_t permissions,
@@ -246,10 +268,358 @@ void CameraPlugin::Create(
   }
   */
 }
+/******************************************************************************
+ * decode_mjpeg
+ ******************************************************************************/
+int decode_mjpeg(const uint8_t *input, size_t input_size,
+                 uint8_t *output, int out_width, int out_height)
+{
+  jpeg_decompress_struct cinfo;
+  jpeg_error_mgr jerr;
+
+  cinfo.err = jpeg_std_error(&jerr);
+  jpeg_create_decompress(&cinfo);
+
+  jpeg_mem_src(&cinfo, input, input_size);
+  if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
+    std::cerr << "[decode_mjpeg] Failed to read JPEG header.\n";
+    jpeg_destroy_decompress(&cinfo);
+    return -1;
+  }
+
+  jpeg_start_decompress(&cinfo);
+  if (cinfo.output_width  != static_cast<uint32_t>(out_width)  ||
+      cinfo.output_height != static_cast<uint32_t>(out_height) ||
+      cinfo.output_components != 3)
+  {
+    std::cerr << "[decode_mjpeg] Unexpected size/components.\n";
+    jpeg_finish_decompress(&cinfo);
+    jpeg_destroy_decompress(&cinfo);
+    return -1;
+  }
+
+  const int row_stride = cinfo.output_width * cinfo.output_components;
+  while (cinfo.output_scanline < cinfo.output_height) {
+    JSAMPROW row[1];
+    row[0] = &output[cinfo.output_scanline * row_stride];
+    jpeg_read_scanlines(&cinfo, row, 1);
+  }
+
+  jpeg_finish_decompress(&cinfo);
+  jpeg_destroy_decompress(&cinfo);
+  return 0;
+}
+/******************************************************************************
+ * parse_props_param: Dump all properties from a SPA_TYPE_OBJECT_Props param
+ *
+ * This function attempts to read each property key (like SPA_PROP_brightness)
+ * from the param, then prints its value type. Real code might do more detailed
+ * checks or convert to a known range.
+ ******************************************************************************/
+static void parse_props_param(const spa_pod *pod)
+{
+    if (!pod) return;
+
+    // Is this actually an object of type SPA_TYPE_OBJECT_Props?
+    if (!spa_pod_is_object_type(pod, SPA_TYPE_OBJECT_Props)) {
+        // Some cameras or older nodes might still pass different param objects
+        return;
+    }
+
+    const spa_pod_object *obj = reinterpret_cast<const spa_pod_object *>(pod);
+    std::cout << "[parse_props_param] Found a props object with the following items:\n";
+
+    // Iterate each property (key/value)
+    spa_pod_prop *prop;
+    SPA_POD_OBJECT_FOREACH(obj, prop) {
+        uint32_t key = prop->key;
+
+        // We can check some known keys from <spa/param/props.h>:
+        // e.g. SPA_PROP_brightness, SPA_PROP_contrast, etc.
+        // We'll just print the key numeric ID and try to parse as float/int, etc.
+        std::cout << "  Key=" << key << " => ";
+
+        // The prop->value is a spa_pod describing the property type
+        if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Float) {
+            float val = 0.0f;
+            spa_pod_get_float(&prop->value, &val);
+            std::cout << "float=" << val;
+        }
+        else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Int) {
+            int val = 0;
+            spa_pod_get_int(&prop->value, &val);
+            std::cout << "int=" << val;
+        }
+        else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Bool) {
+            bool val = false;
+            spa_pod_get_bool(&prop->value, &val);
+            std::cout << "bool=" << val;
+        }
+        else {
+            // We won't parse all possible types in this example
+            std::cout << "(unknown type=" << SPA_POD_TYPE(&prop->value) << ")";
+        }
+        std::cout << "\n";
+    }
+    std::cout << "[parse_props_param] End of props.\n";
+}
+/******************************************************************************
+ * on_stream_process: Called to decode MJPEG frames
+ ******************************************************************************/
+static void on_stream_process(void*)
+{
+  pw_buffer *buf = pw_stream_dequeue_buffer(g_pwStream);
+  if (!buf) return;
+
+  if (!buf->buffer->datas[0].data) {
+    pw_stream_queue_buffer(g_pwStream, buf);
+    return;
+  }
+
+  auto *compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
+  size_t compressedSize = buf->buffer->datas[0].chunk->size;
+
+  int ret = decode_mjpeg(compressedData, compressedSize, g_decodedBuffer.get(), WIDTH, HEIGHT);
+  if (ret == 0) {
+    std::lock_guard<std::mutex> lock(g_frameMutex);
+    g_newFrameAvailable = true;
+  } else {
+    std::cerr << "[on_stream_process] MJPEG decode failed.\n";
+  }
+
+  pw_stream_queue_buffer(g_pwStream, buf);
+}
+/******************************************************************************
+ * on_stream_param_changed: Called when we get new param blocks from the stream
+ *
+ * We'll check if it's SPA_PARAM_Props or SPA_PARAM_PropInfo, then parse them
+ * with parse_props_param().
+ ******************************************************************************/
+static void on_stream_param_changed(void*, uint32_t id, const spa_pod* param)
+{
+  if (!param) return;
+
+  switch (id) {
+    case SPA_PARAM_Props:
+      std::cout << "[on_stream_param_changed] Received SPA_PARAM_Props\n";
+    parse_props_param(param);
+    break;
+    case SPA_PARAM_PropInfo:
+      std::cout << "[on_stream_param_changed] Received SPA_PARAM_PropInfo\n";
+    // For demonstration, we can parse it similarly
+    // or skip if we just want to know it exists
+    parse_props_param(param);
+    break;
+    default:
+      std::cout << "[on_stream_param_changed] Received param id=" << id
+                << " (not handled)\n";
+    break;
+  }
+}
+/******************************************************************************
+ * on_stream_state_changed
+ ******************************************************************************/
+static void on_stream_state_changed(void*,
+                                    pw_stream_state old_state,
+                                    pw_stream_state new_state,
+                                    const char* error)
+{
+  std::cout << "[on_stream_state_changed] "
+            << old_state << " -> " << new_state << " ("
+            << (error ? error : "no error") << ")\n";
+  if (new_state == PW_STREAM_STATE_STREAMING) {
+    // Just an example of changing a property
+    //update_exposure(g_pwStream, "9000");
+  }
+}
+/******************************************************************************
+ * start_camera_stream: Create a PipeWire stream for the chosen camera node,
+ * run until pw_main_loop_quit(). We also call print_camera_parameters() here
+ * after connect, so we can see the advanced param listing.
+ ******************************************************************************/
+void start_camera_stream(const std::string &nodeID);
+
+void start_camera_stream(const std::string &nodeID)
+{
+    pw_init(nullptr, nullptr);
+
+    g_pwLoop    = pw_main_loop_new(nullptr);
+    g_pwContext = pw_context_new(pw_main_loop_get_loop(g_pwLoop), nullptr, 0);
+    g_pwCore    = pw_context_connect(g_pwContext, nullptr, 0);
+    if (!g_pwCore) {
+        std::cerr << "[start_camera_stream] Could not connect to PipeWire core.\n";
+        return;
+    }
+
+    // Create stream
+    pw_properties* props = pw_properties_new(
+        PW_KEY_MEDIA_TYPE,         "Video",
+        PW_KEY_MEDIA_CATEGORY,     "Capture",
+        PW_KEY_MEDIA_ROLE,         "Camera",
+        PW_KEY_NODE_PAUSE_ON_IDLE, "false",
+        // This is deprecated in modern PipeWire, but older versions still use it:
+        PW_KEY_NODE_TARGET,        nodeID.c_str(),
+        nullptr
+    );
+    g_pwStream = pw_stream_new(g_pwCore, "MJPEG Camera Stream", props);
+    if (!g_pwStream) {
+        std::cerr << "[start_camera_stream] Failed to create pw_stream.\n";
+        return;
+    }
+
+    static const pw_stream_events streamEvents = {
+        PW_VERSION_STREAM_EVENTS,
+        nullptr,                  // destroy
+        on_stream_state_changed,  // state_changed
+        nullptr,                  // control_info
+        nullptr,                  // io_changed
+        on_stream_param_changed,  // param_changed  <--- we parse them here
+        nullptr,                  // add_buffer
+        nullptr,                  // remove_buffer
+        on_stream_process,        // process
+        nullptr                   // drain
+    };
+    spa_hook localListener;
+    pw_stream_add_listener(g_pwStream, &localListener, &streamEvents, nullptr);
+
+    // Build a SPA format param for MJPEG 640x480@30fps
+    uint8_t buffer[1024];
+    spa_pod_builder builder  = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    spa_rectangle rect       = { static_cast<uint32_t>(WIDTH), static_cast<uint32_t>(HEIGHT) };
+    spa_fraction fps         = { 30, 1 };
+
+    const spa_pod* params[1];
+    params[0] = reinterpret_cast<const spa_pod*>(
+        spa_pod_builder_add_object(&builder,
+            SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+            SPA_FORMAT_mediaType,        SPA_POD_Id(SPA_MEDIA_TYPE_video),
+            SPA_FORMAT_mediaSubtype,     SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
+            SPA_FORMAT_VIDEO_size,       SPA_POD_Rectangle(&rect),
+            SPA_FORMAT_VIDEO_framerate,  SPA_POD_Fraction(&fps)
+        )
+    );
+
+    int res = pw_stream_connect(
+        g_pwStream,
+        PW_DIRECTION_INPUT,
+        PW_ID_ANY,
+        static_cast<pw_stream_flags>(
+            PW_STREAM_FLAG_AUTOCONNECT |
+            PW_STREAM_FLAG_MAP_BUFFERS  |
+            PW_STREAM_FLAG_RT_PROCESS
+        ),
+        params,
+        1
+    );
+    if (res < 0) {
+        std::cerr << "[start_camera_stream] pw_stream_connect() error: " << res << "\n";
+    }
+
+    // -- Immediately request param blocks so we can print them out
+    //print_camera_parameters();
+
+    // Run the loop until user calls pw_main_loop_quit()
+    pw_main_loop_run(g_pwLoop);
+
+    // Cleanup
+    pw_stream_destroy(g_pwStream);
+    pw_core_disconnect(g_pwCore);
+    pw_context_destroy(g_pwContext);
+    pw_main_loop_destroy(g_pwLoop);
+    pw_deinit();
+}
 
 void CameraPlugin::Initialize(
     const int64_t camera_id,
     const std::function<void(ErrorOr<PlatformSize> reply)> result) {
+
+  // 3) SDL init
+  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    std::cerr << "SDL_Init error: " << SDL_GetError() << "\n";
+    return;
+  }
+  g_window = SDL_CreateWindow("PipeWire MJPEG Camera (Old API)",
+                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                              WIDTH, HEIGHT, 0);
+  if (!g_window) {
+    std::cerr << "SDL_CreateWindow error: " << SDL_GetError() << "\n";
+    SDL_Quit();
+    return;
+  }
+  g_renderer = SDL_CreateRenderer(g_window, -1,
+                                  SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  if (!g_renderer) {
+    std::cerr << "SDL_CreateRenderer error: " << SDL_GetError() << "\n";
+    SDL_DestroyWindow(g_window);
+    SDL_Quit();
+    return;
+  }
+  g_texture = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_RGB24,
+                                SDL_TEXTUREACCESS_STREAMING,
+                                WIDTH, HEIGHT);
+  if (!g_texture) {
+    std::cerr << "SDL_CreateTexture error: " << SDL_GetError() << "\n";
+    SDL_DestroyRenderer(g_renderer);
+    SDL_DestroyWindow(g_window);
+    SDL_Quit();
+    return;
+  }
+  g_decodedBuffer.reset(new uint8_t[WIDTH * HEIGHT * 3]);
+  std::memset(g_decodedBuffer.get(), 0, WIDTH * HEIGHT * 3);
+
+  // 4) Start camera streaming in background
+  std::string chosenID = std::to_string(camera_id);
+  std::thread pwThread([chosenID]() {
+      start_camera_stream(chosenID);
+  });
+
+  // 5) SDL main loop
+  bool running = true;
+  while (running) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT) {
+        running = false;
+      }
+    }
+    // If a new frame is ready, update texture
+    {
+      std::lock_guard<std::mutex> lock(g_frameMutex);
+      if (g_newFrameAvailable) {
+        SDL_UpdateTexture(g_texture, nullptr,
+                          g_decodedBuffer.get(), WIDTH * 3);
+        g_newFrameAvailable = false;
+      }
+    }
+
+    // Render
+    SDL_RenderClear(g_renderer);
+    SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
+    SDL_RenderPresent(g_renderer);
+
+    SDL_Delay(10);
+  }
+
+  // user closed the window => signal pipewire to quit
+  if (g_pwLoop) {
+    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
+  }
+  pwThread.join();
+
+  // cleanup SDL
+  SDL_DestroyTexture(g_texture);
+  SDL_DestroyRenderer(g_renderer);
+  SDL_DestroyWindow(g_window);
+  SDL_Quit();
+
+  std::cout << "Exiting.\n";
+  return;
+
+  /*
+  result(FlutterError("Invalid camera_id~~~"));
+  return;
+  */
+  /*
   if (g_camera_sessions.find(camera_id) == g_camera_sessions.end()) {
     result(FlutterError("Invalid camera_id"));
     return;
@@ -259,6 +629,7 @@ void CameraPlugin::Initialize(
   camera->setCamera(g_camera_manager->get(camera->get_libcamera_id()));
   const auto channel_name = camera->Initialize(camera_id, "JPEG");
   result(PlatformSize(camera->getPlatformSize()));
+  */
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {

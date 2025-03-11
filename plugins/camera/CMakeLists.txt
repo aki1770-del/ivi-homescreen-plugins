@@ -17,6 +17,8 @@ find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(CAMERA IMPORTED_TARGET REQUIRED libcamera)
 pkg_check_modules(PIPEWIRE REQUIRED libpipewire-0.3)
+pkg_check_modules(SDL2 REQUIRED sdl2)
+
 
 include(FindJPEG)
 
@@ -39,6 +41,7 @@ target_include_directories(plugin_camera PUBLIC
         include
         ${JPEG_INCLUDE_DIRS}
         ${PIPEWIRE_INCLUDE_DIRS}
+        ${SDL2_INCLUDE_DIRS}
 )
 
 target_link_libraries(plugin_camera PUBLIC
@@ -48,6 +51,7 @@ target_link_libraries(plugin_camera PUBLIC
         platform_homescreen
         plugin_common
         ${PIPEWIRE_LIBRARIES}
+        ${SDL2_LIBRARIES}
 )
 
 if (JPEG_FOUND)
