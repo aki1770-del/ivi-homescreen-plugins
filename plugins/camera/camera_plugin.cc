@@ -251,9 +251,9 @@ void CameraPlugin::Create(
   spdlog::debug("[camera_plugin] create:");
 
   spdlog::debug("\tname: {}", camera_name);
-  result(std::stoll(camera_name));
+  //result(std::stoll(camera_name));
 
-/*
+
   const auto texture_registrar = registrar_->texture_registrar();
   texture_registrar->TextureMakeCurrent();
 
@@ -266,7 +266,7 @@ void CameraPlugin::Create(
   SPDLOG_DEBUG("[camera_plugin] textureId: {}", textureId);
 
   result(textureId);
-*/
+
   //glDeleteTextures(1, &textureId);
 
 /*
@@ -615,25 +615,24 @@ void CameraPlugin::Initialize(
   mPreview.width = 640;
   mPreview.height = 480;
 
+  /// Setup GL Texture 2D
   const auto texture_registrar = registrar_->texture_registrar();
   texture_registrar->TextureMakeCurrent();
-
   glGenFramebuffers(1, &mPreview.framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
-  glGenTextures(1, &mPreview.textureId);
-
-  texture_registrar->TextureClearCurrent();
+  mPreview.textureId=camera_id;
 /*
+  glGenTextures(1, &mPreview.textureId);
   glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
-
+*/
   glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mPreview.width, mPreview.height, 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0,
+               GL_RGB, GL_UNSIGNED_BYTE, nullptr);
   glBindTexture(GL_TEXTURE_2D, 0);
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
@@ -648,7 +647,7 @@ void CameraPlugin::Initialize(
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
   texture_registrar->TextureClearCurrent();
-*/
+
   mPreview.descriptor = {
     .struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor),
     .handle = &mPreview.textureId,
@@ -670,6 +669,7 @@ void CameraPlugin::Initialize(
   flutter::TextureVariant texture = *mPreview.gpu_surface_texture;
   texture_registrar->RegisterTexture(&texture);
   texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
+
   result(PlatformSize(mPreview.width, mPreview.height));
 
   g_decodedBuffer.reset(new uint8_t[WIDTH * HEIGHT * 3]);
@@ -696,9 +696,10 @@ void CameraPlugin::Initialize(
         //SDL_UpdateTexture(g_texture, nullptr,
         //                  g_decodedBuffer.get(), WIDTH * 3);
 
-        save_image_to_jpeg("/home/tcna/Pictures/output.jpg", g_decodedBuffer.get(), IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS, 90);
+        //save_image_to_jpeg("/home/tcna/Pictures/output.jpg", g_decodedBuffer.get(), IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS, 90);
 
-        /*
+
+
         SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
         texture_registrar->TextureMakeCurrent();
         glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
@@ -719,12 +720,11 @@ void CameraPlugin::Initialize(
                      GL_UNSIGNED_BYTE, g_decodedBuffer.get());
         glGenerateMipmap(GL_TEXTURE_2D);
 
-        glBindFramebuffer(GL_FRAMEBUFFER, GL_NONE);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         texture_registrar->TextureClearCurrent();
         texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
         glFinish();
-
-        */
+        usleep(10000);
         //glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
         //texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
 
