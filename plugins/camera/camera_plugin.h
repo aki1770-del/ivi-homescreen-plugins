@@ -28,6 +28,7 @@
 
 #include "event_channel.h"
 #include "messages.g.h"
+#include "nv12.h"
 #include "plugins/common/common.h"
 
 #include <flutter/plugin_registrar_homescreen.h>
@@ -77,6 +78,8 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
     void ResumePreview(
         int64_t camera_id,
         std::function<void(std::optional<FlutterError> reply)> result) override;
+    void blit_fb(uint8_t const* pixels) const;
+
     /*
     // Creates a camera instance for the given device name and settings.
     void Create(const std::string& camera_name,
@@ -189,6 +192,28 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   CameraPlugin& operator=(const CameraPlugin&) = delete;
 
  private:
+    flutter::TextureRegistrar* texture_registrar_{};
+    struct preview {
+        bool is_initialized{};
+
+        // The internal Flutter event channel instance.
+        flutter::EventChannel<flutter::EncodableValue>* event_channel_;
+
+        // The internal Flutter event sink instance, used to send events to the Dart
+        // side.
+        std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink;
+
+        GLuint textureId{};
+        GLuint framebuffer{};
+        GLuint program;
+        GLsizei width, height;
+        GLuint vertex_arr_id_{};
+
+        // The Surface Descriptor sent to Flutter when a texture frame is available.
+        std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture;
+        FlutterDesktopGpuSurfaceDescriptor descriptor{};
+    } mPreview;
+
   flutter::PluginRegistrarDesktop* registrar_{};
   flutter::BinaryMessenger* messenger_;
   std::map<std::string,

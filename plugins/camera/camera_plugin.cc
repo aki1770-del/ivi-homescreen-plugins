@@ -37,6 +37,7 @@
 #include <vector>
 #include <string>
 #include <SDL2/SDL.h>
+#include "camera_context.h"
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -246,9 +247,28 @@ void CameraPlugin::Create(
     const std::string& camera_name,
     const PlatformMediaSettings& settings,
     const std::function<void(ErrorOr<int64_t> reply)> result) {
+
   spdlog::debug("[camera_plugin] create:");
+
   spdlog::debug("\tname: {}", camera_name);
   result(std::stoll(camera_name));
+
+/*
+  const auto texture_registrar = registrar_->texture_registrar();
+  texture_registrar->TextureMakeCurrent();
+
+  GLuint textureId;
+
+  glGenTextures(1, &textureId);
+
+  texture_registrar->TextureClearCurrent();
+
+  SPDLOG_DEBUG("[camera_plugin] textureId: {}", textureId);
+
+  result(textureId);
+*/
+  //glDeleteTextures(1, &textureId);
+
 /*
   if(CameraName_TextureId.find(camera_name)==CameraName_TextureId.end()) {
     auto camera = std::make_shared<CameraSession>(
@@ -383,6 +403,12 @@ static void on_stream_process(void*)
   if (ret == 0) {
     std::lock_guard<std::mutex> lock(g_frameMutex);
     g_newFrameAvailable = true;
+
+
+
+
+
+
   } else {
     std::cerr << "[on_stream_process] MJPEG decode failed.\n";
   }
@@ -442,6 +468,8 @@ void start_camera_stream(const std::string &nodeID);
 void start_camera_stream(const std::string &nodeID)
 {
     pw_init(nullptr, nullptr);
+
+    spdlog::debug("[camera_plugin] nodeID: {}", nodeID);
 
     g_pwLoop    = pw_main_loop_new(nullptr);
     g_pwContext = pw_context_new(pw_main_loop_get_loop(g_pwLoop), nullptr, 0);
@@ -529,10 +557,226 @@ void start_camera_stream(const std::string &nodeID)
     pw_deinit();
 }
 
+#define IMAGE_WIDTH 640
+#define IMAGE_HEIGHT 480
+#define IMAGE_CHANNELS 3  // RGB format
+
+void save_image_to_jpeg(const std::string &filename, const unsigned char *image_data, int width, int height, int channels, int quality) {
+  struct jpeg_compress_struct cinfo;
+  struct jpeg_error_mgr jerr;
+
+  // Setup error handling
+  cinfo.err = jpeg_std_error(&jerr);
+  jpeg_create_compress(&cinfo);
+
+  // Open file for writing
+  FILE *outfile = fopen(filename.c_str(), "wb");
+  if (!outfile) {
+    std::cerr << "Error: Unable to open file " << filename << " for writing!" << std::endl;
+    return;
+  }
+
+  jpeg_stdio_dest(&cinfo, outfile);
+
+  // Set image properties
+  cinfo.image_width = width;
+  cinfo.image_height = height;
+  cinfo.input_components = channels;
+  cinfo.in_color_space = JCS_RGB;
+
+  jpeg_set_defaults(&cinfo);
+  jpeg_set_quality(&cinfo, quality, TRUE);
+
+  // Start compression
+  jpeg_start_compress(&cinfo, TRUE);
+
+  // Write scanlines
+  JSAMPROW row_pointer;
+  while (cinfo.next_scanline < cinfo.image_height) {
+    row_pointer = (JSAMPROW)&image_data[cinfo.next_scanline * width * channels];
+    jpeg_write_scanlines(&cinfo, &row_pointer, 1);
+  }
+
+  // Finish compression
+  jpeg_finish_compress(&cinfo);
+  fclose(outfile);
+  jpeg_destroy_compress(&cinfo);
+
+  std::cout << "Image saved to " << filename << std::endl;
+}
+
 void CameraPlugin::Initialize(
     const int64_t camera_id,
     const std::function<void(ErrorOr<PlatformSize> reply)> result) {
 
+  std::cout<< "CameraPlugin::Initialize: "<< camera_id<<std::endl;
+
+  /// Setup GL Texture 2D
+  mPreview.width = 640;
+  mPreview.height = 480;
+
+  const auto texture_registrar = registrar_->texture_registrar();
+  texture_registrar->TextureMakeCurrent();
+
+  glGenFramebuffers(1, &mPreview.framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+  glGenTextures(1, &mPreview.textureId);
+
+  texture_registrar->TextureClearCurrent();
+/*
+  glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mPreview.width, mPreview.height, 0,
+               GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         mPreview.textureId, 0);
+  if (auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    status != GL_FRAMEBUFFER_COMPLETE) {
+    spdlog::error("[camera_plugin] FramebufferStatus: 0x{:X}", status);
+    }
+
+  glFinish();
+
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  texture_registrar->TextureClearCurrent();
+*/
+  mPreview.descriptor = {
+    .struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor),
+    .handle = &mPreview.textureId,
+    .width = static_cast<size_t>(mPreview.width),
+    .height = static_cast<size_t>(mPreview.height),
+    .visible_width = static_cast<size_t>(mPreview.width),
+    .visible_height = static_cast<size_t>(mPreview.height),
+    .format = kFlutterDesktopPixelFormatRGBA8888,
+    .release_callback = [](void* /* release_context */) {},
+    .release_context = this,
+};
+  mPreview.gpu_surface_texture = std::make_unique<flutter::GpuSurfaceTexture>(
+      kFlutterDesktopGpuSurfaceTypeGlTexture2D,
+      [&](size_t /* width */,
+          size_t /* height */) -> const FlutterDesktopGpuSurfaceDescriptor* {
+        return &mPreview.descriptor;
+      });
+
+  flutter::TextureVariant texture = *mPreview.gpu_surface_texture;
+  texture_registrar->RegisterTexture(&texture);
+  texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
+  result(PlatformSize(mPreview.width, mPreview.height));
+
+  g_decodedBuffer.reset(new uint8_t[WIDTH * HEIGHT * 3]);
+  std::memset(g_decodedBuffer.get(), 128, WIDTH * HEIGHT * 3);
+
+
+
+  // 4) Start camera streaming in background
+  std::string chosenID = std::to_string(camera_id);
+  std::thread pwThread([chosenID]() {
+      start_camera_stream(chosenID);
+  });
+
+  // 5) SDL main loop
+  //result(PlatformSize(640,480));
+
+  bool running = true;
+  while (running) {
+
+    // If a new frame is ready, update texture
+    {
+      std::lock_guard<std::mutex> lock(g_frameMutex);
+      if (g_newFrameAvailable) {
+        //SDL_UpdateTexture(g_texture, nullptr,
+        //                  g_decodedBuffer.get(), WIDTH * 3);
+
+        save_image_to_jpeg("/home/tcna/Pictures/output.jpg", g_decodedBuffer.get(), IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS, 90);
+
+        /*
+        SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
+        texture_registrar->TextureMakeCurrent();
+        glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+        glViewport(0, 0, mPreview.width, mPreview.height);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
+        glUniform1i(0, 0);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                        GL_LINEAR_MIPMAP_LINEAR);
+        // The following call requires a 32-bit aligned source buffer
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0, GL_RGB,
+                     GL_UNSIGNED_BYTE, g_decodedBuffer.get());
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, GL_NONE);
+        texture_registrar->TextureClearCurrent();
+        texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
+        glFinish();
+
+        */
+        //glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+        //texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
+
+        g_newFrameAvailable = false;
+      }
+    }
+    // Render
+    //SDL_RenderClear(g_renderer);
+    //SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
+    //SDL_RenderPresent(g_renderer);
+
+    //SDL_Delay(10);
+  }
+
+  // user closed the window => signal pipewire to quit
+  if (g_pwLoop) {
+    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
+  }
+  pwThread.join();
+  /*
+  bool running = true;
+  while (running) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT) {
+        running = false;
+      }
+    }
+    // If a new frame is ready, update texture
+    {
+      std::lock_guard<std::mutex> lock(g_frameMutex);
+      if (g_newFrameAvailable) {
+        SDL_UpdateTexture(g_texture, nullptr,
+                          g_decodedBuffer.get(), WIDTH * 3);
+        g_newFrameAvailable = false;
+      }
+    }
+    // Render
+
+    SDL_Delay(10);
+  }
+
+
+
+  // user closed the window => signal pipewire to quit
+  if (g_pwLoop) {
+    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
+  }
+  pwThread.join();
+
+  */
+/*
   // 3) SDL init
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
     std::cerr << "SDL_Init error: " << SDL_GetError() << "\n";
@@ -574,6 +818,8 @@ void CameraPlugin::Initialize(
   });
 
   // 5) SDL main loop
+  //result(PlatformSize(640,480));
+
   bool running = true;
   while (running) {
     SDL_Event e;
@@ -591,7 +837,6 @@ void CameraPlugin::Initialize(
         g_newFrameAvailable = false;
       }
     }
-
     // Render
     SDL_RenderClear(g_renderer);
     SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
@@ -613,6 +858,7 @@ void CameraPlugin::Initialize(
   SDL_Quit();
 
   std::cout << "Exiting.\n";
+  */
   return;
 
   /*
@@ -630,6 +876,36 @@ void CameraPlugin::Initialize(
   const auto channel_name = camera->Initialize(camera_id, "JPEG");
   result(PlatformSize(camera->getPlatformSize()));
   */
+}
+void CameraPlugin::blit_fb(uint8_t const* pixels) const {
+  SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
+  texture_registrar_->TextureClearCurrent();
+  glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+  glViewport(0, 0, mPreview.width, mPreview.height);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
+  glUniform1i(0, 0);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
+  // The following call requires a 32-bit aligned source buffer
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0, GL_RGB,
+               GL_UNSIGNED_BYTE, pixels);
+  glGenerateMipmap(GL_TEXTURE_2D);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, GL_NONE);
+  texture_registrar_->TextureClearCurrent();
+  texture_registrar_->MarkTextureFrameAvailable(mPreview.textureId);
+
+
+  //glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+  //texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
+
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
