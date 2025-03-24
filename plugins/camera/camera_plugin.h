@@ -32,6 +32,11 @@
 #include "plugins/common/common.h"
 
 #include <flutter/plugin_registrar_homescreen.h>
+#include <pipewire/pipewire.h>
+#include <pipewire/core.h>
+#include <pipewire/properties.h>
+#include <spa/param/param.h>
+#include <spa/param/video/format-utils.h>
 
 namespace camera_plugin {
 
@@ -193,6 +198,26 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
  private:
     flutter::TextureRegistrar* texture_registrar_{};
+    // Buffer for decoded frames
+    std::unique_ptr<uint8_t[]> g_decodedBuffer;
+    std::mutex                 g_frameMutex;
+    std::atomic<bool>          g_newFrameAvailable{ false};
+    spa_hook localListener;
+
+    // PipeWire streaming objects
+    pw_main_loop* g_pwLoop    = nullptr;
+    pw_context*   g_pwContext = nullptr;
+    pw_core*      g_pwCore    = nullptr;
+    pw_stream*    g_pwStream  = nullptr;
+
+    // Thread that runs pw_main_loop_run
+    std::thread pipewire_thread_;
+
+    static void on_stream_process(void* data);
+    static void on_stream_state_changed(void *data, pw_stream_state old_state, pw_stream_state new_state, const char* error);
+    void start_camera_stream(const std::string &nodeID);
+    void handle_stream();
+
     struct preview {
         bool is_initialized{};
 
@@ -223,6 +248,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
       stream_handlers_;
 
   std::map<std::string, int> CameraName_TextureId;
+  std::map<int, std::string> TextureId_CameraName;
   std::thread thread_;
   std::unique_ptr<asio::io_context> io_context_;
   asio::executor_work_guard<decltype(io_context_->get_executor())> work_;

@@ -55,22 +55,6 @@ std::vector<CameraInfo> cameras;
 static constexpr int WIDTH  = 640;
 static constexpr int HEIGHT = 480;
 
-// SDL objects
-static SDL_Window*   g_window   = nullptr;
-static SDL_Renderer* g_renderer = nullptr;
-static SDL_Texture*  g_texture  = nullptr;
-
-// Buffer for decoded frames
-static std::unique_ptr<uint8_t[]> g_decodedBuffer;
-static std::mutex                 g_frameMutex;
-static std::atomic<bool>          g_newFrameAvailable(false);
-
-// PipeWire streaming objects
-static pw_main_loop* g_pwLoop    = nullptr;
-static pw_context*   g_pwContext = nullptr;
-static pw_core*      g_pwCore    = nullptr;
-static pw_stream*    g_pwStream  = nullptr;
-
 // Callback function for detecting cameras
 void on_global(void *data, uint32_t id, uint32_t permissions,
                const char *type, uint32_t version, const struct spa_dict *props) {
@@ -254,39 +238,30 @@ void CameraPlugin::Create(
   //result(std::stoll(camera_name));
 
 
-  const auto texture_registrar = registrar_->texture_registrar();
-  texture_registrar->TextureMakeCurrent();
 
-  GLuint textureId;
 
-  glGenTextures(1, &textureId);
 
-  texture_registrar->TextureClearCurrent();
-
-  SPDLOG_DEBUG("[camera_plugin] textureId: {}", textureId);
-
-  result(textureId);
-
-  //glDeleteTextures(1, &textureId);
-
-/*
   if(CameraName_TextureId.find(camera_name)==CameraName_TextureId.end()) {
-    auto camera = std::make_shared<CameraSession>(
-    registrar_, camera_name.c_str(), settings,
-    g_camera_manager->get(camera_name), strand_.get());
 
-    const auto texture_id = camera->get_texture_id();
-    g_camera_sessions[texture_id] = std::move(camera);
-    CameraName_TextureId.insert({camera_name, texture_id});
-    spdlog::debug("2. size of g_camera_sessions={}",g_camera_sessions.size());
-    spdlog::debug("!!!!! camera_id: {}",g_camera_sessions[texture_id]->get_libcamera_id());
+    const auto texture_registrar = registrar_->texture_registrar();
+    texture_registrar->TextureMakeCurrent();
 
-    result(texture_id);
+    GLuint textureId;
+
+    glGenTextures(1, &textureId);
+
+    texture_registrar->TextureClearCurrent();
+
+    CameraName_TextureId.insert({camera_name, textureId});
+    TextureId_CameraName.insert({textureId, camera_name});
+
+    SPDLOG_DEBUG("[camera_plugin] textureId: {}", textureId);
+    result(textureId);
   }
   else {
     result(CameraName_TextureId[camera_name]);
   }
-  */
+
 }
 /******************************************************************************
  * decode_mjpeg
@@ -386,8 +361,36 @@ static void parse_props_param(const spa_pod *pod)
 /******************************************************************************
  * on_stream_process: Called to decode MJPEG frames
  ******************************************************************************/
-static void on_stream_process(void*)
+void CameraPlugin::on_stream_process(void* data)
 {
+  auto *self = static_cast<CameraPlugin*>(data);
+  self->handle_stream();
+/*
+  pw_buffer *buf = pw_stream_dequeue_buffer(self->g_pwStream);
+  if (!buf) return;
+
+  if (!buf->buffer->datas[0].data) {
+    pw_stream_queue_buffer(self->g_pwStream, buf);
+    return;
+  }
+
+  auto *compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
+  size_t compressedSize = buf->buffer->datas[0].chunk->size;
+
+  int ret = decode_mjpeg(compressedData, compressedSize, self->g_decodedBuffer.get(), WIDTH, HEIGHT);
+  if (ret == 0) {
+    std::lock_guard<std::mutex> lock(self->g_frameMutex);
+    self->g_newFrameAvailable = true;
+
+  } else {
+    std::cerr << "[on_stream_process] MJPEG decode failed.\n";
+  }
+
+  pw_stream_queue_buffer(self->g_pwStream, buf);
+  */
+}
+
+void CameraPlugin::handle_stream() {
   pw_buffer *buf = pw_stream_dequeue_buffer(g_pwStream);
   if (!buf) return;
 
@@ -403,11 +406,29 @@ static void on_stream_process(void*)
   if (ret == 0) {
     std::lock_guard<std::mutex> lock(g_frameMutex);
     g_newFrameAvailable = true;
+    SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
+    registrar_->texture_registrar()->TextureMakeCurrent();
+    glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+    glViewport(0, 0, mPreview.width, mPreview.height);
 
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
+    glUniform1i(0, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0,
+                 GL_RGB, GL_UNSIGNED_BYTE, g_decodedBuffer.get());
+    glGenerateMipmap(GL_TEXTURE_2D);
 
-
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    registrar_->texture_registrar()->TextureClearCurrent();
+    registrar_->texture_registrar()->MarkTextureFrameAvailable(mPreview.textureId);
+    glFinish();
 
   } else {
     std::cerr << "[on_stream_process] MJPEG decode failed.\n";
@@ -415,6 +436,7 @@ static void on_stream_process(void*)
 
   pw_stream_queue_buffer(g_pwStream, buf);
 }
+
 /******************************************************************************
  * on_stream_param_changed: Called when we get new param blocks from the stream
  *
@@ -445,7 +467,7 @@ static void on_stream_param_changed(void*, uint32_t id, const spa_pod* param)
 /******************************************************************************
  * on_stream_state_changed
  ******************************************************************************/
-static void on_stream_state_changed(void*,
+void CameraPlugin::on_stream_state_changed(void *data,
                                     pw_stream_state old_state,
                                     pw_stream_state new_state,
                                     const char* error)
@@ -463,11 +485,39 @@ static void on_stream_state_changed(void*,
  * run until pw_main_loop_quit(). We also call print_camera_parameters() here
  * after connect, so we can see the advanced param listing.
  ******************************************************************************/
-void start_camera_stream(const std::string &nodeID);
 
-void start_camera_stream(const std::string &nodeID)
+void CameraPlugin::start_camera_stream(const std::string &nodeID)
 {
-    pw_init(nullptr, nullptr);
+
+  if (g_pwLoop) {
+    // Already started
+    return;
+  }
+  //pw_main_loop_quit(g_pwLoop);
+  if (pipewire_thread_.joinable()) {
+    pipewire_thread_.join();
+  }
+  if(g_pwStream) {
+    pw_stream_destroy(g_pwStream);
+    g_pwStream=nullptr;
+  }
+  if (g_pwCore) {
+    pw_core_disconnect(g_pwCore);
+    g_pwCore = nullptr;
+  }
+  if (g_pwContext) {
+    pw_context_destroy(g_pwContext);
+    g_pwContext = nullptr;
+  }
+  if (g_pwLoop) {
+    pw_main_loop_destroy(g_pwLoop);
+    g_pwLoop = nullptr;
+  }
+  pw_deinit();
+
+
+
+  pw_init(nullptr, nullptr);
 
     spdlog::debug("[camera_plugin] nodeID: {}", nodeID);
 
@@ -507,8 +557,7 @@ void start_camera_stream(const std::string &nodeID)
         on_stream_process,        // process
         nullptr                   // drain
     };
-    spa_hook localListener;
-    pw_stream_add_listener(g_pwStream, &localListener, &streamEvents, nullptr);
+    pw_stream_add_listener(g_pwStream, &localListener, &streamEvents, this);
 
     // Build a SPA format param for MJPEG 640x480@30fps
     uint8_t buffer[1024];
@@ -547,14 +596,10 @@ void start_camera_stream(const std::string &nodeID)
     //print_camera_parameters();
 
     // Run the loop until user calls pw_main_loop_quit()
-    pw_main_loop_run(g_pwLoop);
 
-    // Cleanup
-    pw_stream_destroy(g_pwStream);
-    pw_core_disconnect(g_pwCore);
-    pw_context_destroy(g_pwContext);
-    pw_main_loop_destroy(g_pwLoop);
-    pw_deinit();
+  pipewire_thread_ = std::thread([this]() {
+  pw_main_loop_run(g_pwLoop);
+});
 }
 
 #define IMAGE_WIDTH 640
@@ -611,6 +656,33 @@ void CameraPlugin::Initialize(
 
   std::cout<< "CameraPlugin::Initialize: "<< camera_id<<std::endl;
 
+  if (g_pwLoop) {
+    // Already started
+    return;
+  }
+  //pw_main_loop_quit(g_pwLoop);
+  if (pipewire_thread_.joinable()) {
+    pipewire_thread_.join();
+  }
+  if(g_pwStream) {
+    pw_stream_destroy(g_pwStream);
+    g_pwStream=nullptr;
+  }
+  if (g_pwCore) {
+    pw_core_disconnect(g_pwCore);
+    g_pwCore = nullptr;
+  }
+  if (g_pwContext) {
+    pw_context_destroy(g_pwContext);
+    g_pwContext = nullptr;
+  }
+  if (g_pwLoop) {
+    pw_main_loop_destroy(g_pwLoop);
+    g_pwLoop = nullptr;
+  }
+  pw_deinit();
+
+
   /// Setup GL Texture 2D
   mPreview.width = 640;
   mPreview.height = 480;
@@ -620,7 +692,8 @@ void CameraPlugin::Initialize(
   texture_registrar->TextureMakeCurrent();
   glGenFramebuffers(1, &mPreview.framebuffer);
   glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
-  mPreview.textureId=camera_id;
+  //mPreview.textureId=camera_id;
+  mPreview.textureId = camera_id;
 /*
   glGenTextures(1, &mPreview.textureId);
   glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
@@ -678,204 +751,10 @@ void CameraPlugin::Initialize(
 
 
   // 4) Start camera streaming in background
-  std::string chosenID = std::to_string(camera_id);
-  std::thread pwThread([chosenID]() {
-      start_camera_stream(chosenID);
-  });
+  std::string cameraName;
+  cameraName = TextureId_CameraName[camera_id];
+  start_camera_stream(cameraName);
 
-  // 5) SDL main loop
-  //result(PlatformSize(640,480));
-
-  bool running = true;
-  while (running) {
-
-    // If a new frame is ready, update texture
-    {
-      std::lock_guard<std::mutex> lock(g_frameMutex);
-      if (g_newFrameAvailable) {
-        //SDL_UpdateTexture(g_texture, nullptr,
-        //                  g_decodedBuffer.get(), WIDTH * 3);
-
-        //save_image_to_jpeg("/home/tcna/Pictures/output.jpg", g_decodedBuffer.get(), IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_CHANNELS, 90);
-
-
-
-        SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
-        texture_registrar->TextureMakeCurrent();
-        glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
-        glViewport(0, 0, mPreview.width, mPreview.height);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, mPreview.textureId);
-        glUniform1i(0, 0);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                        GL_LINEAR_MIPMAP_LINEAR);
-        // The following call requires a 32-bit aligned source buffer
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0, GL_RGB,
-                     GL_UNSIGNED_BYTE, g_decodedBuffer.get());
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        texture_registrar->TextureClearCurrent();
-        texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
-        glFinish();
-        usleep(10000);
-        //glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
-        //texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
-
-        g_newFrameAvailable = false;
-      }
-    }
-    // Render
-    //SDL_RenderClear(g_renderer);
-    //SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
-    //SDL_RenderPresent(g_renderer);
-
-    //SDL_Delay(10);
-  }
-
-  // user closed the window => signal pipewire to quit
-  if (g_pwLoop) {
-    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
-  }
-  pwThread.join();
-  /*
-  bool running = true;
-  while (running) {
-    SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-      if (e.type == SDL_QUIT) {
-        running = false;
-      }
-    }
-    // If a new frame is ready, update texture
-    {
-      std::lock_guard<std::mutex> lock(g_frameMutex);
-      if (g_newFrameAvailable) {
-        SDL_UpdateTexture(g_texture, nullptr,
-                          g_decodedBuffer.get(), WIDTH * 3);
-        g_newFrameAvailable = false;
-      }
-    }
-    // Render
-
-    SDL_Delay(10);
-  }
-
-
-
-  // user closed the window => signal pipewire to quit
-  if (g_pwLoop) {
-    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
-  }
-  pwThread.join();
-
-  */
-/*
-  // 3) SDL init
-  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-    std::cerr << "SDL_Init error: " << SDL_GetError() << "\n";
-    return;
-  }
-  g_window = SDL_CreateWindow("PipeWire MJPEG Camera (Old API)",
-                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              WIDTH, HEIGHT, 0);
-  if (!g_window) {
-    std::cerr << "SDL_CreateWindow error: " << SDL_GetError() << "\n";
-    SDL_Quit();
-    return;
-  }
-  g_renderer = SDL_CreateRenderer(g_window, -1,
-                                  SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-  if (!g_renderer) {
-    std::cerr << "SDL_CreateRenderer error: " << SDL_GetError() << "\n";
-    SDL_DestroyWindow(g_window);
-    SDL_Quit();
-    return;
-  }
-  g_texture = SDL_CreateTexture(g_renderer, SDL_PIXELFORMAT_RGB24,
-                                SDL_TEXTUREACCESS_STREAMING,
-                                WIDTH, HEIGHT);
-  if (!g_texture) {
-    std::cerr << "SDL_CreateTexture error: " << SDL_GetError() << "\n";
-    SDL_DestroyRenderer(g_renderer);
-    SDL_DestroyWindow(g_window);
-    SDL_Quit();
-    return;
-  }
-  g_decodedBuffer.reset(new uint8_t[WIDTH * HEIGHT * 3]);
-  std::memset(g_decodedBuffer.get(), 0, WIDTH * HEIGHT * 3);
-
-  // 4) Start camera streaming in background
-  std::string chosenID = std::to_string(camera_id);
-  std::thread pwThread([chosenID]() {
-      start_camera_stream(chosenID);
-  });
-
-  // 5) SDL main loop
-  //result(PlatformSize(640,480));
-
-  bool running = true;
-  while (running) {
-    SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-      if (e.type == SDL_QUIT) {
-        running = false;
-      }
-    }
-    // If a new frame is ready, update texture
-    {
-      std::lock_guard<std::mutex> lock(g_frameMutex);
-      if (g_newFrameAvailable) {
-        SDL_UpdateTexture(g_texture, nullptr,
-                          g_decodedBuffer.get(), WIDTH * 3);
-        g_newFrameAvailable = false;
-      }
-    }
-    // Render
-    SDL_RenderClear(g_renderer);
-    SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
-    SDL_RenderPresent(g_renderer);
-
-    SDL_Delay(10);
-  }
-
-  // user closed the window => signal pipewire to quit
-  if (g_pwLoop) {
-    pw_main_loop_quit(g_pwLoop);  // unblocks start_camera_stream()
-  }
-  pwThread.join();
-
-  // cleanup SDL
-  SDL_DestroyTexture(g_texture);
-  SDL_DestroyRenderer(g_renderer);
-  SDL_DestroyWindow(g_window);
-  SDL_Quit();
-
-  std::cout << "Exiting.\n";
-  */
-  return;
-
-  /*
-  result(FlutterError("Invalid camera_id~~~"));
-  return;
-  */
-  /*
-  if (g_camera_sessions.find(camera_id) == g_camera_sessions.end()) {
-    result(FlutterError("Invalid camera_id"));
-    return;
-  }
-
-  const auto camera = g_camera_sessions[camera_id];
-  camera->setCamera(g_camera_manager->get(camera->get_libcamera_id()));
-  const auto channel_name = camera->Initialize(camera_id, "JPEG");
-  result(PlatformSize(camera->getPlatformSize()));
-  */
 }
 void CameraPlugin::blit_fb(uint8_t const* pixels) const {
   SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
