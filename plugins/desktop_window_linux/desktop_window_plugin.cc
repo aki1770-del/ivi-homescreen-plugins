@@ -18,6 +18,8 @@
 
 #include "messages.h"
 
+#include <SDL3/SDL.h>
+
 #include "plugins/common/common.h"
 
 namespace desktop_window_linux_plugin {
@@ -33,27 +35,45 @@ void DesktopWindowLinuxPlugin::RegisterWithRegistrar(
 }
 
 void DesktopWindowLinuxPlugin::getWindowSize(double& width, double& height) {
+  spdlog::debug("[desktop_window] getWindowSize: {} x {}", width, height);
+  if (const auto window = SDL_GL_GetCurrentWindow()) {
+    int w, h;
+    SDL_GetWindowSize(window, &w, &h);
+    m_width = static_cast<uint32_t>(w);
+    m_height = static_cast<uint32_t>(h);
+  }
   width = m_width;
   height = m_height;
-  spdlog::debug("[desktop_window] getWindowSize: {} x {}", width, height);
 }
 
 void DesktopWindowLinuxPlugin::setWindowSize(double width, double height) {
   spdlog::debug("[desktop_window] setWindowSize: {} x {}", width, height);
   m_width = static_cast<uint32_t>(width);
   m_height = static_cast<uint32_t>(height);
+  if (const auto window = SDL_GL_GetCurrentWindow()) {
+    SDL_SetWindowSize(window, static_cast<int>(width),
+                      static_cast<int>(height));
+  }
 }
 
 void DesktopWindowLinuxPlugin::setMinWindowSize(double width, double height) {
   spdlog::debug("[desktop_window] setMinWindowSize: {} x {}", width, height);
   m_min_width = static_cast<std::uint32_t>(lround(width + 0.5));
   m_min_height = static_cast<std::uint32_t>(lround(height + 0.5));
+  if (const auto window = SDL_GL_GetCurrentWindow()) {
+    SDL_SetWindowMinimumSize(window, static_cast<int>(m_min_width),
+                             static_cast<int>(m_min_height));
+  }
 }
 
 void DesktopWindowLinuxPlugin::setMaxWindowSize(double width, double height) {
   spdlog::debug("[desktop_window] setMaxWindowSize: {} x {}", width, height);
   m_max_width = static_cast<std::uint32_t>(lround(width + 0.5));
   m_max_height = static_cast<std::uint32_t>(lround(height + 0.5));
+  if (const auto window = SDL_GL_GetCurrentWindow()) {
+    SDL_SetWindowMaximumSize(window, static_cast<int>(m_max_width),
+                             static_cast<int>(m_max_height));
+  }
 }
 
 void DesktopWindowLinuxPlugin::resetMaxWindowSize(double width, double height) {
@@ -68,6 +88,9 @@ void DesktopWindowLinuxPlugin::toggleFullScreen() {
 
 void DesktopWindowLinuxPlugin::setFullScreen(bool set) {
   spdlog::debug("[desktop_window] setFullScreen: {}", set);
+  if (const auto window = SDL_GL_GetCurrentWindow()) {
+    SDL_SetWindowFullscreen(window, true);
+  }
 }
 
 bool DesktopWindowLinuxPlugin::getFullScreen() {

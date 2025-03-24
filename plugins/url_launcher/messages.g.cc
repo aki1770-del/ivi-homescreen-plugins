@@ -54,7 +54,7 @@ const flutter::StandardMessageCodec& UrlLauncherApi::GetCodec() {
 // `binary_messenger`.
 void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                            UrlLauncherApi* api) {
-  UrlLauncherApi::SetUp(binary_messenger, api, "");
+  SetUp(binary_messenger, api, "");
 }
 
 void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
@@ -65,7 +65,7 @@ void UrlLauncherApi::SetUp(flutter::BinaryMessenger* binary_messenger,
           ? std::string(".") + message_channel_suffix
           : "";
   {
-    BasicMessageChannel<> channel(
+    const BasicMessageChannel<> channel(
         binary_messenger,
         "dev.flutter.pigeon.url_launcher_linux.UrlLauncherApi.canLaunchUrl" +
             prepended_suffix,

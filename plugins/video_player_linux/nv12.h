@@ -66,7 +66,8 @@ class Shader {
   GLsizei width, height;
   GLuint vertex_arr_id_{};
 
-  Shader(GLsizei _width, GLsizei _height) : width(_width), height(_height) {
+  Shader(const GLsizei _width, const GLsizei _height)
+      : width(_width), height(_height) {
     glGenFramebuffers(1, &framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 

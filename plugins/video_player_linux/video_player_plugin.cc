@@ -45,7 +45,11 @@ VideoPlayerPlugin::VideoPlayerPlugin(flutter::PluginRegistrarDesktop* registrar)
     : registrar_(registrar) {
   // GStreamer lib only needs to be initialized once.  Calling it multiple times
   // is fine.
-  gst_init(nullptr, nullptr);
+  GError* error;
+  if (!gst_init_check(nullptr, nullptr, &error)) {
+    spdlog::error("Failed to initialize GStreamer: {} - {}", error->code,
+                  error->message);
+  }
 
   // start the main loop if not already running
   plugin_common_glib::MainLoop::GetInstance();

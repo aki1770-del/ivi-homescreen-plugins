@@ -127,7 +127,6 @@ void PluginsAoiPlatformViewCreate(
   }
 
   const auto args = std::get_if<flutter::EncodableMap>(arguments);
-
   for (const auto& [fst, snd] : *args) {
     if (const auto key = std::get<std::string>(fst);
         key == kKeyDirection && std::holds_alternative<int32_t>(snd)) {
