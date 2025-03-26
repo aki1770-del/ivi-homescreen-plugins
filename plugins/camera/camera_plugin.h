@@ -17,6 +17,8 @@
 #ifndef FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
 #define FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
 
+#include "CameraStream.h"
+
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
 
@@ -249,7 +251,13 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
   std::map<std::string, int> CameraName_TextureId;
   std::map<int, std::string> TextureId_CameraName;
-  std::thread thread_;
+    std::map<std::string, std::shared_ptr<CameraStream>> CameraName_CameraStream;
+    std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
+    std::map<std::string, bool> CameraName_Created;
+
+    //std::map<std::string, std::shared_ptr<CameraStream>> CameraName_CameraStream;
+
+    std::thread thread_;
   std::unique_ptr<asio::io_context> io_context_;
   asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
   std::unique_ptr<asio::io_context::strand> strand_;

@@ -34,6 +34,8 @@ add_library(plugin_camera STATIC
         texture_sink.cc
         camera_session.cc
         camera_session.cc
+        CameraStream.cpp
+        CameraStream.h
 
 )
 
