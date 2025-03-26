@@ -141,6 +141,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
       io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
+  /*
   thread_ = std::thread([&]() { io_context_->run(); });
   g_camera_manager = std::make_unique<libcamera::CameraManager>();
   g_camera_manager->cameraAdded.connect(this, &CameraPlugin::camera_added);
@@ -152,6 +153,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
   if (res != 0) {
     spdlog::critical("Failed to start camera manager: {}", strerror(-res));
   }
+  */
 }
 
 CameraPlugin::~CameraPlugin() {
@@ -695,9 +697,11 @@ void CameraPlugin::blit_fb(uint8_t const* pixels) const {
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
-  auto camera = g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  camera.reset();
+  //auto camera = g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
+  //camera.reset();
   SPDLOG_DEBUG("[camera_plugin] dispose: {}", camera_id);
+  auto camera_stream= TextureId_CameraStream[camera_id];
+  camera_stream->Stop();
   return {};
 }
 

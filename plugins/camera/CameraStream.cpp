@@ -363,6 +363,7 @@ void CameraStream::HandleProcess()
       //save_image_to_jpeg("/home/tcna/Pictures/test.jpeg", decoded_buffer_.get(), width_, height_, 3, 90);
 
       SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
+
       registrar_->texture_registrar()->TextureMakeCurrent();
       glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
       glViewport(0, 0, width_, height_);
@@ -383,13 +384,16 @@ void CameraStream::HandleProcess()
 
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+      registrar_->texture_registrar()->TextureClearCurrent();
+      registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
+
     }
     // Tell Flutter there's a new frame
     //if (registrar_->texture_registrar()) {
-      registrar_->texture_registrar()->TextureClearCurrent();
-      registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
+    //  registrar_->texture_registrar()->TextureClearCurrent();
+    //  registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
     //}
-    glFinish();
+    //glFinish();
   } else {
     std::fprintf(stderr, "[CameraStream::HandleProcess] MJPEG decode failed.\n");
   }
