@@ -24,13 +24,13 @@
 
 #include <libcamera/camera.h>
 
-#include "camera_session.h"
+//#include "camera_session.h"
 
 #include "camera_context.h"
 
 #include "event_channel.h"
 #include "messages.g.h"
-#include "nv12.h"
+//#include "nv12.h"
 #include "plugins/common/common.h"
 
 #include <flutter/plugin_registrar_homescreen.h>

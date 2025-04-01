@@ -27,13 +27,6 @@ add_library(plugin_camera STATIC
         camera_plugin.cc
         camera_context.cc
         messages.g.cpp
-        camera_session.cc
-        image.cc
-        texture.cc
-        texture_mjpg.cc
-        texture_sink.cc
-        camera_session.cc
-        camera_session.cc
         CameraStream.cpp
         CameraStream.h
         CameraManager.cpp
