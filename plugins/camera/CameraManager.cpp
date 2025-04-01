@@ -3,30 +3,29 @@
 //
 
 #include "CameraManager.h"
+
+#include <glib/main_loop.h>
+
 #include <cstdio>
 
 // Static instance
-CameraManager& CameraManager::instance()
-{
+CameraManager& CameraManager::instance() {
   static CameraManager s_instance;
   return s_instance;
 }
 
-CameraManager::CameraManager()
-{
+CameraManager::CameraManager() {
   // Constructor does nothing yet; actual init in initialize()
 }
 
-CameraManager::~CameraManager()
-{
+CameraManager::~CameraManager() {
   // Ensure shutdown is called in case user forgot
   if (initialized_) {
     shutdown();
   }
 }
 
-bool CameraManager::initialize()
-{
+bool CameraManager::initialize() {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (initialized_) {
@@ -38,6 +37,8 @@ bool CameraManager::initialize()
   pw_init(nullptr, nullptr);
 
   // 2) Create main loop, context, and core
+  // plugin_common_glib::MainLoop::GetInstance();
+
   pw_thread_loop_ = pw_thread_loop_new("camera-loop", 0);
   if (!pw_thread_loop_) {
     std::fprintf(stderr, "[CameraManager] Failed to create pw_main_loop.\n");
@@ -47,7 +48,9 @@ bool CameraManager::initialize()
   // 3) Start the loop in its own thread
   int ret = pw_thread_loop_start(pw_thread_loop_);
   if (ret != 0) {
-    std::fprintf(stderr, "[CameraManager] Failed to start pw_thread_loop (err=%d)\n", ret);
+    std::fprintf(stderr,
+                 "[CameraManager] Failed to start pw_thread_loop (err=%d)\n",
+                 ret);
     pw_thread_loop_destroy(pw_thread_loop_);
     pw_thread_loop_ = nullptr;
     return false;
@@ -57,9 +60,10 @@ bool CameraManager::initialize()
   pw_thread_loop_lock(pw_thread_loop_);
   {
     // We get the underlying spa_loop from the thread loop
-    auto *loop = pw_thread_loop_get_loop(pw_thread_loop_);
+    auto* loop = pw_thread_loop_get_loop(pw_thread_loop_);
     if (!loop) {
-      std::fprintf(stderr, "[CameraManager] Could not get loop from threadLoop.\n");
+      std::fprintf(stderr,
+                   "[CameraManager] Could not get loop from threadLoop.\n");
     } else {
       // Create PipeWire context
       pw_context_ = pw_context_new(loop, nullptr, 0);
@@ -69,7 +73,8 @@ bool CameraManager::initialize()
         // Connect to PipeWire core
         pw_core_ = pw_context_connect(pw_context_, nullptr, 0);
         if (!pw_core_) {
-          std::fprintf(stderr, "[CameraManager] Could not connect to PW core.\n");
+          std::fprintf(stderr,
+                       "[CameraManager] Could not connect to PW core.\n");
         }
       }
     }
@@ -90,8 +95,7 @@ bool CameraManager::initialize()
   return true;
 }
 
-void CameraManager::shutdown()
-{
+void CameraManager::shutdown() {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (!initialized_) {

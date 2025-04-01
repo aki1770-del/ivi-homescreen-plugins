@@ -16,8 +16,7 @@
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(CAMERA IMPORTED_TARGET REQUIRED libcamera)
-pkg_check_modules(PIPEWIRE REQUIRED libpipewire-0.3)
-pkg_check_modules(SDL2 REQUIRED sdl2)
+pkg_check_modules(PIPEWIRE IMPORTED_TARGET REQUIRED libpipewire-0.3)
 
 
 include(FindJPEG)
@@ -37,18 +36,15 @@ add_library(plugin_camera STATIC
 target_include_directories(plugin_camera PUBLIC
         include
         ${JPEG_INCLUDE_DIRS}
-        ${PIPEWIRE_INCLUDE_DIRS}
-        ${SDL2_INCLUDE_DIRS}
 )
 
 target_link_libraries(plugin_camera PUBLIC
         PkgConfig::CAMERA
+        PkgConfig::PIPEWIRE
         ${JPEG_LIBRARIES}
         flutter
         platform_homescreen
         plugin_common
-        ${PIPEWIRE_LIBRARIES}
-        ${SDL2_LIBRARIES}
 )
 
 if (JPEG_FOUND)
