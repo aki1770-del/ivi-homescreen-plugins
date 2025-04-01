@@ -5,7 +5,6 @@
 #ifndef CAMERAMANAGER_H
 #define CAMERAMANAGER_H
 
-
 #pragma once
 
 #include <pipewire/pipewire.h>
@@ -21,9 +20,8 @@
  *   // Create & use your CameraStream objects...
  *   CameraManager::instance().shutdown();     // At the end, if desired
  */
-class CameraManager
-{
-public:
+class CameraManager {
+ public:
   static CameraManager& instance();
 
   /**
@@ -40,8 +38,8 @@ public:
   void shutdown();
 
   /**
-  * @brief Returns the shared pw_thread_loop*, or nullptr if not initialized.
-  */
+   * @brief Returns the shared pw_thread_loop*, or nullptr if not initialized.
+   */
   pw_thread_loop* threadLoop() const { return pw_thread_loop_; }
 
   /**
@@ -54,7 +52,7 @@ public:
    */
   pw_core* core() const { return pw_core_; }
 
-private:
+ private:
   // Private constructor/destructor for singleton
   CameraManager();
   ~CameraManager();
@@ -63,15 +61,13 @@ private:
   CameraManager(const CameraManager&) = delete;
   CameraManager& operator=(const CameraManager&) = delete;
 
-private:
-  bool           initialized_ = false;
-  //pw_main_loop*  pw_loop_     = nullptr;
-  pw_thread_loop*  pw_thread_loop_ = nullptr;  // Instead of pw_main_loop
-  pw_context*    pw_context_  = nullptr;
-  pw_core*       pw_core_     = nullptr;
+ private:
+  bool initialized_ = false;
+  // pw_main_loop*  pw_loop_     = nullptr;
+  pw_thread_loop* pw_thread_loop_ = nullptr;  // Instead of pw_main_loop
+  pw_context* pw_context_ = nullptr;
+  pw_core* pw_core_ = nullptr;
   mutable std::mutex mutex_;
 };
 
-
-
-#endif //CAMERAMANAGER_H
+#endif  // CAMERAMANAGER_H

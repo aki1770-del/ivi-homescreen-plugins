@@ -13,23 +13,28 @@
 #include <string>
 #include <thread>
 
+#include <flutter/plugin_registrar_homescreen.h>
+#include <flutter/texture_registrar.h>
 #include <pipewire/pipewire.h>  // forward-decl is risky; better to include full
 #include <spa/param/video/format-utils.h>
-#include <flutter/texture_registrar.h>
-#include <flutter/plugin_registrar_homescreen.h>
 
 /**
- * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter texture.
+ * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter
+ * texture.
  */
 class CameraStream {
  public:
   /**
    * Create a new CameraStream.
-   * @param registrar  A Flutter TextureRegistrar used to create and update a Flutter texture.
+   * @param registrar  A Flutter TextureRegistrar used to create and update a
+   * Flutter texture.
    * @param width      Desired width of the MJPEG frames.
    * @param height     Desired height of the MJPEG frames.
    */
-  CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar, std::string camera_name, int width, int height);
+  CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
+               std::string camera_name,
+               int width,
+               int height);
 
   /**
    * Destructor. Automatically stops the camera stream if running.
@@ -41,7 +46,7 @@ class CameraStream {
    * @param nodeID  The PipeWire node ID to capture from (e.g. "42").
    * @return true if successful, false otherwise.
    */
-  bool Start(const std::string &nodeID);
+  bool Start(const std::string& nodeID);
 
   /**
    * Stop capturing if the stream is running.
@@ -55,22 +60,22 @@ class CameraStream {
   GLuint texture_id() const { return texture_id_; }
 
   std::string camera_name() const { return camera_name_; }
-  int camera_width() const {return width_; }
+  int camera_width() const { return width_; }
   int camera_height() const { return height_; }
 
  private:
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};
 
-  pw_stream*     pw_stream_  = nullptr;
+  pw_stream* pw_stream_ = nullptr;
 
   // The listener hook must stay in scope; never store it on the stack.
-  spa_hook       stream_listener_;
+  spa_hook stream_listener_;
 
   // Flutter texture integration
-  //flutter::TextureRegistrar*               texture_registrar_ = nullptr;
-  //std::unique_ptr<flutter::TextureVariant> texture_;
-  //int64_t                                  texture_id_ = -1;
+  // flutter::TextureRegistrar*               texture_registrar_ = nullptr;
+  // std::unique_ptr<flutter::TextureVariant> texture_;
+  // int64_t                                  texture_id_ = -1;
   GLuint texture_id_{};
   GLuint framebuffer_{};
 
@@ -79,11 +84,11 @@ class CameraStream {
 
   // Decoded buffer + sync
   std::unique_ptr<uint8_t[]> decoded_buffer_;
-  std::mutex                 frame_mutex_;
-  std::atomic<bool>          new_frame_available_{false};
+  std::mutex frame_mutex_;
+  std::atomic<bool> new_frame_available_{false};
 
   // Dimensions
-  int width_  = 640;
+  int width_ = 640;
   int height_ = 480;
 
   // Private methods
@@ -93,17 +98,14 @@ class CameraStream {
   // Camera name
   std::string camera_name_ = "";
   // PipeWire callbacks (static => dispatch to instance)
-  static void OnStreamStateChanged(void *data,
+  static void OnStreamStateChanged(void* data,
                                    pw_stream_state old_state,
                                    pw_stream_state new_state,
-                                   const char *error);
-  static void OnStreamParamChanged(void *data,
+                                   const char* error);
+  static void OnStreamParamChanged(void* data,
                                    uint32_t id,
-                                   const spa_pod *param);
-  static void OnStreamProcess(void *data);
+                                   const spa_pod* param);
+  static void OnStreamProcess(void* data);
 };
 
-
-
-
-#endif //CAMERASTREAM_H
+#endif  // CAMERASTREAM_H

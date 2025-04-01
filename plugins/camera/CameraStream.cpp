@@ -16,9 +16,11 @@
 //------------------------------------------------------------------------------
 // A helper function for MJPEG decoding
 //------------------------------------------------------------------------------
-static int decode_mjpeg(const uint8_t *input, size_t input_size,
-                        uint8_t *output, int out_width, int out_height)
-{
+static int decode_mjpeg(const uint8_t* input,
+                        size_t input_size,
+                        uint8_t* output,
+                        int out_width,
+                        int out_height) {
   jpeg_decompress_struct cinfo;
   jpeg_error_mgr jerr;
   cinfo.err = jpeg_std_error(&jerr);
@@ -32,9 +34,8 @@ static int decode_mjpeg(const uint8_t *input, size_t input_size,
   }
 
   jpeg_start_decompress(&cinfo);
-  if ((int)cinfo.output_width  != out_width ||
-      (int)cinfo.output_height != out_height ||
-      cinfo.output_components  != 3) {
+  if ((int)cinfo.output_width != out_width ||
+      (int)cinfo.output_height != out_height || cinfo.output_components != 3) {
     std::fprintf(stderr, "[decode_mjpeg] Unexpected size.\n");
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
@@ -57,34 +58,35 @@ static int decode_mjpeg(const uint8_t *input, size_t input_size,
 // Constructor
 //------------------------------------------------------------------------------
 CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
-                           std::string camera_name, int width, int height)
-    :  registrar_(plugin_registrar),
+                           std::string camera_name,
+                           int width,
+                           int height)
+    : registrar_(plugin_registrar),
       camera_name_(camera_name),
       width_(width),
-      height_(height)
-{
+      height_(height) {
   // Allocate RGB buffer for frames
   decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
   std::memset(decoded_buffer_.get(), 0, width_ * height_ * 3);
 
   // Create the Flutter PixelBufferTexture
 
-  auto pixel_buffer_texture =
-      std::make_unique<flutter::PixelBufferTexture>(
-          [this](size_t /*width*/, size_t /*height*/) -> const FlutterDesktopPixelBuffer* {
-            static FlutterDesktopPixelBuffer pixel_buffer = {};
-            static std::mutex s_mutex;
-            std::lock_guard<std::mutex> lock(s_mutex);
+  auto pixel_buffer_texture = std::make_unique<flutter::PixelBufferTexture>(
+      [this](size_t /*width*/,
+             size_t /*height*/) -> const FlutterDesktopPixelBuffer* {
+        static FlutterDesktopPixelBuffer pixel_buffer = {};
+        static std::mutex s_mutex;
+        std::lock_guard<std::mutex> lock(s_mutex);
 
-            pixel_buffer.width  = width_;
-            pixel_buffer.height = height_;
-            pixel_buffer.buffer = decoded_buffer_.get();
+        pixel_buffer.width = width_;
+        pixel_buffer.height = height_;
+        pixel_buffer.buffer = decoded_buffer_.get();
 
-            // No custom release callback
-            pixel_buffer.release_context  = nullptr;
-            pixel_buffer.release_callback = nullptr;
-            return &pixel_buffer;
-          });
+        // No custom release callback
+        pixel_buffer.release_context = nullptr;
+        pixel_buffer.release_callback = nullptr;
+        return &pixel_buffer;
+      });
 
   registrar_->texture_registrar()->TextureMakeCurrent();
 
@@ -100,10 +102,9 @@ CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
   glBindTexture(GL_TEXTURE_2D, 0);
-
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          texture_id_, 0);
@@ -111,54 +112,48 @@ CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
   if (auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
       status != GL_FRAMEBUFFER_COMPLETE) {
     spdlog::error("[camera_plugin] FramebufferStatus: 0x{:X}", status);
-      }
+  }
 
   glFinish();
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-
   registrar_->texture_registrar()->TextureClearCurrent();
 
   descriptor = {
-    .struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor),
-    .handle = &texture_id_,
-    .width = static_cast<size_t>(width),
-    .height = static_cast<size_t>(height),
-    .visible_width = static_cast<size_t>(width),
-    .visible_height = static_cast<size_t>(height),
-    .format = kFlutterDesktopPixelFormatRGBA8888,
-    .release_callback = [](void* /* release_context */) {},
-    .release_context = this,
+      .struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor),
+      .handle = &texture_id_,
+      .width = static_cast<size_t>(width),
+      .height = static_cast<size_t>(height),
+      .visible_width = static_cast<size_t>(width),
+      .visible_height = static_cast<size_t>(height),
+      .format = kFlutterDesktopPixelFormatRGBA8888,
+      .release_callback = [](void* /* release_context */) {},
+      .release_context = this,
   };
 
   gpu_surface_texture = std::make_unique<flutter::GpuSurfaceTexture>(
-    kFlutterDesktopGpuSurfaceTypeGlTexture2D,
-    [&](size_t /* width */,
-        size_t /* height */) -> const FlutterDesktopGpuSurfaceDescriptor* {
-      return &descriptor;
-    });
+      kFlutterDesktopGpuSurfaceTypeGlTexture2D,
+      [&](size_t /* width */, size_t /* height */)
+          -> const FlutterDesktopGpuSurfaceDescriptor* { return &descriptor; });
 
   flutter::TextureVariant texture = *gpu_surface_texture;
   registrar_->texture_registrar()->RegisterTexture(&texture);
   registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
-
 }
 
 //------------------------------------------------------------------------------
 // Destructor
 //------------------------------------------------------------------------------
-CameraStream::~CameraStream()
-{
+CameraStream::~CameraStream() {
   Stop();
 }
 
 //------------------------------------------------------------------------------
 // Start capturing from the given node ID
 //------------------------------------------------------------------------------
-bool CameraStream::Start(const std::string &nodeID)
-{
+bool CameraStream::Start(const std::string& nodeID) {
   // 1) Ensure the manager is running
-  auto &mgr = CameraManager::instance();
+  auto& mgr = CameraManager::instance();
   if (!mgr.initialize()) {
     std::fprintf(stderr, "[CameraStream::Start] Failed to init manager.\n");
     return false;
@@ -181,34 +176,31 @@ bool CameraStream::Start(const std::string &nodeID)
     }
 
     // Create the pw_stream
-    pw_properties* props = pw_properties_new(
-      PW_KEY_MEDIA_TYPE,         "Video",
-      PW_KEY_MEDIA_CATEGORY,     "Capture",
-      PW_KEY_MEDIA_ROLE,         "Camera",
-      PW_KEY_NODE_TARGET,        nodeID.c_str(),
-      nullptr
-    );
+    pw_properties* props =
+        pw_properties_new(PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY,
+                          "Capture", PW_KEY_MEDIA_ROLE, "Camera",
+                          PW_KEY_NODE_TARGET, nodeID.c_str(), nullptr);
 
     pw_stream_ = pw_stream_new(core, "MyCameraStream", props);
     if (!pw_stream_) {
-      std::fprintf(stderr, "[CameraStream::Start] Failed to create pw_stream.\n");
+      std::fprintf(stderr,
+                   "[CameraStream::Start] Failed to create pw_stream.\n");
       pw_thread_loop_unlock(loop);
       return false;
     }
 
     // Set up the stream events
     static pw_stream_events streamEvents = {
-      PW_VERSION_STREAM_EVENTS,
-      /* .destroy        = */ nullptr,
-      /* .state_changed  = */ OnStreamStateChanged,
-      /* .control_info   = */ nullptr,
-      /* .io_changed     = */ nullptr,
-      /* .param_changed  = */ OnStreamParamChanged,
-      /* .add_buffer     = */ nullptr,
-      /* .remove_buffer  = */ nullptr,
-      /* .process        = */ OnStreamProcess,
-      /* .drain          = */ nullptr
-    };
+        PW_VERSION_STREAM_EVENTS,
+        /* .destroy        = */ nullptr,
+        /* .state_changed  = */ OnStreamStateChanged,
+        /* .control_info   = */ nullptr,
+        /* .io_changed     = */ nullptr,
+        /* .param_changed  = */ OnStreamParamChanged,
+        /* .add_buffer     = */ nullptr,
+        /* .remove_buffer  = */ nullptr,
+        /* .process        = */ OnStreamProcess,
+        /* .drain          = */ nullptr};
     pw_stream_add_listener(pw_stream_, &stream_listener_, &streamEvents, this);
 
     // For example, request an MJPEG format or any other video format
@@ -223,34 +215,29 @@ bool CameraStream::Start(const std::string &nodeID)
     // Build the SPA format param for MJPEG @ 640x480@30
     uint8_t buffer[1024];
     spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-    spa_rectangle rect      = { (uint32_t)width_, (uint32_t)height_ };
-    spa_fraction fps        = { 30, 1 };
+    spa_rectangle rect = {(uint32_t)width_, (uint32_t)height_};
+    spa_fraction fps = {30, 1};
 
     const spa_pod* params[1];
-    params[0] = reinterpret_cast<const spa_pod*>(
-        spa_pod_builder_add_object(&builder,
-            SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
-            SPA_FORMAT_mediaType,        SPA_POD_Id(SPA_MEDIA_TYPE_video),
-            SPA_FORMAT_mediaSubtype,     SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
-            SPA_FORMAT_VIDEO_size,       SPA_POD_Rectangle(&rect),
-            SPA_FORMAT_VIDEO_framerate,  SPA_POD_Fraction(&fps)
-        )
-    );
-
+    params[0] = reinterpret_cast<const spa_pod*>(spa_pod_builder_add_object(
+        &builder, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+        SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video),
+        SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
+        SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&rect),
+        SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&fps)));
 
     // Actually connect the stream
-    int res = pw_stream_connect(
-      pw_stream_,
-      PW_DIRECTION_INPUT,
-      PW_ID_ANY,  // or a real node ID integer, or from the nodeID param if numeric
-      (pw_stream_flags)(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
-      ///* params */ nullptr,
-      ///* n_params */ 0
-      params,
-      1
-    );
+    int res = pw_stream_connect(pw_stream_, PW_DIRECTION_INPUT,
+                                PW_ID_ANY,  // or a real node ID integer, or
+                                            // from the nodeID param if numeric
+                                (pw_stream_flags)(PW_STREAM_FLAG_AUTOCONNECT |
+                                                  PW_STREAM_FLAG_MAP_BUFFERS),
+                                ///* params */ nullptr,
+                                ///* n_params */ 0
+                                params, 1);
     if (res < 0) {
-      std::fprintf(stderr, "[CameraStream::Start] pw_stream_connect() error: %d\n", res);
+      std::fprintf(
+          stderr, "[CameraStream::Start] pw_stream_connect() error: %d\n", res);
       pw_stream_destroy(pw_stream_);
       pw_stream_ = nullptr;
       pw_thread_loop_unlock(loop);
@@ -265,13 +252,12 @@ bool CameraStream::Start(const std::string &nodeID)
 //------------------------------------------------------------------------------
 // Stop capturing
 //------------------------------------------------------------------------------
-void CameraStream::Stop()
-{
+void CameraStream::Stop() {
   if (!pw_stream_) {
-    return; // already stopped
+    return;  // already stopped
   }
 
-  auto &mgr = CameraManager::instance();
+  auto& mgr = CameraManager::instance();
   auto* loop = mgr.threadLoop();
 
   // Lock while destroying
@@ -283,7 +269,12 @@ void CameraStream::Stop()
   pw_thread_loop_unlock(loop);
 }
 
-void save_image_to_jpeg(const std::string &filename, const unsigned char *image_data, int width, int height, int channels, int quality) {
+void save_image_to_jpeg(const std::string& filename,
+                        const unsigned char* image_data,
+                        int width,
+                        int height,
+                        int channels,
+                        int quality) {
   struct jpeg_compress_struct cinfo;
   struct jpeg_error_mgr jerr;
 
@@ -292,9 +283,10 @@ void save_image_to_jpeg(const std::string &filename, const unsigned char *image_
   jpeg_create_compress(&cinfo);
 
   // Open file for writing
-  FILE *outfile = fopen(filename.c_str(), "wb");
+  FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
-    std::cerr << "Error: Unable to open file " << filename << " for writing!" << std::endl;
+    std::cerr << "Error: Unable to open file " << filename << " for writing!"
+              << std::endl;
     return;
   }
 
@@ -327,40 +319,41 @@ void save_image_to_jpeg(const std::string &filename, const unsigned char *image_
   std::cout << "Image saved to " << filename << std::endl;
 }
 
-
 //------------------------------------------------------------------------------
 // Private method: called each time there's a new MJPEG frame
 //------------------------------------------------------------------------------
-void CameraStream::HandleProcess()
-{
-  if (!pw_stream_) return;
+void CameraStream::HandleProcess() {
+  if (!pw_stream_)
+    return;
   pw_buffer* buf = pw_stream_dequeue_buffer(pw_stream_);
-  if (!buf) return;
+  if (!buf)
+    return;
 
   if (!buf->buffer->datas[0].data) {
     pw_stream_queue_buffer(pw_stream_, buf);
     return;
   }
 
-  auto*    compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
-  size_t   compressedSize = buf->buffer->datas[0].chunk->size;
+  auto* compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
+  size_t compressedSize = buf->buffer->datas[0].chunk->size;
 
   decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
-  std::cout << "size of decoded_buffer_: " <<sizeof(decoded_buffer_)<<std::endl;
-  std::cout << "compressedSize: "<<compressedSize<<std::endl;
-
+  std::cout << "size of decoded_buffer_: " << sizeof(decoded_buffer_)
+            << std::endl;
+  std::cout << "compressedSize: " << compressedSize << std::endl;
 
   std::memset(decoded_buffer_.get(), 0, width_ * height_ * 3);
 
-  int ret = decode_mjpeg(compressedData, compressedSize,
-                         decoded_buffer_.get(), width_, height_);
+  int ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(),
+                         width_, height_);
   if (ret == 0) {
     {
       std::lock_guard<std::mutex> lock(frame_mutex_);
       new_frame_available_ = true;
-      std::cout << "new_frame_available_ = true"<<std::endl;
+      std::cout << "new_frame_available_ = true" << std::endl;
 
-      //save_image_to_jpeg("/home/tcna/Pictures/test.jpeg", decoded_buffer_.get(), width_, height_, 3, 90);
+      // save_image_to_jpeg("/home/tcna/Pictures/test.jpeg",
+      // decoded_buffer_.get(), width_, height_, 3, 90);
 
       SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
 
@@ -376,10 +369,11 @@ void CameraStream::HandleProcess()
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                      GL_LINEAR_MIPMAP_LINEAR);
 
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0,
-                   GL_RGB, GL_UNSIGNED_BYTE, decoded_buffer_.get());
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0, GL_RGB,
+                   GL_UNSIGNED_BYTE, decoded_buffer_.get());
       glGenerateMipmap(GL_TEXTURE_2D);
 
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -388,13 +382,14 @@ void CameraStream::HandleProcess()
       registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
     }
     // Tell Flutter there's a new frame
-    //if (registrar_->texture_registrar()) {
+    // if (registrar_->texture_registrar()) {
     //  registrar_->texture_registrar()->TextureClearCurrent();
     //  registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
     //}
-    //glFinish();
+    // glFinish();
   } else {
-    std::fprintf(stderr, "[CameraStream::HandleProcess] MJPEG decode failed.\n");
+    std::fprintf(stderr,
+                 "[CameraStream::HandleProcess] MJPEG decode failed.\n");
   }
 
   pw_stream_queue_buffer(pw_stream_, buf);
@@ -403,38 +398,32 @@ void CameraStream::HandleProcess()
 //------------------------------------------------------------------------------
 // Static callback proxies
 //------------------------------------------------------------------------------
-void CameraStream::OnStreamStateChanged(void *data,
+void CameraStream::OnStreamStateChanged(void* data,
                                         pw_stream_state old_state,
                                         pw_stream_state new_state,
-                                        const char *error)
-{
+                                        const char* error) {
   auto* self = reinterpret_cast<CameraStream*>(data);
-  (void)self; // not used in this minimal example
+  (void)self;  // not used in this minimal example
   std::fprintf(stderr,
-    "[CameraStream] stream state changed from %d to %d (%s)\n",
-    old_state, new_state, (error ? error : "no error"));
+               "[CameraStream] stream state changed from %d to %d (%s)\n",
+               old_state, new_state, (error ? error : "no error"));
 }
 
-void CameraStream::OnStreamParamChanged(void *data,
+void CameraStream::OnStreamParamChanged(void* data,
                                         uint32_t id,
-                                        const spa_pod* param)
-{
+                                        const spa_pod* param) {
   auto* self = reinterpret_cast<CameraStream*>(data);
   (void)self;
   std::fprintf(stderr, "[CameraStream] OnStreamParamChanged: id=%u\n", id);
 }
 
-void CameraStream::OnStreamProcess(void *data)
-{
-  auto *self = reinterpret_cast<CameraStream*>(data);
+void CameraStream::OnStreamProcess(void* data) {
+  auto* self = reinterpret_cast<CameraStream*>(data);
   (void)self;
   // handle new frame data here...
   // e.g., pw_stream_dequeue_buffer, decode MJPEG, etc.
   std::fprintf(stderr, "[CameraStream] OnStreamProcess: new frame!\n");
-  //std::cout << self->camera_height()<<std::endl;
-
+  // std::cout << self->camera_height()<<std::endl;
 
   self->HandleProcess();
-
-
 }

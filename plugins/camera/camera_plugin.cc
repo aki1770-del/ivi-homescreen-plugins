@@ -52,20 +52,26 @@ struct CameraInfo {
 std::vector<CameraInfo> cameras;
 
 // For streaming
-static constexpr int WIDTH  = 640;
+static constexpr int WIDTH = 640;
 static constexpr int HEIGHT = 480;
 
 // Callback function for detecting cameras
-void on_global(void *data, uint32_t id, uint32_t permissions,
-               const char *type, uint32_t version, const struct spa_dict *props) {
-  if (!props) return;
+void on_global(void* data,
+               uint32_t id,
+               uint32_t permissions,
+               const char* type,
+               uint32_t version,
+               const struct spa_dict* props) {
+  if (!props)
+    return;
 
-  const char *media_class = spa_dict_lookup(props, "media.class");
-  const char *name = spa_dict_lookup(props, "node.description");
+  const char* media_class = spa_dict_lookup(props, "media.class");
+  const char* name = spa_dict_lookup(props, "node.description");
 
   if (media_class && std::string(media_class) == "Video/Source") {
-    std::cout << "Found camera: " << (name ? name : "Unknown") << " (id: " << id << ")" << std::endl;
-    cameras.push_back({id,name ? name: "Unknown"});
+    std::cout << "Found camera: " << (name ? name : "Unknown") << " (id: " << id
+              << ")" << std::endl;
+    cameras.push_back({id, name ? name : "Unknown"});
   }
 }
 
@@ -75,21 +81,22 @@ std::vector<CameraInfo> enumerate_cameras() {
 
   pw_init(nullptr, nullptr);
 
-  pw_main_loop *loop = pw_main_loop_new(nullptr);
-  pw_context *context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
-  pw_core *core = pw_context_connect(context, nullptr, 0);
-  pw_registry *registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
+  pw_main_loop* loop = pw_main_loop_new(nullptr);
+  pw_context* context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
+  pw_core* core = pw_context_connect(context, nullptr, 0);
+  pw_registry* registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
 
   spa_hook registry_listener;
   static const pw_registry_events registry_events = {
-    PW_VERSION_REGISTRY_EVENTS,
-    .global = on_global,
-};
+      PW_VERSION_REGISTRY_EVENTS,
+      .global = on_global,
+  };
 
-  pw_registry_add_listener(registry, &registry_listener, &registry_events, nullptr);
+  pw_registry_add_listener(registry, &registry_listener, &registry_events,
+                           nullptr);
 
   // Run the main loop briefly to gather device info
-  //pw_main_loop_run(loop);
+  // pw_main_loop_run(loop);
   int timeout_ms = 1000;
   int elapsed_ms = 0;
   while (elapsed_ms < timeout_ms) {
@@ -98,14 +105,13 @@ std::vector<CameraInfo> enumerate_cameras() {
   }
   // Cleanup
   spa_hook_remove(&registry_listener);
-  pw_proxy_destroy(reinterpret_cast<pw_proxy *>(registry));
+  pw_proxy_destroy(reinterpret_cast<pw_proxy*>(registry));
   pw_core_disconnect(core);
   pw_context_destroy(context);
   pw_main_loop_destroy(loop);
 
   return cameras;
 }
-
 
 using namespace plugin_common;
 
@@ -121,9 +127,9 @@ namespace camera_plugin {
 // TODO static constexpr char kResolutionPresetValueMax[] = "max";
 
 static std::unique_ptr<libcamera::CameraManager> g_camera_manager;
-//static std::vector<std::shared_ptr<CameraContext>> g_cameras;
-//static std::unordered_map<unsigned int, std::shared_ptr<CameraSession>>
-//    g_camera_sessions;
+// static std::vector<std::shared_ptr<CameraContext>> g_cameras;
+// static std::unordered_map<unsigned int, std::shared_ptr<CameraSession>>
+//     g_camera_sessions;
 
 // static
 void CameraPlugin::RegisterWithRegistrar(
@@ -141,16 +147,13 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
       io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
-
   if (!CameraManager::instance().initialize()) {
     std::cerr << "Failed to initialize PipeWire manager!\n";
   }
-
 }
 
 CameraPlugin::~CameraPlugin() {
   CameraManager::instance().shutdown();
-
 }
 
 void CameraPlugin::camera_added(const std::shared_ptr<libcamera::Camera>& cam) {
@@ -160,7 +163,6 @@ void CameraPlugin::camera_added(const std::shared_ptr<libcamera::Camera>& cam) {
 void CameraPlugin::camera_removed(
     const std::shared_ptr<libcamera::Camera>& cam) {
   spdlog::debug("[camera_plugin] Camera removed: {}", cam->id());
-
 }
 
 std::string CameraPlugin::get_camera_lens_facing(
@@ -207,31 +209,34 @@ void CameraPlugin::Create(
     const std::string& camera_name,
     const PlatformMediaSettings& settings,
     const std::function<void(ErrorOr<int64_t> reply)> result) {
-
   spdlog::debug("[camera_plugin] create:");
 
   spdlog::debug("\tname: {}", camera_name);
 
-  if(CameraName_CameraStream.find(camera_name)==CameraName_CameraStream.end()) {
-    //The camera is not created before
-    //CameraStream newCamera = CameraStream(registrar_, 640,480 );
-    //CameraName_CameraStream.insert({camera_name, newCamera});
-    auto new_camera = std::make_shared<CameraStream>(registrar_, camera_name, 640, 480);
+  if (CameraName_CameraStream.find(camera_name) ==
+      CameraName_CameraStream.end()) {
+    // The camera is not created before
+    // CameraStream newCamera = CameraStream(registrar_, 640,480 );
+    // CameraName_CameraStream.insert({camera_name, newCamera});
+    auto new_camera =
+        std::make_shared<CameraStream>(registrar_, camera_name, 640, 480);
     CameraName_CameraStream.insert({camera_name, new_camera});
     TextureId_CameraStream.insert({new_camera->texture_id(), new_camera});
-    //result(new_camera->get_textureId());
+    // result(new_camera->get_textureId());
   }
-  std::cout << "textureID of "<< camera_name <<" is : "<< CameraName_CameraStream[camera_name]->texture_id()<<std::endl;
+  std::cout << "textureID of " << camera_name
+            << " is : " << CameraName_CameraStream[camera_name]->texture_id()
+            << std::endl;
   result(CameraName_CameraStream[camera_name]->texture_id());
-
-
 }
 /******************************************************************************
  * decode_mjpeg
  ******************************************************************************/
-int decode_mjpeg(const uint8_t *input, size_t input_size,
-                 uint8_t *output, int out_width, int out_height)
-{
+int decode_mjpeg(const uint8_t* input,
+                 size_t input_size,
+                 uint8_t* output,
+                 int out_width,
+                 int out_height) {
   jpeg_decompress_struct cinfo;
   jpeg_error_mgr jerr;
 
@@ -246,10 +251,9 @@ int decode_mjpeg(const uint8_t *input, size_t input_size,
   }
 
   jpeg_start_decompress(&cinfo);
-  if (cinfo.output_width  != static_cast<uint32_t>(out_width)  ||
+  if (cinfo.output_width != static_cast<uint32_t>(out_width) ||
       cinfo.output_height != static_cast<uint32_t>(out_height) ||
-      cinfo.output_components != 3)
-  {
+      cinfo.output_components != 3) {
     std::cerr << "[decode_mjpeg] Unexpected size/components.\n";
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
@@ -274,75 +278,74 @@ int decode_mjpeg(const uint8_t *input, size_t input_size,
  * from the param, then prints its value type. Real code might do more detailed
  * checks or convert to a known range.
  ******************************************************************************/
-static void parse_props_param(const spa_pod *pod)
-{
-    if (!pod) return;
+static void parse_props_param(const spa_pod* pod) {
+  if (!pod)
+    return;
 
-    // Is this actually an object of type SPA_TYPE_OBJECT_Props?
-    if (!spa_pod_is_object_type(pod, SPA_TYPE_OBJECT_Props)) {
-        // Some cameras or older nodes might still pass different param objects
-        return;
+  // Is this actually an object of type SPA_TYPE_OBJECT_Props?
+  if (!spa_pod_is_object_type(pod, SPA_TYPE_OBJECT_Props)) {
+    // Some cameras or older nodes might still pass different param objects
+    return;
+  }
+
+  const spa_pod_object* obj = reinterpret_cast<const spa_pod_object*>(pod);
+  std::cout
+      << "[parse_props_param] Found a props object with the following items:\n";
+
+  // Iterate each property (key/value)
+  spa_pod_prop* prop;
+  SPA_POD_OBJECT_FOREACH(obj, prop) {
+    uint32_t key = prop->key;
+
+    // We can check some known keys from <spa/param/props.h>:
+    // e.g. SPA_PROP_brightness, SPA_PROP_contrast, etc.
+    // We'll just print the key numeric ID and try to parse as float/int, etc.
+    std::cout << "  Key=" << key << " => ";
+
+    // The prop->value is a spa_pod describing the property type
+    if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Float) {
+      float val = 0.0f;
+      spa_pod_get_float(&prop->value, &val);
+      std::cout << "float=" << val;
+    } else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Int) {
+      int val = 0;
+      spa_pod_get_int(&prop->value, &val);
+      std::cout << "int=" << val;
+    } else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Bool) {
+      bool val = false;
+      spa_pod_get_bool(&prop->value, &val);
+      std::cout << "bool=" << val;
+    } else {
+      // We won't parse all possible types in this example
+      std::cout << "(unknown type=" << SPA_POD_TYPE(&prop->value) << ")";
     }
-
-    const spa_pod_object *obj = reinterpret_cast<const spa_pod_object *>(pod);
-    std::cout << "[parse_props_param] Found a props object with the following items:\n";
-
-    // Iterate each property (key/value)
-    spa_pod_prop *prop;
-    SPA_POD_OBJECT_FOREACH(obj, prop) {
-        uint32_t key = prop->key;
-
-        // We can check some known keys from <spa/param/props.h>:
-        // e.g. SPA_PROP_brightness, SPA_PROP_contrast, etc.
-        // We'll just print the key numeric ID and try to parse as float/int, etc.
-        std::cout << "  Key=" << key << " => ";
-
-        // The prop->value is a spa_pod describing the property type
-        if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Float) {
-            float val = 0.0f;
-            spa_pod_get_float(&prop->value, &val);
-            std::cout << "float=" << val;
-        }
-        else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Int) {
-            int val = 0;
-            spa_pod_get_int(&prop->value, &val);
-            std::cout << "int=" << val;
-        }
-        else if (SPA_POD_TYPE(&prop->value) == SPA_TYPE_Bool) {
-            bool val = false;
-            spa_pod_get_bool(&prop->value, &val);
-            std::cout << "bool=" << val;
-        }
-        else {
-            // We won't parse all possible types in this example
-            std::cout << "(unknown type=" << SPA_POD_TYPE(&prop->value) << ")";
-        }
-        std::cout << "\n";
-    }
-    std::cout << "[parse_props_param] End of props.\n";
+    std::cout << "\n";
+  }
+  std::cout << "[parse_props_param] End of props.\n";
 }
 /******************************************************************************
  * on_stream_process: Called to decode MJPEG frames
  ******************************************************************************/
-void CameraPlugin::on_stream_process(void* data)
-{
-  auto *self = static_cast<CameraPlugin*>(data);
+void CameraPlugin::on_stream_process(void* data) {
+  auto* self = static_cast<CameraPlugin*>(data);
   self->handle_stream();
 }
 
 void CameraPlugin::handle_stream() {
-  pw_buffer *buf = pw_stream_dequeue_buffer(g_pwStream);
-  if (!buf) return;
+  pw_buffer* buf = pw_stream_dequeue_buffer(g_pwStream);
+  if (!buf)
+    return;
 
   if (!buf->buffer->datas[0].data) {
     pw_stream_queue_buffer(g_pwStream, buf);
     return;
   }
 
-  auto *compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
+  auto* compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
   size_t compressedSize = buf->buffer->datas[0].chunk->size;
 
-  int ret = decode_mjpeg(compressedData, compressedSize, g_decodedBuffer.get(), WIDTH, HEIGHT);
+  int ret = decode_mjpeg(compressedData, compressedSize, g_decodedBuffer.get(),
+                         WIDTH, HEIGHT);
   if (ret == 0) {
     std::lock_guard<std::mutex> lock(g_frameMutex);
     g_newFrameAvailable = true;
@@ -359,7 +362,8 @@ void CameraPlugin::handle_stream() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
+                    GL_LINEAR_MIPMAP_LINEAR);
 
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0,
                  GL_RGB, GL_UNSIGNED_BYTE, g_decodedBuffer.get());
@@ -367,7 +371,8 @@ void CameraPlugin::handle_stream() {
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     registrar_->texture_registrar()->TextureClearCurrent();
-    registrar_->texture_registrar()->MarkTextureFrameAvailable(mPreview.textureId);
+    registrar_->texture_registrar()->MarkTextureFrameAvailable(
+        mPreview.textureId);
     glFinish();
 
   } else {
@@ -383,41 +388,39 @@ void CameraPlugin::handle_stream() {
  * We'll check if it's SPA_PARAM_Props or SPA_PARAM_PropInfo, then parse them
  * with parse_props_param().
  ******************************************************************************/
-static void on_stream_param_changed(void*, uint32_t id, const spa_pod* param)
-{
-  if (!param) return;
+static void on_stream_param_changed(void*, uint32_t id, const spa_pod* param) {
+  if (!param)
+    return;
 
   switch (id) {
     case SPA_PARAM_Props:
       std::cout << "[on_stream_param_changed] Received SPA_PARAM_Props\n";
-    parse_props_param(param);
-    break;
+      parse_props_param(param);
+      break;
     case SPA_PARAM_PropInfo:
       std::cout << "[on_stream_param_changed] Received SPA_PARAM_PropInfo\n";
-    // For demonstration, we can parse it similarly
-    // or skip if we just want to know it exists
-    parse_props_param(param);
-    break;
+      // For demonstration, we can parse it similarly
+      // or skip if we just want to know it exists
+      parse_props_param(param);
+      break;
     default:
       std::cout << "[on_stream_param_changed] Received param id=" << id
                 << " (not handled)\n";
-    break;
+      break;
   }
 }
 /******************************************************************************
  * on_stream_state_changed
  ******************************************************************************/
-void CameraPlugin::on_stream_state_changed(void *data,
-                                    pw_stream_state old_state,
-                                    pw_stream_state new_state,
-                                    const char* error)
-{
-  std::cout << "[on_stream_state_changed] "
-            << old_state << " -> " << new_state << " ("
-            << (error ? error : "no error") << ")\n";
+void CameraPlugin::on_stream_state_changed(void* data,
+                                           pw_stream_state old_state,
+                                           pw_stream_state new_state,
+                                           const char* error) {
+  std::cout << "[on_stream_state_changed] " << old_state << " -> " << new_state
+            << " (" << (error ? error : "no error") << ")\n";
   if (new_state == PW_STREAM_STATE_STREAMING) {
     // Just an example of changing a property
-    //update_exposure(g_pwStream, "9000");
+    // update_exposure(g_pwStream, "9000");
   }
 }
 /******************************************************************************
@@ -426,20 +429,18 @@ void CameraPlugin::on_stream_state_changed(void *data,
  * after connect, so we can see the advanced param listing.
  ******************************************************************************/
 
-void CameraPlugin::start_camera_stream(const std::string &nodeID)
-{
-
+void CameraPlugin::start_camera_stream(const std::string& nodeID) {
   if (g_pwLoop) {
     // Already started
     return;
   }
-  //pw_main_loop_quit(g_pwLoop);
+  // pw_main_loop_quit(g_pwLoop);
   if (pipewire_thread_.joinable()) {
     pipewire_thread_.join();
   }
-  if(g_pwStream) {
+  if (g_pwStream) {
     pw_stream_destroy(g_pwStream);
-    g_pwStream=nullptr;
+    g_pwStream = nullptr;
   }
   if (g_pwCore) {
     pw_core_disconnect(g_pwCore);
@@ -455,98 +456,88 @@ void CameraPlugin::start_camera_stream(const std::string &nodeID)
   }
   pw_deinit();
 
-
-
   pw_init(nullptr, nullptr);
 
-    spdlog::debug("[camera_plugin] nodeID: {}", nodeID);
+  spdlog::debug("[camera_plugin] nodeID: {}", nodeID);
 
-    g_pwLoop    = pw_main_loop_new(nullptr);
-    g_pwContext = pw_context_new(pw_main_loop_get_loop(g_pwLoop), nullptr, 0);
-    g_pwCore    = pw_context_connect(g_pwContext, nullptr, 0);
-    if (!g_pwCore) {
-        std::cerr << "[start_camera_stream] Could not connect to PipeWire core.\n";
-        return;
-    }
+  g_pwLoop = pw_main_loop_new(nullptr);
+  g_pwContext = pw_context_new(pw_main_loop_get_loop(g_pwLoop), nullptr, 0);
+  g_pwCore = pw_context_connect(g_pwContext, nullptr, 0);
+  if (!g_pwCore) {
+    std::cerr << "[start_camera_stream] Could not connect to PipeWire core.\n";
+    return;
+  }
 
-    // Create stream
-    pw_properties* props = pw_properties_new(
-        PW_KEY_MEDIA_TYPE,         "Video",
-        PW_KEY_MEDIA_CATEGORY,     "Capture",
-        PW_KEY_MEDIA_ROLE,         "Camera",
-        PW_KEY_NODE_PAUSE_ON_IDLE, "false",
-        // This is deprecated in modern PipeWire, but older versions still use it:
-        PW_KEY_NODE_TARGET,        nodeID.c_str(),
-        nullptr
-    );
-    g_pwStream = pw_stream_new(g_pwCore, "MJPEG Camera Stream", props);
-    if (!g_pwStream) {
-        std::cerr << "[start_camera_stream] Failed to create pw_stream.\n";
-        return;
-    }
+  // Create stream
+  pw_properties* props = pw_properties_new(
+      PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture",
+      PW_KEY_MEDIA_ROLE, "Camera", PW_KEY_NODE_PAUSE_ON_IDLE, "false",
+      // This is deprecated in modern PipeWire, but older versions still use it:
+      PW_KEY_NODE_TARGET, nodeID.c_str(), nullptr);
+  g_pwStream = pw_stream_new(g_pwCore, "MJPEG Camera Stream", props);
+  if (!g_pwStream) {
+    std::cerr << "[start_camera_stream] Failed to create pw_stream.\n";
+    return;
+  }
 
-    static const pw_stream_events streamEvents = {
-        PW_VERSION_STREAM_EVENTS,
-        nullptr,                  // destroy
-        on_stream_state_changed,  // state_changed
-        nullptr,                  // control_info
-        nullptr,                  // io_changed
-        on_stream_param_changed,  // param_changed  <--- we parse them here
-        nullptr,                  // add_buffer
-        nullptr,                  // remove_buffer
-        on_stream_process,        // process
-        nullptr                   // drain
-    };
-    pw_stream_add_listener(g_pwStream, &localListener, &streamEvents, this);
+  static const pw_stream_events streamEvents = {
+      PW_VERSION_STREAM_EVENTS,
+      nullptr,                  // destroy
+      on_stream_state_changed,  // state_changed
+      nullptr,                  // control_info
+      nullptr,                  // io_changed
+      on_stream_param_changed,  // param_changed  <--- we parse them here
+      nullptr,                  // add_buffer
+      nullptr,                  // remove_buffer
+      on_stream_process,        // process
+      nullptr                   // drain
+  };
+  pw_stream_add_listener(g_pwStream, &localListener, &streamEvents, this);
 
-    // Build a SPA format param for MJPEG 640x480@30fps
-    uint8_t buffer[1024];
-    spa_pod_builder builder  = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-    spa_rectangle rect       = { static_cast<uint32_t>(WIDTH), static_cast<uint32_t>(HEIGHT) };
-    spa_fraction fps         = { 30, 1 };
+  // Build a SPA format param for MJPEG 640x480@30fps
+  uint8_t buffer[1024];
+  spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+  spa_rectangle rect = {static_cast<uint32_t>(WIDTH),
+                        static_cast<uint32_t>(HEIGHT)};
+  spa_fraction fps = {30, 1};
 
-    const spa_pod* params[1];
-    params[0] = reinterpret_cast<const spa_pod*>(
-        spa_pod_builder_add_object(&builder,
-            SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
-            SPA_FORMAT_mediaType,        SPA_POD_Id(SPA_MEDIA_TYPE_video),
-            SPA_FORMAT_mediaSubtype,     SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
-            SPA_FORMAT_VIDEO_size,       SPA_POD_Rectangle(&rect),
-            SPA_FORMAT_VIDEO_framerate,  SPA_POD_Fraction(&fps)
-        )
-    );
+  const spa_pod* params[1];
+  params[0] = reinterpret_cast<const spa_pod*>(spa_pod_builder_add_object(
+      &builder, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+      SPA_FORMAT_mediaType, SPA_POD_Id(SPA_MEDIA_TYPE_video),
+      SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
+      SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&rect),
+      SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&fps)));
 
-    int res = pw_stream_connect(
-        g_pwStream,
-        PW_DIRECTION_INPUT,
-        PW_ID_ANY,
-        static_cast<pw_stream_flags>(
-            PW_STREAM_FLAG_AUTOCONNECT |
-            PW_STREAM_FLAG_MAP_BUFFERS  |
-            PW_STREAM_FLAG_RT_PROCESS
-        ),
-        params,
-        1
-    );
-    if (res < 0) {
-        std::cerr << "[start_camera_stream] pw_stream_connect() error: " << res << "\n";
-    }
+  int res = pw_stream_connect(
+      g_pwStream, PW_DIRECTION_INPUT, PW_ID_ANY,
+      static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT |
+                                   PW_STREAM_FLAG_MAP_BUFFERS |
+                                   PW_STREAM_FLAG_RT_PROCESS),
+      params, 1);
+  if (res < 0) {
+    std::cerr << "[start_camera_stream] pw_stream_connect() error: " << res
+              << "\n";
+  }
 
-    // -- Immediately request param blocks so we can print them out
-    //print_camera_parameters();
+  // -- Immediately request param blocks so we can print them out
+  // print_camera_parameters();
 
-    // Run the loop until user calls pw_main_loop_quit()
+  // Run the loop until user calls pw_main_loop_quit()
 
-  pipewire_thread_ = std::thread([this]() {
-  pw_main_loop_run(g_pwLoop);
-});
+  pipewire_thread_ = std::thread([this]() { pw_main_loop_run(g_pwLoop); });
 }
 
 #define IMAGE_WIDTH 640
 #define IMAGE_HEIGHT 480
 #define IMAGE_CHANNELS 3  // RGB format
 
-void save_image_to_jpeg(const std::string &filename, const unsigned char *image_data, int width, int height, int channels, int quality) {
+void save_image_to_jpeg(const std::string& filename,
+                        const unsigned char* image_data,
+                        int width,
+                        int height,
+                        int channels,
+                        int quality) {
   struct jpeg_compress_struct cinfo;
   struct jpeg_error_mgr jerr;
 
@@ -555,9 +546,10 @@ void save_image_to_jpeg(const std::string &filename, const unsigned char *image_
   jpeg_create_compress(&cinfo);
 
   // Open file for writing
-  FILE *outfile = fopen(filename.c_str(), "wb");
+  FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
-    std::cerr << "Error: Unable to open file " << filename << " for writing!" << std::endl;
+    std::cerr << "Error: Unable to open file " << filename << " for writing!"
+              << std::endl;
     return;
   }
 
@@ -593,19 +585,19 @@ void save_image_to_jpeg(const std::string &filename, const unsigned char *image_
 void CameraPlugin::Initialize(
     const int64_t camera_id,
     const std::function<void(ErrorOr<PlatformSize> reply)> result) {
-
-  std::cout<< "CameraPlugin::Initialize: "<< camera_id<<std::endl;
-  //GLuint textureID= camera_id;
-  if(TextureId_CameraStream.find(camera_id)==TextureId_CameraStream.end()) {
-    return;//means, the camera_id is not found.
+  std::cout << "CameraPlugin::Initialize: " << camera_id << std::endl;
+  // GLuint textureID= camera_id;
+  if (TextureId_CameraStream.find(camera_id) == TextureId_CameraStream.end()) {
+    return;  // means, the camera_id is not found.
   }
-  auto camera_stream= TextureId_CameraStream[camera_id];
+  auto camera_stream = TextureId_CameraStream[camera_id];
 
-  //auto cameraStream = CameraName_CameraStream
-  result(PlatformSize(camera_stream->camera_width(), camera_stream->camera_height()));
-  //std::string nodeID=camera_stream->camera_name();
+  // auto cameraStream = CameraName_CameraStream
+  result(PlatformSize(camera_stream->camera_width(),
+                      camera_stream->camera_height()));
+  // std::string nodeID=camera_stream->camera_name();
 
-  std::cout << camera_stream->camera_name()<<std::endl;
+  std::cout << camera_stream->camera_name() << std::endl;
   camera_stream->Start(camera_stream->camera_name());
 }
 void CameraPlugin::blit_fb(uint8_t const* pixels) const {
@@ -625,25 +617,23 @@ void CameraPlugin::blit_fb(uint8_t const* pixels) const {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                   GL_LINEAR_MIPMAP_LINEAR);
   // The following call requires a 32-bit aligned source buffer
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0, GL_RGB,
-               GL_UNSIGNED_BYTE, pixels);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mPreview.width, mPreview.height, 0,
+               GL_RGB, GL_UNSIGNED_BYTE, pixels);
   glGenerateMipmap(GL_TEXTURE_2D);
 
   glBindFramebuffer(GL_FRAMEBUFFER, GL_NONE);
   texture_registrar_->TextureClearCurrent();
   texture_registrar_->MarkTextureFrameAvailable(mPreview.textureId);
 
-
-  //glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
-  //texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
-
+  // glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
+  // texture_registrar->MarkTextureFrameAvailable(mPreview.textureId);
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
-  //auto camera = g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  //camera.reset();
+  // auto camera = g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
+  // camera.reset();
   SPDLOG_DEBUG("[camera_plugin] dispose: {}", camera_id);
-  auto camera_stream= TextureId_CameraStream[camera_id];
+  auto camera_stream = TextureId_CameraStream[camera_id];
   camera_stream->Stop();
   return {};
 }
@@ -651,32 +641,32 @@ std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
 void CameraPlugin::TakePicture(
     const int64_t camera_id,
     const std::function<void(ErrorOr<std::string> reply)> result) {
+  // const auto camera =
+  //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
+  // const auto camera = g_camera_sessions[camera_id];
+  // camera->pausePreview();
+  /*
+    SPDLOG_DEBUG("[camera_plugin] pause the camera: {}");
 
-  //const auto camera =
-  //    g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  //const auto camera = g_camera_sessions[camera_id];
-  //camera->pausePreview();
-/*
-  SPDLOG_DEBUG("[camera_plugin] pause the camera: {}");
-
-  libcamera::StreamRole stream_roles = { libcamera::StreamRole::StillCapture };
-  //std::unique_ptr<libcamera::CameraConfiguration> config =
-    //camera->generateConfiguration(stream_roles);
-  //camera->
-  camera->resumePreview();
-*/
-  //result(camera->takePicture());
+    libcamera::StreamRole stream_roles = { libcamera::StreamRole::StillCapture
+    };
+    //std::unique_ptr<libcamera::CameraConfiguration> config =
+      //camera->generateConfiguration(stream_roles);
+    //camera->
+    camera->resumePreview();
+  */
+  // result(camera->takePicture());
 }
 
 void CameraPlugin::StartVideoRecording(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
   bool enable_stream{};
-/*
-  const auto camera =
-      g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  camera->startVideoRecording(enable_stream);
-*/
+  /*
+    const auto camera =
+        g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
+    camera->startVideoRecording(enable_stream);
+  */
   result({});
 }
 
@@ -693,8 +683,8 @@ void CameraPlugin::StopVideoRecording(
 void CameraPlugin::PausePreview(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
-  //const auto camera =
-  //    g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
+  // const auto camera =
+  //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
   /*
   const auto camera = g_camera_sessions[camera_id];
   if(camera) {
@@ -710,7 +700,6 @@ void CameraPlugin::PausePreview(
 void CameraPlugin::ResumePreview(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
-
   result({});
 }
 }  // namespace camera_plugin
