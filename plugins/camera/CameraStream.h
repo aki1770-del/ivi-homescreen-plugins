@@ -61,16 +61,11 @@ class CameraStream {
  private:
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};
-  pw_main_loop*  pw_loop_    = nullptr;
-  pw_context*    pw_context_ = nullptr;
-  pw_core*       pw_core_    = nullptr;
+
   pw_stream*     pw_stream_  = nullptr;
 
   // The listener hook must stay in scope; never store it on the stack.
   spa_hook       stream_listener_;
-
-  // Thread that runs pw_main_loop_run
-  std::thread    pipewire_thread_;
 
   // Flutter texture integration
   //flutter::TextureRegistrar*               texture_registrar_ = nullptr;

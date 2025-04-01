@@ -27,16 +27,18 @@
 
 #include "plugins/common/common.h"
 
-#include <pipewire/pipewire.h>
+#include <SDL2/SDL.h>
+#include <jpeglib.h>
 #include <pipewire/core.h>
+#include <pipewire/pipewire.h>
 #include <pipewire/properties.h>
 #include <spa/param/param.h>
 #include <spa/param/video/format-utils.h>
-#include <jpeglib.h>
 #include <iostream>
-#include <vector>
 #include <string>
-#include <SDL2/SDL.h>
+#include <vector>
+
+#include "CameraManager.h"
 #include "camera_context.h"
 
 extern "C" {
@@ -141,29 +143,16 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
       io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
-  /*
-  thread_ = std::thread([&]() { io_context_->run(); });
-  g_camera_manager = std::make_unique<libcamera::CameraManager>();
-  g_camera_manager->cameraAdded.connect(this, &CameraPlugin::camera_added);
-  g_camera_manager->cameraRemoved.connect(this, &CameraPlugin::camera_removed);
 
-  spdlog::debug("[camera_plugin] libcamera {}", g_camera_manager->version());
-
-  auto res = g_camera_manager->start();
-  if (res != 0) {
-    spdlog::critical("Failed to start camera manager: {}", strerror(-res));
+  if (!CameraManager::instance().initialize()) {
+    std::cerr << "Failed to initialize PipeWire manager!\n";
   }
-  */
+
 }
 
 CameraPlugin::~CameraPlugin() {
-  io_context_->run();
-  thread_.join();
+  CameraManager::instance().shutdown();
 
-  g_camera_manager->stop();
-  for (auto& [texture_id, camera] : g_camera_sessions) {
-    camera.reset();
-  }
 }
 
 void CameraPlugin::camera_added(const std::shared_ptr<libcamera::Camera>& cam) {
@@ -249,6 +238,7 @@ void CameraPlugin::Create(
   }
   std::cout << "textureID of "<< camera_name <<" is : "<< CameraName_CameraStream[camera_name]->texture_id()<<std::endl;
   result(CameraName_CameraStream[camera_name]->texture_id());
+
 
 }
 /******************************************************************************
@@ -353,29 +343,6 @@ void CameraPlugin::on_stream_process(void* data)
 {
   auto *self = static_cast<CameraPlugin*>(data);
   self->handle_stream();
-/*
-  pw_buffer *buf = pw_stream_dequeue_buffer(self->g_pwStream);
-  if (!buf) return;
-
-  if (!buf->buffer->datas[0].data) {
-    pw_stream_queue_buffer(self->g_pwStream, buf);
-    return;
-  }
-
-  auto *compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
-  size_t compressedSize = buf->buffer->datas[0].chunk->size;
-
-  int ret = decode_mjpeg(compressedData, compressedSize, self->g_decodedBuffer.get(), WIDTH, HEIGHT);
-  if (ret == 0) {
-    std::lock_guard<std::mutex> lock(self->g_frameMutex);
-    self->g_newFrameAvailable = true;
-
-  } else {
-    std::cerr << "[on_stream_process] MJPEG decode failed.\n";
-  }
-
-  pw_stream_queue_buffer(self->g_pwStream, buf);
-  */
 }
 
 void CameraPlugin::handle_stream() {
@@ -648,21 +615,12 @@ void CameraPlugin::Initialize(
     return;//means, the camera_id is not found.
   }
   auto camera_stream= TextureId_CameraStream[camera_id];
-/*
-  for ( std::map<std::string, std::shared_ptr<CameraStream>>::iterator it= CameraName_CameraStream.begin(); it != CameraName_CameraStream.end(); ++it) {
-    std::cout << "camera name: "<< it->second->camera_name()<<std::endl;
-    if(it->second->texture_id()== camera_id) {
-      std::cout<< "found the texture_id: " << it->second->texture_id()<<std::endl;
-      std::cout<< "its camera name: "<< it->second->camera_name();
-      break;
-    }
-  }
-  */
+
   //auto cameraStream = CameraName_CameraStream
   result(PlatformSize(camera_stream->camera_width(), camera_stream->camera_height()));
   //std::string nodeID=camera_stream->camera_name();
 
-
+  std::cout << camera_stream->camera_name()<<std::endl;
   camera_stream->Start(camera_stream->camera_name());
 }
 void CameraPlugin::blit_fb(uint8_t const* pixels) const {

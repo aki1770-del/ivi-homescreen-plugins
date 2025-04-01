@@ -3,6 +3,7 @@
 //
 
 #include "CameraStream.h"
+#include "CameraManager.h"
 
 #include <GLES2/gl2.h>
 #include <jpeglib.h>
@@ -149,13 +150,6 @@ CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
 CameraStream::~CameraStream()
 {
   Stop();
-/*
-  // Optionally unregister the texture if you want; often unnecessary
-  if (texture_registrar_ && texture_id_ != -1) {
-    texture_registrar_->UnregisterTexture(texture_id_);
-    texture_id_ = -1;
-  }
-  */
 }
 
 //------------------------------------------------------------------------------
@@ -163,87 +157,108 @@ CameraStream::~CameraStream()
 //------------------------------------------------------------------------------
 bool CameraStream::Start(const std::string &nodeID)
 {
-  if (pw_loop_) {
-    // Already started
-    return true;
-  }
-
-  pw_init(nullptr, nullptr);
-
-  pw_loop_    = pw_main_loop_new(nullptr);
-  pw_context_ = pw_context_new(pw_main_loop_get_loop(pw_loop_), nullptr, 0);
-  pw_core_    = pw_context_connect(pw_context_, nullptr, 0);
-  if (!pw_core_) {
-    std::fprintf(stderr, "[CameraStream::Start] Could not connect to PW core.\n");
+  // 1) Ensure the manager is running
+  auto &mgr = CameraManager::instance();
+  if (!mgr.initialize()) {
+    std::fprintf(stderr, "[CameraStream::Start] Failed to init manager.\n");
     return false;
   }
 
-  // Create the stream
-  pw_properties* props = pw_properties_new(
+  auto* loop = mgr.threadLoop();
+  if (!loop) {
+    std::fprintf(stderr, "[CameraStream::Start] threadLoop is null?\n");
+    return false;
+  }
+
+  // 2) Lock the thread loop while creating the stream
+  pw_thread_loop_lock(loop);
+  {
+    auto* core = mgr.core();
+    if (!core) {
+      std::fprintf(stderr, "[CameraStream::Start] No valid PipeWire core.\n");
+      pw_thread_loop_unlock(loop);
+      return false;
+    }
+
+    // Create the pw_stream
+    pw_properties* props = pw_properties_new(
       PW_KEY_MEDIA_TYPE,         "Video",
       PW_KEY_MEDIA_CATEGORY,     "Capture",
       PW_KEY_MEDIA_ROLE,         "Camera",
-      PW_KEY_NODE_PAUSE_ON_IDLE, "false",
       PW_KEY_NODE_TARGET,        nodeID.c_str(),
       nullptr
-  );
-  pw_stream_ = pw_stream_new(pw_core_, "MJPEG Camera Stream", props);
-  if (!pw_stream_) {
-    std::fprintf(stderr, "[CameraStream::Start] Failed to create pw_stream.\n");
-    return false;
-  }
+    );
 
-  // Set up callbacks
-  static pw_stream_events streamEvents = {
-    PW_VERSION_STREAM_EVENTS,
-    nullptr,                  // destroy
-    OnStreamStateChanged,     // state_changed
-    nullptr,                  // control_info
-    nullptr,                  // io_changed
-    OnStreamParamChanged,     // param_changed
-    nullptr,                  // add_buffer
-    nullptr,                  // remove_buffer
-    OnStreamProcess,          // process
-    nullptr                   // drain
-  };
-  pw_stream_add_listener(pw_stream_, &stream_listener_, &streamEvents, this);
+    pw_stream_ = pw_stream_new(core, "MyCameraStream", props);
+    if (!pw_stream_) {
+      std::fprintf(stderr, "[CameraStream::Start] Failed to create pw_stream.\n");
+      pw_thread_loop_unlock(loop);
+      return false;
+    }
 
-  // Build the SPA format param for MJPEG @ 640x480@30
-  uint8_t buffer[1024];
-  spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-  spa_rectangle rect      = { (uint32_t)width_, (uint32_t)height_ };
-  spa_fraction fps        = { 30, 1 };
+    // Set up the stream events
+    static pw_stream_events streamEvents = {
+      PW_VERSION_STREAM_EVENTS,
+      /* .destroy        = */ nullptr,
+      /* .state_changed  = */ OnStreamStateChanged,
+      /* .control_info   = */ nullptr,
+      /* .io_changed     = */ nullptr,
+      /* .param_changed  = */ OnStreamParamChanged,
+      /* .add_buffer     = */ nullptr,
+      /* .remove_buffer  = */ nullptr,
+      /* .process        = */ OnStreamProcess,
+      /* .drain          = */ nullptr
+    };
+    pw_stream_add_listener(pw_stream_, &stream_listener_, &streamEvents, this);
 
-  const spa_pod* params[1];
-  params[0] = reinterpret_cast<const spa_pod*>(
-      spa_pod_builder_add_object(&builder,
-          SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
-          SPA_FORMAT_mediaType,        SPA_POD_Id(SPA_MEDIA_TYPE_video),
-          SPA_FORMAT_mediaSubtype,     SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
-          SPA_FORMAT_VIDEO_size,       SPA_POD_Rectangle(&rect),
-          SPA_FORMAT_VIDEO_framerate,  SPA_POD_Fraction(&fps)
-      )
-  );
+    // For example, request an MJPEG format or any other video format
+    // building an SPA_POD with resolution, etc. This is just a stub:
 
-  int res = pw_stream_connect(
+    /*
+    spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    const spa_pod* params[1];
+    // fill out your desired format (e.g. MJPEG 640x480) ...
+    // params[0] = ...
+    */
+    // Build the SPA format param for MJPEG @ 640x480@30
+    uint8_t buffer[1024];
+    spa_pod_builder builder = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    spa_rectangle rect      = { (uint32_t)width_, (uint32_t)height_ };
+    spa_fraction fps        = { 30, 1 };
+
+    const spa_pod* params[1];
+    params[0] = reinterpret_cast<const spa_pod*>(
+        spa_pod_builder_add_object(&builder,
+            SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+            SPA_FORMAT_mediaType,        SPA_POD_Id(SPA_MEDIA_TYPE_video),
+            SPA_FORMAT_mediaSubtype,     SPA_POD_Id(SPA_MEDIA_SUBTYPE_mjpg),
+            SPA_FORMAT_VIDEO_size,       SPA_POD_Rectangle(&rect),
+            SPA_FORMAT_VIDEO_framerate,  SPA_POD_Fraction(&fps)
+        )
+    );
+
+
+    // Actually connect the stream
+    int res = pw_stream_connect(
       pw_stream_,
       PW_DIRECTION_INPUT,
-      PW_ID_ANY,
-      (pw_stream_flags)(
-          PW_STREAM_FLAG_AUTOCONNECT |
-          PW_STREAM_FLAG_MAP_BUFFERS |
-          PW_STREAM_FLAG_RT_PROCESS
-      ),
-      params, 1
-  );
-
-  if (res < 0) {
-    std::fprintf(stderr, "[CameraStream::Start] pw_stream_connect() error: %d\n", res);
-    return false;
+      PW_ID_ANY,  // or a real node ID integer, or from the nodeID param if numeric
+      (pw_stream_flags)(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
+      ///* params */ nullptr,
+      ///* n_params */ 0
+      params,
+      1
+    );
+    if (res < 0) {
+      std::fprintf(stderr, "[CameraStream::Start] pw_stream_connect() error: %d\n", res);
+      pw_stream_destroy(pw_stream_);
+      pw_stream_ = nullptr;
+      pw_thread_loop_unlock(loop);
+      return false;
+    }
   }
+  pw_thread_loop_unlock(loop);
 
-  // Launch the PipeWire main loop in a separate thread
-  pipewire_thread_ = std::thread(&CameraStream::RunPipeWireLoop, this);
   return true;
 }
 
@@ -252,42 +267,20 @@ bool CameraStream::Start(const std::string &nodeID)
 //------------------------------------------------------------------------------
 void CameraStream::Stop()
 {
-  if (!pw_loop_) {
-    // Not running
-    return;
-  }
-  // Stop the main loop
-  pw_main_loop_quit(pw_loop_);
-  if (pipewire_thread_.joinable()) {
-    pipewire_thread_.join();
+  if (!pw_stream_) {
+    return; // already stopped
   }
 
-  // Cleanup
-  if (pw_stream_) {
+  auto &mgr = CameraManager::instance();
+  auto* loop = mgr.threadLoop();
+
+  // Lock while destroying
+  pw_thread_loop_lock(loop);
+  {
     pw_stream_destroy(pw_stream_);
     pw_stream_ = nullptr;
   }
-  if (pw_core_) {
-    pw_core_disconnect(pw_core_);
-    pw_core_ = nullptr;
-  }
-  if (pw_context_) {
-    pw_context_destroy(pw_context_);
-    pw_context_ = nullptr;
-  }
-  if (pw_loop_) {
-    pw_main_loop_destroy(pw_loop_);
-    pw_loop_ = nullptr;
-  }
-  pw_deinit();
-}
-
-//------------------------------------------------------------------------------
-// Private method: run the main loop
-//------------------------------------------------------------------------------
-void CameraStream::RunPipeWireLoop()
-{
-  pw_main_loop_run(pw_loop_);
+  pw_thread_loop_unlock(loop);
 }
 
 void save_image_to_jpeg(const std::string &filename, const unsigned char *image_data, int width, int height, int channels, int quality) {
@@ -352,13 +345,20 @@ void CameraStream::HandleProcess()
   auto*    compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
   size_t   compressedSize = buf->buffer->datas[0].chunk->size;
 
+  decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
+  std::cout << "size of decoded_buffer_: " <<sizeof(decoded_buffer_)<<std::endl;
+  std::cout << "compressedSize: "<<compressedSize<<std::endl;
+
+
+  std::memset(decoded_buffer_.get(), 0, width_ * height_ * 3);
+
   int ret = decode_mjpeg(compressedData, compressedSize,
                          decoded_buffer_.get(), width_, height_);
   if (ret == 0) {
     {
       std::lock_guard<std::mutex> lock(frame_mutex_);
       new_frame_available_ = true;
-      //std::cout << "new_frame_available_ = true"<<std::endl;
+      std::cout << "new_frame_available_ = true"<<std::endl;
 
       //save_image_to_jpeg("/home/tcna/Pictures/test.jpeg", decoded_buffer_.get(), width_, height_, 3, 90);
 
@@ -386,7 +386,6 @@ void CameraStream::HandleProcess()
 
       registrar_->texture_registrar()->TextureClearCurrent();
       registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
-
     }
     // Tell Flutter there's a new frame
     //if (registrar_->texture_registrar()) {
@@ -409,20 +408,33 @@ void CameraStream::OnStreamStateChanged(void *data,
                                         pw_stream_state new_state,
                                         const char *error)
 {
-  // For this example, just log
-  std::fprintf(stderr, "[CameraStream] state changed from %d to %d (%s)\n",
-               old_state, new_state, (error ? error : "no error"));
+  auto* self = reinterpret_cast<CameraStream*>(data);
+  (void)self; // not used in this minimal example
+  std::fprintf(stderr,
+    "[CameraStream] stream state changed from %d to %d (%s)\n",
+    old_state, new_state, (error ? error : "no error"));
 }
 
 void CameraStream::OnStreamParamChanged(void *data,
                                         uint32_t id,
                                         const spa_pod* param)
 {
+  auto* self = reinterpret_cast<CameraStream*>(data);
+  (void)self;
   std::fprintf(stderr, "[CameraStream] OnStreamParamChanged: id=%u\n", id);
 }
 
 void CameraStream::OnStreamProcess(void *data)
 {
-  auto *self = static_cast<CameraStream*>(data);
+  auto *self = reinterpret_cast<CameraStream*>(data);
+  (void)self;
+  // handle new frame data here...
+  // e.g., pw_stream_dequeue_buffer, decode MJPEG, etc.
+  std::fprintf(stderr, "[CameraStream] OnStreamProcess: new frame!\n");
+  //std::cout << self->camera_height()<<std::endl;
+
+
   self->HandleProcess();
+
+
 }

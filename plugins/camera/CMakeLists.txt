@@ -36,6 +36,8 @@ add_library(plugin_camera STATIC
         camera_session.cc
         CameraStream.cpp
         CameraStream.h
+        CameraManager.cpp
+        CameraManager.h
 
 )
 
