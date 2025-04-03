@@ -53,6 +53,8 @@ class CameraStream {
    */
   void Stop();
 
+  void PauseStream();
+  void ResumeStream();
   /**
    * Get the Flutter texture ID associated with this stream.
    * Use this ID in Flutter's Texture() widget to display the camera feed.
@@ -62,6 +64,8 @@ class CameraStream {
   std::string camera_name() const { return camera_name_; }
   int camera_width() const { return width_; }
   int camera_height() const { return height_; }
+  static std::optional<std::string> GetFilePathForPicture();
+  std::string takePicture();
 
  private:
   // PipeWire objects

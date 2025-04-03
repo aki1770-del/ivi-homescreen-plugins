@@ -641,6 +641,14 @@ std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
 void CameraPlugin::TakePicture(
     const int64_t camera_id,
     const std::function<void(ErrorOr<std::string> reply)> result) {
+
+  SPDLOG_DEBUG("[camera_plugin] Take Picture: {}", camera_id);
+  auto camera_stream = TextureId_CameraStream[camera_id];
+
+  //std::string str = "Take Picture ";
+  result(camera_stream->takePicture());
+
+  //result(camera->takePicture());
   // const auto camera =
   //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
   // const auto camera = g_camera_sessions[camera_id];
@@ -683,6 +691,11 @@ void CameraPlugin::StopVideoRecording(
 void CameraPlugin::PausePreview(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
+
+  SPDLOG_DEBUG("[camera_plugin] PausePreview");
+  auto camera_stream = TextureId_CameraStream[camera_id];
+  camera_stream->PauseStream();
+
   // const auto camera =
   //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
   /*
@@ -700,6 +713,9 @@ void CameraPlugin::PausePreview(
 void CameraPlugin::ResumePreview(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
+  SPDLOG_DEBUG("[camera_plugin] ResumePreview");
+  auto camera_stream = TextureId_CameraStream[camera_id];
+  camera_stream->ResumeStream();
   result({});
 }
 }  // namespace camera_plugin

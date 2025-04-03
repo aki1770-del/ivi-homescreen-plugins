@@ -427,3 +427,61 @@ void CameraStream::OnStreamProcess(void* data) {
 
   self->HandleProcess();
 }
+
+void CameraStream::PauseStream() {
+  if(!pw_stream_)
+    return;
+
+  auto& mgr = CameraManager::instance();
+  if (!mgr.initialize()) {
+    std::fprintf(stderr, "[CameraStream::Start] Failed to init manager.\n");
+    return;
+  }
+
+  auto* loop = mgr.threadLoop();
+  if (!loop) {
+    std::fprintf(stderr, "[CameraStream::Start] threadLoop is null?\n");
+    return;
+  }
+
+  pw_thread_loop_lock(loop);
+  {
+    pw_stream_set_active(pw_stream_, false);
+  }
+  pw_thread_loop_unlock(loop);
+}
+
+void CameraStream::ResumeStream() {
+  if(!pw_stream_)
+    return;
+
+  auto& mgr = CameraManager::instance();
+  if (!mgr.initialize()) {
+    std::fprintf(stderr, "[CameraStream::Start] Failed to init manager.\n");
+    return;
+  }
+
+  auto* loop = mgr.threadLoop();
+  if (!loop) {
+    std::fprintf(stderr, "[CameraStream::Start] threadLoop is null?\n");
+    return;
+  }
+
+  pw_thread_loop_lock(loop);
+  {
+    pw_stream_set_active(pw_stream_, true);
+  }
+  pw_thread_loop_unlock(loop);
+}
+std::optional<std::string> CameraStream::GetFilePathForPicture() {
+  std::string str = "CameraStream::GetFilePathForPicture";
+  return str;
+}
+
+std::string CameraStream::takePicture() {
+  auto filename = GetFilePathForPicture();
+  return filename.value();
+}
+
+
+
