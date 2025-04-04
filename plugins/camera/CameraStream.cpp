@@ -8,10 +8,16 @@
 #include <GLES2/gl2.h>
 #include <jpeglib.h>
 #include <spdlog/spdlog.h>
+#include <string/string_tools.h>
+#include <time/time_tools.h>
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <sstream>
+#include "tools/command.h"
+static constexpr char kPictureCaptureExtension[] = "jpeg";
 
 //------------------------------------------------------------------------------
 // A helper function for MJPEG decoding
@@ -381,17 +387,10 @@ void CameraStream::HandleProcess() {
       registrar_->texture_registrar()->TextureClearCurrent();
       registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
     }
-    // Tell Flutter there's a new frame
-    // if (registrar_->texture_registrar()) {
-    //  registrar_->texture_registrar()->TextureClearCurrent();
-    //  registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
-    //}
-    // glFinish();
   } else {
     std::fprintf(stderr,
                  "[CameraStream::HandleProcess] MJPEG decode failed.\n");
   }
-
   pw_stream_queue_buffer(pw_stream_, buf);
 }
 
@@ -474,12 +473,29 @@ void CameraStream::ResumeStream() {
   pw_thread_loop_unlock(loop);
 }
 std::optional<std::string> CameraStream::GetFilePathForPicture() {
-  std::string str = "CameraStream::GetFilePathForPicture";
-  return str;
+  std::ostringstream oss;
+  oss << "xdg-user-dir PICTURES";
+  std::string picture_path;
+  if (!plugin_common::Command::Execute(oss.str().c_str(), picture_path)) {
+    return std::nullopt;
+  }
+  std::filesystem::path path(
+      plugin_common::StringTools::trim(picture_path, "\n"));
+
+  path /= "PhotoCapture_" + plugin_common::TimeTools::GetCurrentTimeString() + "." +
+        kPictureCaptureExtension;
+  //std::string str = "/home/tcna/Pictures/image.png";
+  return path;
 }
 
 std::string CameraStream::takePicture() {
   auto filename = GetFilePathForPicture();
+  /*
+   *saved picure here.
+   *
+   */
+  save_image_to_jpeg(filename.value(),
+decoded_buffer_.get(), width_, height_, 3, 90);
   return filename.value();
 }
 

@@ -26,6 +26,7 @@
 #include "plugins/common/common.h"
 
 #include <SDL2/SDL.h>
+#include <glib/main_loop.h>
 #include <jpeglib.h>
 #include <pipewire/core.h>
 #include <pipewire/pipewire.h>
@@ -82,6 +83,8 @@ std::vector<CameraInfo> enumerate_cameras() {
   pw_init(nullptr, nullptr);
 
   pw_main_loop* loop = pw_main_loop_new(nullptr);
+  //pw_main_loop* loop = plugin_common_glib::MainLoop::GetInstance();
+
   pw_context* context = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
   pw_core* core = pw_context_connect(context, nullptr, 0);
   pw_registry* registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
