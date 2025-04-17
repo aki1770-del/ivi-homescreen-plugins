@@ -78,6 +78,7 @@ void on_global(void* data,
 
 // Function to enumerate cameras using PipeWire
 std::vector<CameraInfo> enumerate_cameras() {
+  /*
   cameras.clear();  // Clear previous entries
 
   pw_init(nullptr, nullptr);
@@ -112,7 +113,7 @@ std::vector<CameraInfo> enumerate_cameras() {
   pw_core_disconnect(core);
   pw_context_destroy(context);
   pw_main_loop_destroy(loop);
-
+*/
   return cameras;
 }
 
@@ -194,6 +195,7 @@ std::string CameraPlugin::get_camera_lens_facing(
 }
 
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
+  /*
   std::vector<CameraInfo> pwcameras = enumerate_cameras();
   spdlog::debug("[camera_plugin] availableCameras:");
   flutter::EncodableList list;
@@ -205,6 +207,15 @@ ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
     spdlog::debug("\tname: {}", name);
     list.emplace_back(flutter::EncodableValue(std::move(id)));
   }
+  */
+  flutter::EncodableList list;
+  auto& mgr = CameraManager::instance();
+  auto cameras = mgr.getAvailableCameras();
+  for(const auto& [id, name] : cameras) {
+    std::cout << "Detected camera: " << name << " (ID: " << id << ")\n";
+    list.emplace_back(flutter::EncodableValue(std::move(std::to_string(id))));
+  }
+
   return list;
 }
 

@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include "tools/command.h"
@@ -357,10 +358,7 @@ void CameraStream::HandleProcess() {
       std::lock_guard<std::mutex> lock(frame_mutex_);
       new_frame_available_ = true;
       std::cout << "new_frame_available_ = true" << std::endl;
-
-      // save_image_to_jpeg("/home/tcna/Pictures/test.jpeg",
-      // decoded_buffer_.get(), width_, height_, 3, 90);
-
+      std::cout << "CameraStream::HandleProcess(): Running in thread ID:"<<std::this_thread::get_id()<<std::endl;
       SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
 
       registrar_->texture_registrar()->TextureMakeCurrent();
@@ -484,18 +482,39 @@ std::optional<std::string> CameraStream::GetFilePathForPicture() {
 
   path /= "PhotoCapture_" + plugin_common::TimeTools::GetCurrentTimeString() + "." +
         kPictureCaptureExtension;
-  //std::string str = "/home/tcna/Pictures/image.png";
   return path;
 }
+void capture_snapshot(std::promise<std::string> prom) {
+  std::cout << "[capture_snapshot]: Running in thread ID: "<<std::this_thread::get_id()<<std::endl;
 
+  std::cout<<"waiting for next frame\n";
+  std::this_thread::sleep_for(std::chrono::seconds(5));
+  std::string path = "/tmp/snapshot_123.png";
+  std::cout << "[camera] Snapshot saved to "<<path<<std::endl;
+  prom.set_value(path);
+}
 std::string CameraStream::takePicture() {
   auto filename = GetFilePathForPicture();
+  std::cout << "[CameraStream::takePicture()]: Running in thread ID: "<<std::this_thread::get_id()<<std::endl;
+
   /*
    *saved picure here.
    *
    */
+
+  std::cout <<"requesting a snapshot"<<std::endl;
+  std::promise<std::string> prom;
+  std::future<std::string> fut = prom.get_future();
+  std::thread capture_thread(capture_snapshot, std::move(prom));
+  std::cout<<"[Main] Waiting for snapshot to complete\n";
+  std::string result =fut.get();
+  std::cout<<"[Main] Received snapsot path: "<<result<<std::endl;
+  capture_thread.join();
+
+  //capture_snapshot();
   save_image_to_jpeg(filename.value(),
 decoded_buffer_.get(), width_, height_, 3, 90);
+
   return filename.value();
 }
 

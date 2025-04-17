@@ -7,6 +7,7 @@
 #include <glib/main_loop.h>
 
 #include <cstdio>
+#include <iostream>
 
 // Static instance
 CameraManager& CameraManager::instance() {
@@ -24,6 +25,54 @@ CameraManager::~CameraManager() {
     shutdown();
   }
 }
+
+const std::map<uint32_t, std::string>& CameraManager::getAvailableCameras() const {
+  return camera_nodes_;
+}
+
+// Callback function for detecting cameras
+void CameraManager::on_global(void* data,
+               uint32_t id,
+               uint32_t permissions,
+               const char* type,
+               uint32_t version,
+               const struct spa_dict* props) {
+
+  if (!data) {
+    std::cerr << "[Error] on_global received null data\n";
+    return;
+  }
+
+  std::cout<<"on_global"<<std::endl;
+  if (!props)
+    return;
+  const char* media_class = spa_dict_lookup(props, "media.class");
+  if (!media_class || std::string(media_class) != "Video/Source") return;
+
+  //const char* name = spa_dict_lookup(props, "node.description");
+
+  const char *node_name = spa_dict_lookup(props, "node.description");
+  std::string name = node_name ? node_name : "Unknown";
+
+  auto *self = static_cast<CameraManager *>(data);
+  self->camera_nodes_[id] = name;
+  std::cout << "[+] Camera added: " << name << " (id: " << id << ")\n";
+
+}
+void CameraManager::on_global_remove(void *data, uint32_t id) {
+  if (!data) {
+    std::cerr << "[Error] on_global_remove received null data\n";
+    return;
+  }
+  auto *self = static_cast<CameraManager *>(data);
+  auto it = self->camera_nodes_.find(id);
+  if (it != self->camera_nodes_.end()) {
+    std::cout << "[-] Camera removed: " << it->second << " (id: " << id << ")\n";
+    self->camera_nodes_.erase(it);
+  }
+
+}
+
 
 bool CameraManager::initialize() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -76,6 +125,23 @@ bool CameraManager::initialize() {
           std::fprintf(stderr,
                        "[CameraManager] Could not connect to PW core.\n");
         }
+        pw_registry_ = pw_core_get_registry(pw_core_, PW_VERSION_REGISTRY, 0);
+        static pw_registry_events registry_events = {
+          PW_VERSION_REGISTRY_EVENTS,
+          .global = on_global,
+          .global_remove = on_global_remove,
+      };
+        pw_registry_add_listener(pw_registry_, new spa_hook{}, &registry_events, this);
+
+  /*
+        spa_hook registry_listener;
+        static const pw_registry_events registry_events = {
+          PW_VERSION_REGISTRY_EVENTS,
+          .global = on_global,
+      };
+        pw_registry_add_listener(pw_registry_, &registry_listener, &registry_events,
+                         nullptr);
+*/
       }
     }
   }
