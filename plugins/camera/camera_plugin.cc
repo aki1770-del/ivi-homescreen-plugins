@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include <flutter/plugin_registrar_homescreen.h>
 
 #include <memory>
@@ -31,9 +30,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include "plugins/common/common.h"
-#include "camera_plugin.h"
 #include "CameraManager.h"
+#include "camera_plugin.h"
+#include "plugins/common/common.h"
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -84,10 +83,10 @@ namespace camera_plugin {
 // TODO static constexpr char kResolutionPresetValueUltraHigh[] = "ultraHigh";
 // TODO static constexpr char kResolutionPresetValueMax[] = "max";
 
-//static std::unique_ptr<libcamera::CameraManager> g_camera_manager;
-// static std::vector<std::shared_ptr<CameraContext>> g_cameras;
-// static std::unordered_map<unsigned int, std::shared_ptr<CameraSession>>
-//     g_camera_sessions;
+// static std::unique_ptr<libcamera::CameraManager> g_camera_manager;
+//  static std::vector<std::shared_ptr<CameraContext>> g_cameras;
+//  static std::unordered_map<unsigned int, std::shared_ptr<CameraSession>>
+//      g_camera_sessions;
 
 // static
 void CameraPlugin::RegisterWithRegistrar(
@@ -100,8 +99,7 @@ void CameraPlugin::RegisterWithRegistrar(
 
 CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* messenger)
-    : registrar_(plugin_registrar),
-      messenger_(messenger) {
+    : registrar_(plugin_registrar), messenger_(messenger) {
   if (!CameraManager::instance().initialize()) {
     std::cerr << "Failed to initialize PipeWire manager!\n";
   }
@@ -146,10 +144,10 @@ std::string CameraPlugin::get_camera_lens_facing(
 }
 */
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
-   flutter::EncodableList list;
+  flutter::EncodableList list;
   auto& mgr = CameraManager::instance();
   auto cameras = mgr.getAvailableCameras();
-  for(const auto& [id, name] : cameras) {
+  for (const auto& [id, name] : cameras) {
     std::cout << "Detected camera: " << name << " (ID: " << id << ")\n";
     list.emplace_back(flutter::EncodableValue(std::move(std::to_string(id))));
   }
@@ -342,29 +340,11 @@ std::optional<FlutterError> CameraPlugin::Dispose(const int64_t camera_id) {
 void CameraPlugin::TakePicture(
     const int64_t camera_id,
     const std::function<void(ErrorOr<std::string> reply)> result) {
-
   SPDLOG_DEBUG("[camera_plugin] Take Picture: {}", camera_id);
   auto camera_stream = TextureId_CameraStream[camera_id];
 
-  //std::string str = "Take Picture ";
+  // std::string str = "Take Picture ";
   result(camera_stream->takePicture());
-
-  //result(camera->takePicture());
-  // const auto camera =
-  //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  // const auto camera = g_camera_sessions[camera_id];
-  // camera->pausePreview();
-  /*
-    SPDLOG_DEBUG("[camera_plugin] pause the camera: {}");
-
-    libcamera::StreamRole stream_roles = { libcamera::StreamRole::StillCapture
-    };
-    //std::unique_ptr<libcamera::CameraConfiguration> config =
-      //camera->generateConfiguration(stream_roles);
-    //camera->
-    camera->resumePreview();
-  */
-  // result(camera->takePicture());
 }
 
 void CameraPlugin::StartVideoRecording(
@@ -392,7 +372,6 @@ void CameraPlugin::StopVideoRecording(
 void CameraPlugin::PausePreview(
     const int64_t camera_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
-
   SPDLOG_DEBUG("[camera_plugin] PausePreview");
   auto camera_stream = TextureId_CameraStream[camera_id];
   camera_stream->PauseStream();
@@ -406,5 +385,5 @@ void CameraPlugin::ResumePreview(
   auto camera_stream = TextureId_CameraStream[camera_id];
   camera_stream->ResumeStream();
   result({});
-  }
+}
 }  // namespace camera_plugin

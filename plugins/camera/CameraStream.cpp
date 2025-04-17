@@ -1,20 +1,20 @@
 //
 // Created by tcna on 3/24/25.
 //
+#include "CameraStream.h"
 #include <GLES2/gl2.h>
-#include <cstdio>
 #include <jpeglib.h>
 #include <spdlog/spdlog.h>
 #include <string/string_tools.h>
 #include <time/time_tools.h>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <sstream>
-#include "tools/command.h"
-#include "CameraStream.h"
 #include "CameraManager.h"
+#include "tools/command.h"
 static constexpr char kPictureCaptureExtension[] = "jpeg";
 
 //------------------------------------------------------------------------------
@@ -407,7 +407,8 @@ void CameraStream::OnStreamStateChanged(void* data,
                                         const char* error) {
   std::fprintf(stderr,
                "[CameraStream] stream state changed from %s to %s (%s)\n",
-               StreamStateToString(old_state), StreamStateToString(new_state), (error ? error : "no error"));
+               StreamStateToString(old_state), StreamStateToString(new_state),
+               (error ? error : "no error"));
 }
 
 void CameraStream::OnStreamProcess(void* data) {
@@ -418,7 +419,7 @@ void CameraStream::OnStreamProcess(void* data) {
 }
 
 void CameraStream::PauseStream() {
-  if(!pw_stream_)
+  if (!pw_stream_)
     return;
 
   auto& mgr = CameraManager::instance();
@@ -434,14 +435,12 @@ void CameraStream::PauseStream() {
   }
 
   pw_thread_loop_lock(loop);
-  {
-    pw_stream_set_active(pw_stream_, false);
-  }
+  { pw_stream_set_active(pw_stream_, false); }
   pw_thread_loop_unlock(loop);
 }
 
 void CameraStream::ResumeStream() {
-  if(!pw_stream_)
+  if (!pw_stream_)
     return;
 
   auto& mgr = CameraManager::instance();
@@ -457,9 +456,7 @@ void CameraStream::ResumeStream() {
   }
 
   pw_thread_loop_lock(loop);
-  {
-    pw_stream_set_active(pw_stream_, true);
-  }
+  { pw_stream_set_active(pw_stream_, true); }
   pw_thread_loop_unlock(loop);
 }
 std::optional<std::string> CameraStream::GetFilePathForPicture() {
@@ -472,19 +469,17 @@ std::optional<std::string> CameraStream::GetFilePathForPicture() {
   std::filesystem::path path(
       plugin_common::StringTools::trim(picture_path, "\n"));
 
-  path /= "PhotoCapture_" + plugin_common::TimeTools::GetCurrentTimeString() + "." +
-        kPictureCaptureExtension;
+  path /= "PhotoCapture_" + plugin_common::TimeTools::GetCurrentTimeString() +
+          "." + kPictureCaptureExtension;
   return path;
 }
 
 std::string CameraStream::takePicture() {
   auto filename = GetFilePathForPicture();
-  std::cout << "[CameraStream::takePicture()]: Running in thread ID: "<<std::this_thread::get_id()<<std::endl;
-  save_image_to_jpeg(filename.value(),
-decoded_buffer_.get(), width_, height_, 3, 90);
+  std::cout << "[CameraStream::takePicture()]: Running in thread ID: "
+            << std::this_thread::get_id() << std::endl;
+  save_image_to_jpeg(filename.value(), decoded_buffer_.get(), width_, height_,
+                     3, 90);
 
   return filename.value();
 }
-
-
-

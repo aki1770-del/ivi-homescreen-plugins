@@ -7,15 +7,15 @@
 
 #include <GLES2/gl2.h>
 
+#include <flutter/plugin_registrar_homescreen.h>
+#include <flutter/texture_registrar.h>
+#include <pipewire/pipewire.h>  // forward-decl is risky; better to include full
+#include <spa/param/video/format-utils.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <flutter/plugin_registrar_homescreen.h>
-#include <flutter/texture_registrar.h>
-#include <pipewire/pipewire.h>  // forward-decl is risky; better to include full
-#include <spa/param/video/format-utils.h>
 
 /**
  * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter

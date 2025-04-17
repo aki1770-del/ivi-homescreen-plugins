@@ -25,10 +25,10 @@
 #include <pipewire/properties.h>
 #include <spa/param/param.h>
 #include <spa/param/video/format-utils.h>
-#include "plugins/common/common.h"
+#include "CameraStream.h"
 #include "event_channel.h"
 #include "messages.g.h"
-#include "CameraStream.h"
+#include "plugins/common/common.h"
 
 namespace camera_plugin {
 
@@ -103,7 +103,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
                                       pw_stream_state old_state,
                                       pw_stream_state new_state,
                                       const char* error);
-  //void start_camera_stream(const std::string& nodeID);
+  // void start_camera_stream(const std::string& nodeID);
   void handle_stream();
 
   struct preview {
