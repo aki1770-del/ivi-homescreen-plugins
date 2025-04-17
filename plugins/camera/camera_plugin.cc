@@ -14,16 +14,11 @@
  * limitations under the License.
  */
 
-#include "camera_plugin.h"
 
 #include <flutter/plugin_registrar_homescreen.h>
 
 #include <memory>
 #include <unordered_map>
-
-#include <libcamera/libcamera.h>
-
-#include "plugins/common/common.h"
 
 #include <SDL2/SDL.h>
 #include <glib/main_loop.h>
@@ -36,9 +31,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
-
+#include "plugins/common/common.h"
+#include "camera_plugin.h"
 #include "CameraManager.h"
-#include "camera_context.h"
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -89,7 +84,7 @@ namespace camera_plugin {
 // TODO static constexpr char kResolutionPresetValueUltraHigh[] = "ultraHigh";
 // TODO static constexpr char kResolutionPresetValueMax[] = "max";
 
-static std::unique_ptr<libcamera::CameraManager> g_camera_manager;
+//static std::unique_ptr<libcamera::CameraManager> g_camera_manager;
 // static std::vector<std::shared_ptr<CameraContext>> g_cameras;
 // static std::unordered_map<unsigned int, std::shared_ptr<CameraSession>>
 //     g_camera_sessions;
@@ -106,10 +101,7 @@ void CameraPlugin::RegisterWithRegistrar(
 CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* messenger)
     : registrar_(plugin_registrar),
-      messenger_(messenger),
-      io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
-      work_(io_context_->get_executor()),
-      strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
+      messenger_(messenger) {
   if (!CameraManager::instance().initialize()) {
     std::cerr << "Failed to initialize PipeWire manager!\n";
   }
@@ -118,7 +110,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
 CameraPlugin::~CameraPlugin() {
   CameraManager::instance().shutdown();
 }
-
+/*
 void CameraPlugin::camera_added(const std::shared_ptr<libcamera::Camera>& cam) {
   spdlog::debug("[camera_plugin] Camera added: {}", cam->id());
 }
@@ -152,7 +144,7 @@ std::string CameraPlugin::get_camera_lens_facing(
   }
   return std::move(lensFacing);
 }
-
+*/
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
    flutter::EncodableList list;
   auto& mgr = CameraManager::instance();

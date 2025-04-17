@@ -12,7 +12,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/texture_registrar.h>
 #include <pipewire/pipewire.h>  // forward-decl is risky; better to include full

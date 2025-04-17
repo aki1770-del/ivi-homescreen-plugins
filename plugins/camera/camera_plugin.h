@@ -17,28 +17,18 @@
 #ifndef FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
 #define FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
 
-#include "CameraStream.h"
-
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
-
-#include <libcamera/camera.h>
-
-// #include "camera_session.h"
-
-#include "camera_context.h"
-
-#include "event_channel.h"
-#include "messages.g.h"
-// #include "nv12.h"
-#include "plugins/common/common.h"
-
 #include <flutter/plugin_registrar_homescreen.h>
 #include <pipewire/core.h>
 #include <pipewire/pipewire.h>
 #include <pipewire/properties.h>
 #include <spa/param/param.h>
 #include <spa/param/video/format-utils.h>
+#include "plugins/common/common.h"
+#include "event_channel.h"
+#include "messages.g.h"
+#include "CameraStream.h"
 
 namespace camera_plugin {
 
@@ -155,15 +145,12 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   // CameraName_CameraStream;
 
   std::thread thread_;
-  std::unique_ptr<asio::io_context> io_context_;
-  asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
-  std::unique_ptr<asio::io_context::strand> strand_;
 
-  static void camera_added(const std::shared_ptr<libcamera::Camera>& cam);
-  static void camera_removed(const std::shared_ptr<libcamera::Camera>& cam);
+  //static void camera_added(const std::shared_ptr<libcamera::Camera>& cam);
+  //static void camera_removed(const std::shared_ptr<libcamera::Camera>& cam);
 
-  static std::string get_camera_lens_facing(
-      const std::shared_ptr<libcamera::Camera>& camera);
+  //static std::string get_camera_lens_facing(
+  //    const std::shared_ptr<libcamera::Camera>& camera);
 
   static std::optional<std::string> GetFilePathForPicture();
   static std::optional<std::string> GetFilePathForVideo();

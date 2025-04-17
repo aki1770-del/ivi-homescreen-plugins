@@ -15,33 +15,26 @@
 #
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(CAMERA IMPORTED_TARGET REQUIRED libcamera)
 pkg_check_modules(PIPEWIRE IMPORTED_TARGET REQUIRED libpipewire-0.3)
-
-
-include(FindJPEG)
+pkg_check_modules(JPEG IMPORTED_TARGET REQUIRED libjpeg)
 
 add_library(plugin_camera STATIC
         camera_plugin_c_api.cc
         camera_plugin.cc
-        camera_context.cc
         messages.g.cpp
         CameraStream.cpp
         CameraStream.h
         CameraManager.cpp
         CameraManager.h
-
 )
 
 target_include_directories(plugin_camera PUBLIC
         include
-        ${JPEG_INCLUDE_DIRS}
 )
 
 target_link_libraries(plugin_camera PUBLIC
-        PkgConfig::CAMERA
         PkgConfig::PIPEWIRE
-        ${JPEG_LIBRARIES}
+        PkgConfig::JPEG
         flutter
         platform_homescreen
         plugin_common

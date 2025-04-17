@@ -1,23 +1,20 @@
 //
 // Created by tcna on 3/24/25.
 //
-
-#include "CameraStream.h"
-#include "CameraManager.h"
-
 #include <GLES2/gl2.h>
+#include <cstdio>
 #include <jpeglib.h>
 #include <spdlog/spdlog.h>
 #include <string/string_tools.h>
 #include <time/time_tools.h>
-
-#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <future>
 #include <iostream>
 #include <sstream>
 #include "tools/command.h"
+#include "CameraStream.h"
+#include "CameraManager.h"
 static constexpr char kPictureCaptureExtension[] = "jpeg";
 
 //------------------------------------------------------------------------------
