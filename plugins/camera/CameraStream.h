@@ -58,9 +58,9 @@ class CameraStream {
    * Get the Flutter texture ID associated with this stream.
    * Use this ID in Flutter's Texture() widget to display the camera feed.
    */
-  GLuint texture_id() const { return texture_id_; }
+  [[nodiscard]] GLuint texture_id() const { return texture_id_; }
 
-  std::string camera_name() const { return camera_name_; }
+  [[nodiscard]] std::string camera_name() const { return camera_name_; }
   int camera_width() const { return width_; }
   int camera_height() const { return height_; }
   static std::optional<std::string> GetFilePathForPicture();
@@ -75,10 +75,6 @@ class CameraStream {
   // The listener hook must stay in scope; never store it on the stack.
   spa_hook stream_listener_;
 
-  // Flutter texture integration
-  // flutter::TextureRegistrar*               texture_registrar_ = nullptr;
-  // std::unique_ptr<flutter::TextureVariant> texture_;
-  // int64_t                                  texture_id_ = -1;
   GLuint texture_id_{};
   GLuint framebuffer_{};
 
@@ -95,7 +91,6 @@ class CameraStream {
   int height_ = 480;
 
   // Private methods
-  //void RunPipeWireLoop();
   void HandleProcess();
 
   // Camera name

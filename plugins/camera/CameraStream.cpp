@@ -200,7 +200,7 @@ bool CameraStream::Start(const std::string& nodeID) {
         /* .state_changed  = */ OnStreamStateChanged,
         /* .control_info   = */ nullptr,
         /* .io_changed     = */ nullptr,
-        /* .param_changed  = */ OnStreamParamChanged,
+        /* .param_changed  = */ nullptr,
         /* .add_buffer     = */ nullptr,
         /* .remove_buffer  = */ nullptr,
         /* .process        = */ OnStreamProcess,
@@ -341,23 +341,15 @@ void CameraStream::HandleProcess() {
   auto* compressedData = static_cast<uint8_t*>(buf->buffer->datas[0].data);
   size_t compressedSize = buf->buffer->datas[0].chunk->size;
 
-  decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
-  std::cout << "size of decoded_buffer_: " << sizeof(decoded_buffer_)
-            << std::endl;
-  std::cout << "compressedSize: " << compressedSize << std::endl;
-
-  std::memset(decoded_buffer_.get(), 0, width_ * height_ * 3);
-
+  if (!decoded_buffer_) {
+    decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
+  }
   int ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(),
                          width_, height_);
   if (ret == 0) {
     {
       std::lock_guard<std::mutex> lock(frame_mutex_);
       new_frame_available_ = true;
-      std::cout << "new_frame_available_ = true" << std::endl;
-      std::cout << "CameraStream::HandleProcess(): Running in thread ID:"<<std::this_thread::get_id()<<std::endl;
-      SPDLOG_TRACE("[camera_plugin] Texture::blit_fb");
-
       registrar_->texture_registrar()->TextureMakeCurrent();
       glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
       glViewport(0, 0, width_, height_);
@@ -392,33 +384,36 @@ void CameraStream::HandleProcess() {
 //------------------------------------------------------------------------------
 // Static callback proxies
 //------------------------------------------------------------------------------
+const char* StreamStateToString(enum pw_stream_state state) {
+  switch (state) {
+    case PW_STREAM_STATE_ERROR:
+      return "PW_STREAM_STATE_ERROR";
+    case PW_STREAM_STATE_UNCONNECTED:
+      return "PW_STREAM_STATE_UNCONNECTED";
+    case PW_STREAM_STATE_CONNECTING:
+      return "PW_STREAM_STATE_CONNECTING";
+    case PW_STREAM_STATE_PAUSED:
+      return "PW_STREAM_STATE_PAUSED";
+    case PW_STREAM_STATE_STREAMING:
+      return "PW_STREAM_STATE_STREAMING";
+    default:
+      return "PW_STREAM_STATE_UNKNOWN";
+  }
+}
+
 void CameraStream::OnStreamStateChanged(void* data,
                                         pw_stream_state old_state,
                                         pw_stream_state new_state,
                                         const char* error) {
-  auto* self = reinterpret_cast<CameraStream*>(data);
-  (void)self;  // not used in this minimal example
   std::fprintf(stderr,
-               "[CameraStream] stream state changed from %d to %d (%s)\n",
-               old_state, new_state, (error ? error : "no error"));
-}
-
-void CameraStream::OnStreamParamChanged(void* data,
-                                        uint32_t id,
-                                        const spa_pod* param) {
-  auto* self = reinterpret_cast<CameraStream*>(data);
-  (void)self;
-  std::fprintf(stderr, "[CameraStream] OnStreamParamChanged: id=%u\n", id);
+               "[CameraStream] stream state changed from %s to %s (%s)\n",
+               StreamStateToString(old_state), StreamStateToString(new_state), (error ? error : "no error"));
 }
 
 void CameraStream::OnStreamProcess(void* data) {
   auto* self = reinterpret_cast<CameraStream*>(data);
   (void)self;
   // handle new frame data here...
-  // e.g., pw_stream_dequeue_buffer, decode MJPEG, etc.
-  std::fprintf(stderr, "[CameraStream] OnStreamProcess: new frame!\n");
-  // std::cout << self->camera_height()<<std::endl;
-
   self->HandleProcess();
 }
 
@@ -481,34 +476,10 @@ std::optional<std::string> CameraStream::GetFilePathForPicture() {
         kPictureCaptureExtension;
   return path;
 }
-void capture_snapshot(std::promise<std::string> prom) {
-  std::cout << "[capture_snapshot]: Running in thread ID: "<<std::this_thread::get_id()<<std::endl;
 
-  std::cout<<"waiting for next frame\n";
-  std::this_thread::sleep_for(std::chrono::seconds(5));
-  std::string path = "/tmp/snapshot_123.png";
-  std::cout << "[camera] Snapshot saved to "<<path<<std::endl;
-  prom.set_value(path);
-}
 std::string CameraStream::takePicture() {
   auto filename = GetFilePathForPicture();
   std::cout << "[CameraStream::takePicture()]: Running in thread ID: "<<std::this_thread::get_id()<<std::endl;
-
-  /*
-   *saved picure here.
-   *
-   */
-
-  std::cout <<"requesting a snapshot"<<std::endl;
-  std::promise<std::string> prom;
-  std::future<std::string> fut = prom.get_future();
-  std::thread capture_thread(capture_snapshot, std::move(prom));
-  std::cout<<"[Main] Waiting for snapshot to complete\n";
-  std::string result =fut.get();
-  std::cout<<"[Main] Received snapsot path: "<<result<<std::endl;
-  capture_thread.join();
-
-  //capture_snapshot();
   save_image_to_jpeg(filename.value(),
 decoded_buffer_.get(), width_, height_, 3, 90);
 

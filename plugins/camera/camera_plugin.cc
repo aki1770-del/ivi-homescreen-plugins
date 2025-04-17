@@ -396,18 +396,6 @@ void CameraPlugin::PausePreview(
   SPDLOG_DEBUG("[camera_plugin] PausePreview");
   auto camera_stream = TextureId_CameraStream[camera_id];
   camera_stream->PauseStream();
-
-  // const auto camera =
-  //     g_camera_sessions[static_cast<unsigned long>(camera_id - 1)];
-  /*
-  const auto camera = g_camera_sessions[camera_id];
-  if(camera) {
-    SPDLOG_DEBUG("[camera_plugin] texture_id: {}", camera->get_texture_id());
-    camera->pausePreview();
-  }
-  else
-    SPDLOG_DEBUG("[camera_plugin] no camera session was found!!");
-*/
   result({});
 }
 
@@ -418,5 +406,5 @@ void CameraPlugin::ResumePreview(
   auto camera_stream = TextureId_CameraStream[camera_id];
   camera_stream->ResumeStream();
   result({});
-}
+  }
 }  // namespace camera_plugin
