@@ -39,7 +39,3 @@ target_link_libraries(plugin_camera PUBLIC
         platform_homescreen
         plugin_common
 )
-
-if (JPEG_FOUND)
-    target_compile_definitions(plugin_camera PUBLIC ENABLE_JPEG)
-endif ()
