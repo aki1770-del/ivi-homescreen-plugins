@@ -3,9 +3,7 @@
 //
 
 #include "CameraManager.h"
-
 #include <glib/main_loop.h>
-
 #include <cstdio>
 #include <iostream>
 
@@ -43,13 +41,10 @@ void CameraManager::on_global(void* data,
     return;
   }
 
-  std::cout<<"on_global"<<std::endl;
   if (!props)
     return;
   const char* media_class = spa_dict_lookup(props, "media.class");
   if (!media_class || std::string(media_class) != "Video/Source") return;
-
-  //const char* name = spa_dict_lookup(props, "node.description");
 
   const char *node_name = spa_dict_lookup(props, "node.description");
   std::string name = node_name ? node_name : "Unknown";
@@ -70,7 +65,6 @@ void CameraManager::on_global_remove(void *data, uint32_t id) {
     std::cout << "[-] Camera removed: " << it->second << " (id: " << id << ")\n";
     self->camera_nodes_.erase(it);
   }
-
 }
 
 
@@ -86,8 +80,6 @@ bool CameraManager::initialize() {
   pw_init(nullptr, nullptr);
 
   // 2) Create main loop, context, and core
-  // plugin_common_glib::MainLoop::GetInstance();
-
   pw_thread_loop_ = pw_thread_loop_new("camera-loop", 0);
   if (!pw_thread_loop_) {
     std::fprintf(stderr, "[CameraManager] Failed to create pw_main_loop.\n");
@@ -132,16 +124,6 @@ bool CameraManager::initialize() {
           .global_remove = on_global_remove,
       };
         pw_registry_add_listener(pw_registry_, new spa_hook{}, &registry_events, this);
-
-  /*
-        spa_hook registry_listener;
-        static const pw_registry_events registry_events = {
-          PW_VERSION_REGISTRY_EVENTS,
-          .global = on_global,
-      };
-        pw_registry_add_listener(pw_registry_, &registry_listener, &registry_events,
-                         nullptr);
-*/
       }
     }
   }

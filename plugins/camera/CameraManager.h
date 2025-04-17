@@ -73,8 +73,7 @@ class CameraManager {
   static void on_global_remove(void *data, uint32_t id);
 
   bool initialized_ = false;
-  // pw_main_loop*  pw_loop_     = nullptr;
-  pw_thread_loop* pw_thread_loop_ = nullptr;  // Instead of pw_main_loop
+  pw_thread_loop* pw_thread_loop_ = nullptr;
   pw_context* pw_context_ = nullptr;
   pw_core* pw_core_ = nullptr;
   pw_registry* pw_registry_ = nullptr;

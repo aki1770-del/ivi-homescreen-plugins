@@ -140,17 +140,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   std::map<std::string, std::shared_ptr<CameraStream>> CameraName_CameraStream;
   std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
   std::map<std::string, bool> CameraName_Created;
-
-  // std::map<std::string, std::shared_ptr<CameraStream>>
-  // CameraName_CameraStream;
-
   std::thread thread_;
-
-  //static void camera_added(const std::shared_ptr<libcamera::Camera>& cam);
-  //static void camera_removed(const std::shared_ptr<libcamera::Camera>& cam);
-
-  //static std::string get_camera_lens_facing(
-  //    const std::shared_ptr<libcamera::Camera>& camera);
 
   static std::optional<std::string> GetFilePathForPicture();
   static std::optional<std::string> GetFilePathForVideo();
