@@ -96,7 +96,7 @@ class CameraStream {
   int height_ = 480;
 
   // Private methods
-  void RunPipeWireLoop();
+  //void RunPipeWireLoop();
   void HandleProcess();
 
   // Camera name

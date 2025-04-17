@@ -113,7 +113,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
                                       pw_stream_state old_state,
                                       pw_stream_state new_state,
                                       const char* error);
-  void start_camera_stream(const std::string& nodeID);
+  //void start_camera_stream(const std::string& nodeID);
   void handle_stream();
 
   struct preview {
