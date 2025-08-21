@@ -15,8 +15,10 @@
  */
 
 #include "CameraManager.h"
-#include <spdlog/spdlog.h>
+
 #include <iostream>
+
+#include "plugins/common/common.h"
 
 // Static instance
 CameraManager& CameraManager::instance() {
@@ -95,8 +97,7 @@ bool CameraManager::initialize() {
   }
 
   // 3) Start the loop in its own thread
-  int ret = pw_thread_loop_start(pw_thread_loop_);
-  if (ret != 0) {
+  if (int ret = pw_thread_loop_start(pw_thread_loop_); ret != 0) {
     spdlog::error("[CameraManager] failed to start pw_thread_loop (err={})",
                   ret);
     pw_thread_loop_destroy(pw_thread_loop_);
@@ -144,6 +145,9 @@ bool CameraManager::initialize() {
     return false;
   }
 
+  graph_ = std::make_unique<PipewireGraph>(pw_thread_loop_, pw_context_, pw_core_, pw_registry_);
+  graph_->initialize();
+
   initialized_ = true;
   return true;
 }
@@ -154,6 +158,8 @@ void CameraManager::shutdown() {
   if (!initialized_) {
     return;
   }
+
+  graph_->shutdown();
 
   // 1) Stop the background thread loop
   pw_thread_loop_stop(pw_thread_loop_);

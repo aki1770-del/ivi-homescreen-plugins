@@ -25,6 +25,8 @@
 #include <mutex>
 #include <thread>
 
+#include "PipewireGraph.h"
+
 /**
  * @brief A singleton manager that initializes and owns the shared
  * PipeWire main loop, context, and core connection.
@@ -92,6 +94,8 @@ class CameraManager {
   pw_registry* pw_registry_ = nullptr;
   mutable std::mutex mutex_;
   std::map<uint32_t, std::string> camera_nodes_;
+
+  std::unique_ptr<PipewireGraph> graph_;
 };
 
 #endif  // CAMERAMANAGER_H
