@@ -22,12 +22,11 @@
 #include <core/scene/camera/touch_pair.h>
 #include <core/scene/geometry/ray.h>
 
-#include <cstdint>
-#include <event_channel.h>
 #include <filament/Engine.h>
 #include <flutter_desktop_plugin_registrar.h>
 #include <gltfio/AssetLoader.h>
 #include <viewer/Settings.h>
+#include <wayland/presentation.h>
 
 namespace plugin_filament_view {
 
@@ -55,7 +54,7 @@ class ViewTarget {
       if (initialized_) return;
 
       initialized_ = true;
-      OnFrame(this, nullptr, 0);
+      OnPresented(this, 0, 0, 0, 0, 0, false);
     }
 
     /*
@@ -63,7 +62,7 @@ class ViewTarget {
      */
     void InitializeFilamentInternals(uint32_t width, uint32_t height);
     [[nodiscard]] ::filament::View* getFilamentView() const { return fview_; }
-    filament::gltfio::FilamentAsset* getAsset() { return asset_; }
+    filament::gltfio::FilamentAsset* getAsset() const { return asset_; }
     void setAnimator(filament::gltfio::Animator* animator) { fanimator_ = animator; }
 
     /*
@@ -133,7 +132,7 @@ class ViewTarget {
     void _setProjection(const Projection& projection);
     void _setLens(const LensProjection& lensProjection);
     /// Sets the eyes view matrices for stereoscopic rendering (if applicable).
-    void _setEyes(const double ipd);
+    void _setEyes(double ipd);
 
     /*
      *  Wayland
@@ -162,7 +161,7 @@ class ViewTarget {
     } native_window_{};
 
     ::filament::SwapChain* fswapChain_{};
-    std::mutex frameLock_;
+    std::atomic_flag frameBusy_ = ATOMIC_FLAG_INIT;
     ::filament::View* fview_{};
 
     // todo to be moved?
@@ -173,7 +172,17 @@ class ViewTarget {
       std::initializer_list<std::pair<const char*, flutter::EncodableValue>> args
     );
 
-    static void OnFrame(void* data, wl_callback* callback, uint32_t time);
+    Presentation::FeedbackCallback presentation_callback_;
+
+    static void OnPresented(
+      void* user_data,
+      uint64_t tv_sec,
+      uint32_t tv_nsec,
+      uint64_t seq,
+      uint32_t refresh,
+      uint32_t flags,
+      bool discarded
+    );
 
     static const wl_callback_listener frame_listener;
     int _prev_fps_counter = 0;
@@ -185,6 +194,8 @@ class ViewTarget {
     void setupView(uint32_t width, uint32_t height);
 
     uint32_t m_LastTime = 0;
+
+    static uint32_t get_absolute_ms(uint64_t tv_sec, uint32_t tv_nsec);
 };
 
 }  // namespace plugin_filament_view

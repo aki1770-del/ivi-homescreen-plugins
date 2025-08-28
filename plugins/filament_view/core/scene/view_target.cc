@@ -16,7 +16,6 @@
 
 #include "view_target.h"
 
-#include <core/include/additionalmath.h>
 #include <core/include/literals.h>
 #include <core/systems/derived/filament_system.h>
 #include <core/systems/derived/transform_system.h>
@@ -42,6 +41,7 @@
 #include <utility>
 #include <view/flutter_view.h>
 #include <wayland/display.h>
+#include <wayland/presentation.h>
 
 using flutter::EncodableList;
 using flutter::EncodableMap;
@@ -159,6 +159,11 @@ void ViewTarget::setupWaylandSubsurface() {
 
   wl_subsurface_place_below(subsurface_, parent_surface_);
   wl_subsurface_set_desync(subsurface_);
+
+  presentation_callback_ = OnPresented;
+
+  const auto present = &Presentation::GetInstance();
+  present->RequestFeedback(surface_, presentation_callback_, this);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -525,16 +530,13 @@ void ViewTarget::SendFrameViewCallback(
   viewTargetSystem->SendDataToEventChannel(encodableMap);
 }
 
-/////////////////////////////////////////////////////////////////////////
-const wl_callback_listener ViewTarget::frame_listener = {.done = OnFrame};
-
 /**
  * Renders the model and updates the Filament camera.
  *
  * @param time - timestamp of running program
  * rendered
  */
-void ViewTarget::DrawFrame(const uint32_t time) {
+void ViewTarget::DrawFrame(uint32_t time) {
   if (m_LastTime == 0) {
     m_LastTime = time;
   }
@@ -550,7 +552,6 @@ void ViewTarget::DrawFrame(const uint32_t time) {
     deltaTime += 1.0;
   }
 
-  float fps;
   if (_last_fps_reset_time == 0) {
     _last_fps_reset_time = time;
     // calculate from delta time and round to int
@@ -566,7 +567,7 @@ void ViewTarget::DrawFrame(const uint32_t time) {
     _fps_counter = 0;
   }
 
-  fps = static_cast<float>(_prev_fps_counter);
+  auto fps = static_cast<float>(_prev_fps_counter);
 
   // spdlog::debug("[{}] deltaTime: {:.2f}ms", __FUNCTION__, deltaTime * 1000.0f);
 
@@ -647,10 +648,37 @@ void ViewTarget::DrawFrame(const uint32_t time) {
 }
 
 ////////////////////////////////////////////////////////////////////////////
-void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time) {
-  // lock surface
-  const auto obj = static_cast<ViewTarget*>(data);
-  std::lock_guard<std::mutex> lock(obj->frameLock_);
+uint32_t ViewTarget::get_absolute_ms(const uint64_t tv_sec, const uint32_t tv_nsec) {
+  using namespace std::chrono;
+  static nanoseconds prev{};
+  static bool has_prev = false;
+
+  const auto now = seconds(tv_sec) + nanoseconds(tv_nsec);
+  uint32_t rel_ms = 0;
+  if (has_prev) {
+    rel_ms = static_cast<uint32_t>(duration_cast<milliseconds>(now - prev).count());
+  }
+  prev = now;
+  has_prev = true;
+  return rel_ms;
+}
+
+////////////////////////////////////////////////////////////////////////////
+void ViewTarget::OnPresented(
+  void* user_data,
+  uint64_t tv_sec,
+  uint32_t tv_nsec,
+  uint64_t seq,
+  uint32_t refresh,
+  uint32_t flags,
+  bool discarded
+) {
+  auto obj = static_cast<ViewTarget*>(user_data);
+
+  // If already busy, skip this frame
+  if (obj->frameBusy_.test_and_set(std::memory_order_acquire)) {
+    return;
+  }
 
   // Wait for previous frame to complete
   // NOTE: this HAS to be done here, because the CallEvent above needs to complete on this thread
@@ -661,35 +689,30 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
   const auto promise = std::make_shared<std::promise<void>>();
   obj->framePromise = promise;
 
-  // TODO: there's a 0.05ms lag when posting the task - SHOULDN'T HAPPEN!
-  // NOTE: let's use separate strands for work and rendering?
-  post(*ECSManager::GetInstance()->getStrand(), [data, obj, callback, time, promise] {
-    // spdlog::debug("=== (wl) callback start ===");
-    obj->callback_ = nullptr;
+  post(
+    *ECSManager::GetInstance()->getStrand(),
+    [obj, tv_sec, tv_nsec, seq, refresh, flags, discarded, promise] {
+      // auto abs_ms = get_absolute_ms(tv_sec, tv_nsec);
+      const uint32_t timestamp_ms = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()
+      ).count());
 
-    // std::lock_guard<std::mutex> lock(obj->frameLock_);
-    if (callback) {
-      wl_callback_destroy(callback);
+      spdlog::info(
+        "Presentation feedback: timestamp_ms={}, tv_sec={}, tv_nsec={}, seq={}, refresh={}, flags={}, discarded={}",
+        timestamp_ms, tv_sec, tv_nsec, seq, refresh, flags, discarded
+      );
+
+      const auto presentation = &Presentation::GetInstance();
+      presentation->RequestFeedback(obj->surface_, obj->presentation_callback_, obj);
+
+      obj->DrawFrame(timestamp_ms);
+
+      promise->set_value();
+
+      // Mark frame as not busy
+      obj->frameBusy_.clear(std::memory_order_release);
     }
-
-    // spdlog::debug("=== (wl) surface frame ===");
-    obj->callback_ = wl_surface_frame(obj->surface_);
-    wl_callback_add_listener(obj->callback_, &ViewTarget::frame_listener, data);
-
-    obj->DrawFrame(time);
-
-    // Z-Order
-    // These do not need <seem> to need to be called every frame.
-    // wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
-    // spdlog::debug("=== (wl) subsurface position ===");
-    // wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
-
-    // spdlog::debug("=== (wl) surface commit ===");
-    // NOTE: DO NOT CALL wl_surface_commit, it already happens elsewhere
-
-    // spdlog::debug("=== (wl) callback end ===");
-    promise->set_value();
-  });
+  );
 
   // DON'T wait for the future here (see above in this method)
 }
