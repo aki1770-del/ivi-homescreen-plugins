@@ -39,6 +39,8 @@ class ViewTarget {
     static constexpr size_t kNullViewId = -1;
     const size_t id;
 
+    std::shared_ptr<std::promise<void>> framePromise;
+
     ViewTarget(size_t id, int32_t top, int32_t left, FlutterDesktopEngineState* state);
 
     ~ViewTarget();

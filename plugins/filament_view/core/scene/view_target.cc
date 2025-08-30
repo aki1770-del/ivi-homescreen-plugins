@@ -24,6 +24,8 @@
 #include <core/systems/ecs.h>
 #include <core/utils/vectorutils.h>
 
+#include <filament_view_plugin.h>
+
 #include <filament/Renderer.h>
 #include <filament/SwapChain.h>
 #include <filament/View.h>
@@ -569,7 +571,10 @@ void ViewTarget::DrawFrame(const uint32_t time) {
   // ECS Update
   const auto cpuUpdateStart = std::chrono::steady_clock::now();
   ecs->update(deltaTime);
-  const auto cpuUpdateDuration = std::chrono::steady_clock::now() - cpuUpdateStart;
+  double cpuFrametime = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - cpuUpdateStart
+  )
+                          .count();
   // spdlog::debug(
   //   "[{}] CPU frametime: {:.2f}ms", __FUNCTION__,
   //   std::chrono::duration<double, std::milli>(cpuUpdateDuration).count()
@@ -593,23 +598,30 @@ void ViewTarget::DrawFrame(const uint32_t time) {
     // spdlog::error("[{}] BEGINFRAME FAILED!", __FUNCTION__);
   }
 
-  const auto gpuDrawDuration = std::chrono::steady_clock::now() - gpuDrawStart;
+  double gpuFrametime = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - gpuDrawStart
+  )
+                          .count();
 
-  SendFrameViewCallback(
+  const auto scriptStart = std::chrono::steady_clock::now();
+
+  // spdlog::debug("[{}] Calling Script event: preRenderFrame", __FUNCTION__);
+  const auto scriptFuture = FilamentViewPlugin::CallEvent(
     kPreRenderFrame,
     {//
      std::make_pair(kParam_DeltaTime, EncodableValue(deltaTime)),
      std::make_pair(kParam_FPS, EncodableValue(fps)),
-     std::make_pair(
-       kParam_cpuFrametime,
-       EncodableValue(std::chrono::duration<double, std::milli>(cpuUpdateDuration).count())
-     ),
-     std::make_pair(
-       kParam_gpuFrametime,
-       EncodableValue(std::chrono::duration<double, std::milli>(gpuDrawDuration).count())
-     )
+     std::make_pair(kParam_cpuFrametime, EncodableValue(cpuFrametime)),
+     std::make_pair(kParam_gpuFrametime, EncodableValue(gpuFrametime))
     }
   );
+
+  scriptFuture.wait();
+  const auto scriptDuration = std::chrono::steady_clock::now() - scriptStart;
+  // spdlog::debug(
+  //   "[{}] Script frametime: {:.2f}ms", __FUNCTION__,
+  //   std::chrono::duration<double, std::milli>(scriptDuration).count()
+  // );
 
   // spdlog::debug(
   //   "[{}] GPU frametime: {:.2f}ms", __FUNCTION__,
@@ -625,9 +637,14 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
   const auto obj = static_cast<ViewTarget*>(data);
   std::lock_guard<std::mutex> lock(obj->frameLock_);
 
+  // Wait for previous frame to complete
+  // NOTE: this HAS to be done here, because the CallEvent above needs to complete on this thread
+  //       so we need to give the event loop a chance to process it
+  if (!!obj->framePromise) obj->framePromise->get_future().wait();
+
   // Post and await promise
   const auto promise = std::make_shared<std::promise<void>>();
-  const auto future = promise->get_future();
+  obj->framePromise = promise;
 
   // TODO: there's a 0.05ms lag when posting the task - SHOULDN'T HAPPEN!
   // NOTE: let's use separate strands for work and rendering?
@@ -659,7 +676,7 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
     promise->set_value();
   });
 
-  future.wait();
+  // DON'T wait for the future here (see above in this method)
 }
 
 ////////////////////////////////////////////////////////////////////////////
