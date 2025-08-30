@@ -35,6 +35,7 @@
 #include <event_sink.h>
 #include <event_stream_handler_functions.h>
 #include <messages.g.h>
+#include <method_result_functions.h>
 #include <plugins/common/common.h>
 
 class FlutterView;
@@ -135,6 +136,69 @@ void DeserializeDataAndSetupMessageChannels(
   viewTargetSystem->setupMessageChannels(registrar, "plugin.filament_view.frame_view");
   animationSystem->setupMessageChannels(registrar, "plugin.filament_view.animation_info");
 }
+
+std::future<void> FilamentViewPlugin::CallEvent(
+  const std::string& eventName,
+  std::initializer_list<std::pair<const char*, flutter::EncodableValue>> data
+) {
+  int64_t eventId = _eventIdCounter++;
+
+  flutter::EncodableMap encodableMap;
+  encodableMap.insert(
+    {flutter::EncodableValue("_internal_eventId"), flutter::EncodableValue(eventId)}
+  );
+  for (const auto& [fst, snd] : data) {
+    encodableMap[flutter::EncodableValue(fst)] = snd;  // NOLINT
+  }
+
+  // Post and await promise
+  auto promise = std::make_shared<std::promise<void>>();
+  auto future = promise->get_future();
+
+  FilamentViewPlugin::_eventCallbacks[eventId] = std::move(promise);
+
+  spdlog::trace("InvokeMethod: calling event {}", eventName);
+  auto retval = std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(  //
+    [&, eventId](const auto* /*result*/) {
+      spdlog::trace("[EventBus] Event completed successfully");
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    },
+    [&, eventId](const auto& error_code, const auto& error_message, const auto* /*result*/) {
+      spdlog::error("[EventBus] Event failed with error code {}: {}", error_code, error_message);
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    },
+    [&, eventId]() {
+      spdlog::warn("[EventBus] Event was not implemented");
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    }
+  );
+
+  FilamentViewPlugin::eventBus->InvokeMethod(
+    "call_" + eventName,
+    // wrap map in unique_ptr EncodableValue
+    std::make_unique<flutter::EncodableValue>(encodableMap), std::move(retval)
+  );
+  spdlog::trace("InvokeMethod done! Returning future");
+
+  return future;
+}
+
+std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> FilamentViewPlugin::eventBus =
+  nullptr;
+int64_t FilamentViewPlugin::_eventIdCounter = 0;
+std::map<int64_t, std::shared_ptr<std::promise<void>>> FilamentViewPlugin::_eventCallbacks;
 
 //////////////////////////////////////////////////////////////////////////////////////////
 void FilamentViewPlugin::RegisterWithRegistrar(
@@ -252,7 +316,45 @@ FilamentViewPlugin::~FilamentViewPlugin() {
 
 //////////////////////////////////////////////////////////////////////////////////////////
 std::unique_ptr<flutter::EventSink<>> eventSink_;
-void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registrar) {
+void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registrar
+) {                                    // Set up event bus
+  FilamentViewPlugin::eventBus = std::make_unique<flutter::MethodChannel<>>(
+    registrar->messenger(),            //
+    "plugin.filament_view.event_bus",  //
+    &flutter::StandardMethodCodec::GetInstance()
+  );
+
+  FilamentViewPlugin::eventBus->SetMethodCallHandler(
+    [&](const auto& call, std::unique_ptr<flutter::MethodResult<>> result) {
+      const std::string& method = call.method_name();
+      spdlog::debug("[EventBus] Received method call: {}", method);
+
+      // Handle callbacks
+      if (method.rfind("ret_") == 0) {
+        const std::string eventName = method.substr(4);
+        spdlog::debug("[EventBus] Handling event: {}", eventName);
+
+        // Get event ID (EncodableValue<int64_t>)
+        const flutter::EncodableValue* callArg = call.arguments();
+        int64_t eventId = std::get<int64_t>(*callArg);
+        spdlog::debug("[EventBus] Event ID: {}", eventId);
+        // Fetch promise and set value
+        if (FilamentViewPlugin::_eventCallbacks.find(eventId)
+            != FilamentViewPlugin::_eventCallbacks.end()) {
+          FilamentViewPlugin::_eventCallbacks[eventId]->set_value();
+          FilamentViewPlugin::_eventCallbacks.erase(eventId);
+          result->Success();
+        } else {
+          spdlog::warn("[EventBus] Unhandled event ID: {}", eventId);
+          result->Error("Unhandled event ID");
+        }
+      } else {
+        spdlog::warn("[EventBus] Unhandled method call: {}", method);
+        result->Error("Unhandled method call");
+      }
+    }
+  );
+
   // Setup MethodChannel for readiness check
   const std::string readinessMethodChannel = "plugin.filament_view.readiness_checker";
 

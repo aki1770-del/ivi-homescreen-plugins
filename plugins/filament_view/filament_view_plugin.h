@@ -31,6 +31,16 @@ namespace plugin_filament_view {
 
 class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, public PlatformView {
   public:
+    static std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> eventBus;
+    static std::map<int64_t, std::shared_ptr<std::promise<void>>> _eventCallbacks;
+
+    static int64_t _eventIdCounter;
+
+    static std::future<void> CallEvent(
+      const std::string& eventName,
+      std::initializer_list<std::pair<const char*, flutter::EncodableValue>> data
+    );
+
     static void RegisterWithRegistrar(
       flutter::PluginRegistrar* registrar,
       int32_t id,
