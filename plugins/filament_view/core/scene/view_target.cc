@@ -52,9 +52,9 @@ using flutter::MethodResult;
 
 class Display;
 class FlutterView;
-class FilamentViewPlugin;
 
 namespace plugin_filament_view {
+
 ////////////////////////////////////////////////////////////////////////////
 ViewTarget::ViewTarget(
   const size_t id,
@@ -603,7 +603,7 @@ void ViewTarget::DrawFrame(const uint32_t time) {
   )
                           .count();
 
-  const auto scriptStart = std::chrono::steady_clock::now();
+  // const auto scriptStart = std::chrono::steady_clock::now();
 
   // spdlog::debug("[{}] Calling Script event: preRenderFrame", __FUNCTION__);
   const auto scriptFuture = FilamentViewPlugin::CallEvent(
@@ -617,7 +617,7 @@ void ViewTarget::DrawFrame(const uint32_t time) {
   );
 
   scriptFuture.wait();
-  const auto scriptDuration = std::chrono::steady_clock::now() - scriptStart;
+  // const auto scriptDuration = std::chrono::steady_clock::now() - scriptStart;
   // spdlog::debug(
   //   "[{}] Script frametime: {:.2f}ms", __FUNCTION__,
   //   std::chrono::duration<double, std::milli>(scriptDuration).count()
