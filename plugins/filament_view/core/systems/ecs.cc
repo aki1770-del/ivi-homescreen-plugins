@@ -47,7 +47,8 @@ ECSManager::ECSManager()
   setupThreadingInternals();
 }
 
-/// NOTE: THIS IS DEPRECATED, temporarily; right now the Wayland callback in ViewTarget calls the main loop
+/// NOTE: THIS IS DEPRECATED, temporarily; right now the Wayland callback in ViewTarget calls the
+/// main loop
 void ECSManager::StartMainLoop() {
   if (m_eCurrentState != Initialized) {
     return;
@@ -512,6 +513,9 @@ void ECSManager::removeSystem(TypeID systemTypeId) {
 
 ////////////////////////////////////////////////////////////////////////////
 void ECSManager::update(const double deltaTime) {
+  /// NOTE: this is temporary until the main loop gets refactored
+  m_eCurrentState = Running;
+
   // Copy systems under mutex
   std::map<TypeID, std::shared_ptr<System>> systemsCopy;
   {
