@@ -68,7 +68,6 @@ class ECSManager {
     //
     // Threading
     //
-    std::atomic<bool> m_bIsRunning{false};
     std::atomic<bool> m_bSpawnedThreadFinished{false};
     std::atomic<bool> isHandlerExecuting{false};
 
@@ -81,13 +80,21 @@ class ECSManager {
 
     std::map<std::string, int> m_mapOffThreadCallers;
 
-    RunState m_eCurrentState;
+    std::atomic<RunState> m_eCurrentState{NotInitialized};
     static ECSManager* m_poInstance;
 
     ECSManager();
     ~ECSManager();
 
   public:
+    [[nodiscard]] inline static RunState GetRunState() {
+      if (m_poInstance == nullptr) {
+        return NotInitialized;
+      } else {
+        return m_poInstance->m_eCurrentState;
+      }
+    }
+
     [[nodiscard]] inline RunState getRunState() const { return m_eCurrentState; }
 
     [[nodiscard]] inline static ECSManager* GetInstance() {

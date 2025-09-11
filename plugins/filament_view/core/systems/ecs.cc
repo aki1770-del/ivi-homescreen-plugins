@@ -47,14 +47,15 @@ ECSManager::ECSManager()
   setupThreadingInternals();
 }
 
-////////////////////////////////////////////////////////////////////////////
+/// NOTE: THIS IS DEPRECATED, temporarily; right now the Wayland callback in ViewTarget calls the
+/// main loop
 void ECSManager::StartMainLoop() {
-  if (m_bIsRunning) {
+  if (m_eCurrentState != Initialized) {
     return;
   }
 
   spdlog::info("\n\n\n === Starting ECS main loop ===\n");
-  m_bIsRunning = true;
+  m_eCurrentState = Running;
   m_bSpawnedThreadFinished = false;
 
   // Launch MainLoop in a separate thread
@@ -86,7 +87,7 @@ void ECSManager::MainLoop() {
   auto lastFrameTime = std::chrono::steady_clock::now();
 
   m_eCurrentState = Running;
-  while (m_bIsRunning) {
+  while (m_eCurrentState == Running) {
     auto start = std::chrono::steady_clock::now();
 
     // Calculate the time difference between this frame and the last frame
@@ -156,7 +157,7 @@ void ECSManager::MainLoop() {
 
 ////////////////////////////////////////////////////////////////////////////
 void ECSManager::StopMainLoop() {
-  m_bIsRunning = false;
+  m_eCurrentState = ShutdownStarted;
   if (loopThread_.joinable()) {
     loopThread_.join();
   }
@@ -512,6 +513,9 @@ void ECSManager::removeSystem(TypeID systemTypeId) {
 
 ////////////////////////////////////////////////////////////////////////////
 void ECSManager::update(const double deltaTime) {
+  /// NOTE: this is temporary until the main loop gets refactored
+  m_eCurrentState = Running;
+
   // Copy systems under mutex
   std::map<TypeID, std::shared_ptr<System>> systemsCopy;
   {
