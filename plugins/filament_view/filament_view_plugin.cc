@@ -52,6 +52,7 @@ bool m_bHasSetupRegistrar = false;
 void RunOnceCheckAndInitializeECSystems() {
   const auto ecs = ECSManager::GetInstance();
 
+  // Make sure we only initialize once
   if (ecs->getRunState() != ECSManager::RunState::NotInitialized) {
     return;
   }
@@ -366,35 +367,14 @@ void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registra
     [&](const flutter::MethodCall<>& call, const std::unique_ptr<flutter::MethodResult<>>& result) {
       if (call.method_name() == "isReady") {
         // Check readiness and respond
-        bool isReady = true;  // Replace with your actual readiness check
+        bool isReady = ECSManager::GetRunState() == ECSManager::RunState::Running;
+        spdlog::debug("Readiness check: {}", static_cast<int>(ECSManager::GetRunState()));
         result->Success(flutter::EncodableValue(isReady));
       } else {
         result->NotImplemented();
       }
     }
   );
-
-  // Setup EventChannel for readiness events
-  const std::string readinessEventChannel = "plugin.filament_view.readiness";
-
-  const auto eventChannel = std::make_unique<flutter::EventChannel<>>(
-    registrar->messenger(), readinessEventChannel, &flutter::StandardMethodCodec::GetInstance()
-  );
-
-  eventChannel->SetStreamHandler(std::make_unique<flutter::StreamHandlerFunctions<>>(
-    [&](
-      const flutter::EncodableValue* /* arguments */, std::unique_ptr<flutter::EventSink<>>&& events
-    ) -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = std::move(events);
-      sendReadyEvent();  // Proactively send "ready" event
-      return nullptr;
-    },
-    [&](const flutter::EncodableValue* /* arguments */)
-      -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = nullptr;
-      return nullptr;
-    }
-  ));
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
