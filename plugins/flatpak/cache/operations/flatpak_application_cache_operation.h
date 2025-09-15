@@ -55,7 +55,7 @@ struct ApplicationCacheOperation : CacheOperationTemplate<Application> {
     }
     // Serialize to List then Serialize the list
     flutter::EncodableList list = data.ToEncodableList();
-    return operation->SerializeData(flutter::EncodableValue(list));
+    return operation->SerializeData(list);
   }
 
   std::optional<Application> DeserializeData(
@@ -63,8 +63,7 @@ struct ApplicationCacheOperation : CacheOperationTemplate<Application> {
     if (serialized_data.empty()) {
       return std::nullopt;
     }
-    const auto deserialization =
-        operation->DeserializeData(flutter::EncodableValue(serialized_data));
+    const auto deserialization = operation->DeserializeData(serialized_data);
 
     if (!deserialization) {
       return std::nullopt;

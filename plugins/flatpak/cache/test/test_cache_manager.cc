@@ -599,6 +599,28 @@ TEST_F(CacheManagerIntegrationTest, CacheHitOnSecondRequest) {
   EXPECT_TRUE(has_cache_interaction);
 }
 
+TEST_F(CacheManagerIntegrationTest, RemoteCacheHitOnSecondRequest) {
+  CreateCacheManager();
+  EXPECT_TRUE(cache_manager_->IsHealthy());
+
+  // fetch from network
+  const auto result1 = cache_manager_->GetApplicationsRemote("flathub", false);
+  ASSERT_TRUE(result1.has_value());
+
+  observer_ptr_->ClearEvents();
+
+  // hit cache if cache policy allows
+  const auto result2 = cache_manager_->GetApplicationsRemote("flathub", false);
+  ASSERT_TRUE(result2.has_value());
+
+  EXPECT_EQ(result1->size(), result2->size());
+
+  // cache-first policy get a cache hit
+  const bool has_cache_interaction =
+      observer_ptr_->HasEvent("hit") || observer_ptr_->HasEvent("miss");
+  EXPECT_TRUE(has_cache_interaction);
+}
+
 TEST_F(CacheManagerIntegrationTest, ForceRefreshBypassesCache) {
   CreateCacheManager();
   EXPECT_TRUE(cache_manager_->IsHealthy());
