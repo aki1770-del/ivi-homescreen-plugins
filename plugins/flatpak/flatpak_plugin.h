@@ -24,6 +24,7 @@
 
 #include "flatpak_shim.h"
 #include "messages.g.h"
+#include "plugins/flatpak/cache/cache_manager.h"
 
 namespace flatpak_plugin {
 class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
@@ -91,6 +92,7 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   std::unique_ptr<asio::io_context> io_context_;
   asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
   std::unique_ptr<asio::io_context::strand> strand_;
+  std::unique_ptr<CacheManager> manager_;
 };
 }  // namespace flatpak_plugin
 

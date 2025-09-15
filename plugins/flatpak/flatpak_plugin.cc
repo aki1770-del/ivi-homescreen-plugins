@@ -58,6 +58,17 @@ FlatpakPlugin::FlatpakPlugin()
       spdlog::debug("\t\t{}", *arch);
     }
   }
+  manager_ = CacheManager::Builder()
+                 .WithDatabasePath("/tmp/flatpak_plugin.db")
+                 .WithCachePolicy(CachePolicy::CACHE_FIRST)
+                 .WithAutoCleanup(true, std::chrono::minutes(5))
+                 .WithDefaultTTL(std::chrono::minutes(10))
+                 .WithCompression(false)
+                 .WithMaxCacheSize(50)
+                 .WithMaxRetries(3)
+                 .WithNetworkTimeout(std::chrono::seconds(5))
+                 .WithMetrics(true)
+                 .Build();
 }
 
 FlatpakPlugin::~FlatpakPlugin() {
@@ -99,11 +110,16 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetSupportedArches() {
 
 // Get configuration of user installation.
 ErrorOr<Installation> FlatpakPlugin::GetUserInstallation() {
-  return FlatpakShim::GetUserInstallation();
+  auto result = manager_->GetUserInstallation(false);
+  return ErrorOr<Installation>(std::move(result.value()));
 }
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetSystemInstallations() {
-  return FlatpakShim::GetSystemInstallations();
+  auto result = manager_->GetSystemInstallations(false);
+  if (!result.has_value()) {
+    return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
+  }
+  return ErrorOr<flutter::EncodableList>(std::move(result.value()));
 }
 
 ErrorOr<bool> FlatpakPlugin::RemoteAdd(const Remote& configuration) {
@@ -115,12 +131,20 @@ ErrorOr<bool> FlatpakPlugin::RemoteRemove(const std::string& id) {
 }
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsInstalled() {
-  return FlatpakShim::GetApplicationsInstalled();
+  auto result = manager_->GetApplicationsInstalled(false);
+  if (!result.has_value()) {
+    return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
+  }
+  return ErrorOr<flutter::EncodableList>(std::move(result.value()));
 }
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
     const std::string& id) {
-  return FlatpakShim::GetApplicationsRemote(id);
+  auto result = manager_->GetApplicationsRemote(id, false);
+  if (!result.has_value()) {
+    return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
+  }
+  return ErrorOr<flutter::EncodableList>(std::move(result.value()));
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationInstall(const std::string& id) {

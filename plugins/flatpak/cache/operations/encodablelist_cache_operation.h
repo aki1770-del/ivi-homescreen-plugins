@@ -26,6 +26,7 @@
 #include "cache_operation_template.h"
 #include "flatpak/cache/cache_manager.h"
 #include "flatpak/messages.g.h"
+#include "tomlplusplus/toml.hpp"
 
 namespace flatpak_plugin {
 
@@ -41,8 +42,7 @@ struct EncodableListCacheOperation
   std::string SerializeData(const flutter::EncodableList& data) override {
     try {
       const auto& codec = FlatpakApi::GetCodec();
-      flutter::EncodableList data_copy{data};
-      const flutter::EncodableValue encodable_data(std::move(data_copy));
+      const flutter::EncodableValue encodable_data(data);
       const auto encoded = codec.EncodeMessage(encodable_data);
       if (!encoded) {
         spdlog::error("Failed to encode encodable list");
@@ -61,11 +61,13 @@ struct EncodableListCacheOperation
   std::optional<flutter::EncodableList> DeserializeData(
       const std::string& serialized_data) override {
     if (serialized_data.empty()) {
-      return flutter::EncodableList{};
+      return std::nullopt;
     }
+    spdlog::debug("[EncodableListCache] Deserializing {} bytes of data",
+                  serialized_data.size());
     try {
       if (serialized_data.empty()) {
-        spdlog::warn("Attempting to deserialize empty encodable list");
+        spdlog::error("Attempting to deserialize empty encodable list");
         return flutter::EncodableList{};
       }
 
@@ -82,7 +84,31 @@ struct EncodableListCacheOperation
         spdlog::error("Decoded message is not EncodableList");
         return std::nullopt;
       }
-      return std::get<flutter::EncodableList>(*decoded);
+
+      const auto res = std::get<flutter::EncodableList>(*decoded);
+      flutter::EncodableList encodable_data;
+      encodable_data.reserve(res.size());
+      for (const auto& item : res) {
+        if (std::holds_alternative<flutter::CustomEncodableValue>(item)) {
+          const auto& value = std::get<flutter::CustomEncodableValue>(item);
+          if (value.type() == typeid(Application)) {
+            try {
+              const Application& app = std::any_cast<Application>(value);
+              encodable_data.emplace_back(item);
+            } catch (const std::exception& e) {
+              spdlog::error(
+                  "Failed to convert encodable list to Application: {}",
+                  e.what());
+              encodable_data.emplace_back(item);
+            }
+          } else {
+            encodable_data.emplace_back(item);
+          }
+        } else {
+          encodable_data.emplace_back(item);
+        }
+      }
+      return encodable_data;
     } catch (const std::exception& e) {
       spdlog::error("Failed to deserialize message: {}", e.what());
       return std::nullopt;
