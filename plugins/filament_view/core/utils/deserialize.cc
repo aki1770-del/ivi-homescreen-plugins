@@ -85,10 +85,9 @@ bool Deserialize::DecodeParameterWithDefault(
       it != params.end() && std::holds_alternative<flutter::EncodableMap>(it->second)) {
     *out_value = Format3(std::get<flutter::EncodableMap>(it->second));
     return true;
-  } else {
-    *out_value = default_value;
-    return false;
   }
+  *out_value = default_value;
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -155,14 +154,15 @@ void Deserialize::DecodeParameterWithDefaultInt64(
   const flutter::EncodableMap& params,
   const int64_t& default_value
 ) {
-  const auto it = params.find(flutter::EncodableValue(key));
 
-  if (it == params.end()) {
+  if (const auto it = params.find(flutter::EncodableValue(key)); it == params.end()) {
     *out_value = default_value;
   } else if (std::holds_alternative<int64_t>(it->second)) {
     *out_value = std::get<int64_t>(it->second);
   } else if (std::holds_alternative<int32_t>(it->second)) {
     *out_value = std::get<int32_t>(it->second);
+  } else if (std::holds_alternative<std::monostate>(it->second)) {
+    *out_value = default_value;
   } else {
     // get type as string
     // auto type = std::string(it->second.type().name());
