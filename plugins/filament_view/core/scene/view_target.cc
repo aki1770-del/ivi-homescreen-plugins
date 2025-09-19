@@ -211,10 +211,6 @@ void ViewTarget::setupView(uint32_t width, uint32_t height) {
   // fview_->setAntiAliasing(filament::View::AntiAliasing::FXAA);
   // fview_->setAntiAliasing(filament::View::AntiAliasing::NONE);
 
-  // ambient occlusion is the cheapest effect that adds a lot of quality
-  fview_->setAmbientOcclusionOptions({.enabled = true, .ssct = {}});
-  // fview_->setAmbientOcclusion(filament::View::AmbientOcclusion::NONE);
-
   // fview_->setShadowingEnabled(false);
   // fview_->setScreenSpaceRefractionEnabled(false);
   // fview_->setStencilBufferEnabled(false);
@@ -310,6 +306,21 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 1000.0f;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
       settings.shadowType = filament::View::ShadowType::PCF;
+      settings.ssao = {
+        .radius = 1.0f,                                       //
+        .power = 0.7f,                                        //
+        .bias = 0.01f,                                        //
+        .resolution = 1.0f,                                   //
+        .intensity = 2.0f,                                    //
+        .bilateralThreshold = 0.05f,                          //
+        .quality = filament::View::QualityLevel::HIGH,        //
+        .lowPassFilter = filament::View::QualityLevel::HIGH,  //
+        .upsampling = filament::View::QualityLevel::HIGH,     //
+        .enabled = true,                                      //
+        .bentNormals = true,                                  //
+        .minHorizonAngleRad = 0.523599f,                      // 30 degrees
+        .ssct = {.enabled = false}                            //
+      };
       fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
