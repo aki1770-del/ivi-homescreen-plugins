@@ -559,7 +559,7 @@ std::optional<FlutterError> FilamentViewPlugin::ChangeLightTransformByGUID(
 std::optional<FlutterError> FilamentViewPlugin::ChangeLightColorByGUID(
   const int64_t guid,
   const std::string& color,
-  const int64_t intensity
+  const double intensity
 ) {
   ECSMessage lightData;
   lightData.addData(ECSMessageType::ChangeSceneLightProperties, guid);
