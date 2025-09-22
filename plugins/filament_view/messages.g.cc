@@ -457,7 +457,7 @@ void FilamentViewApi::SetUp(
               reply(WrapError("intensity_arg unexpectedly null."));
               return;
             }
-            const int64_t intensity_arg = encodable_intensity_arg.LongValue();
+            const double intensity_arg = std::get<double>(encodable_intensity_arg);
             std::optional<FlutterError> output = api->ChangeLightColorByGUID(
               id_arg, color_arg, intensity_arg
             );

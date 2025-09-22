@@ -162,7 +162,7 @@ Resource<filament::MaterialInstance*> MaterialSystem::getMaterialInstance(
 /////////////////////////////////////////////////////////////////////////////////////////
 void MaterialSystem::onSystemInit() {
   registerMessageHandler(ECSMessageType::ChangeMaterialParameter, [this](const ECSMessage& msg) {
-    spdlog::debug("ChangeMaterialParameter");
+    spdlog::trace("ChangeMaterialParameter");
 
     const flutter::EncodableMap& params = msg.getData<flutter::EncodableMap>(
       ECSMessageType::ChangeMaterialParameter
@@ -170,7 +170,7 @@ void MaterialSystem::onSystemInit() {
     const auto guid = msg.getData<EntityGUID>(ECSMessageType::EntityToTarget);
 
     if (const auto entityObject = ecs->getEntity(guid); entityObject != nullptr) {
-      spdlog::debug("ChangeMaterialParameter valid entity found.");
+      spdlog::trace("ChangeMaterialParameter valid entity found.");
 
       const auto parameter = MaterialParameter::Deserialize("", params);
 
@@ -178,11 +178,11 @@ void MaterialSystem::onSystemInit() {
       renderable->ChangeMaterialInstanceProperty(parameter.get(), loadedTextures_);
     }
 
-    spdlog::debug("ChangeMaterialParameter Complete");
+    spdlog::trace("ChangeMaterialParameter Complete");
   });
 
   registerMessageHandler(ECSMessageType::ChangeMaterialDefinitions, [this](const ECSMessage& msg) {
-    spdlog::debug("ChangeMaterialDefinitions");
+    spdlog::trace("ChangeMaterialDefinitions");
 
     const flutter::EncodableMap& params = msg.getData<flutter::EncodableMap>(
       ECSMessageType::ChangeMaterialDefinitions
@@ -191,13 +191,13 @@ void MaterialSystem::onSystemInit() {
     const auto guid = msg.getData<EntityGUID>(ECSMessageType::EntityToTarget);
 
     if (const auto entityObject = ecs->getEntity(guid); entityObject != nullptr) {
-      spdlog::debug("ChangeMaterialDefinitions valid entity found.");
+      spdlog::trace("ChangeMaterialDefinitions valid entity found.");
 
       const auto renderable = dynamic_cast<RenderableEntityObject*>(entityObject.get());
       renderable->ChangeMaterialDefinitions(params, loadedTextures_);
     }
 
-    spdlog::debug("ChangeMaterialDefinitions Complete");
+    spdlog::trace("ChangeMaterialDefinitions Complete");
   });
 }
 

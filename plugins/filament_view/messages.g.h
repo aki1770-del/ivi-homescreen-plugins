@@ -146,7 +146,7 @@ class FilamentViewApi {
     virtual std::optional<FlutterError> ChangeLightColorByGUID(
       int64_t id,
       const std::string& color,
-      int64_t intensity
+      double intensity
     ) = 0;
     // Set a light's transform by GUID. Deprecated.
     virtual std::optional<FlutterError> ChangeLightTransformByGUID(

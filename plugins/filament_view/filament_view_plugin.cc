@@ -201,6 +201,8 @@ std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> FilamentViewPlu
 int64_t FilamentViewPlugin::_eventIdCounter = 0;
 std::map<int64_t, std::shared_ptr<std::promise<void>>> FilamentViewPlugin::_eventCallbacks;
 
+bool _hasLoadedOnce = false;
+
 //////////////////////////////////////////////////////////////////////////////////////////
 void FilamentViewPlugin::RegisterWithRegistrar(
   flutter::PluginRegistrar* registrar,
@@ -218,6 +220,14 @@ void FilamentViewPlugin::RegisterWithRegistrar(
   PlatformViewRemoveListener removeListener,
   void* platform_view_context
 ) {
+  // Make sure we only initialize once
+  if (_hasLoadedOnce) {
+    spdlog::warn("FilamentViewPlugin::RegisterWithRegistrar called more than once!");
+    return;
+  }
+
+  _hasLoadedOnce = true;
+
   pthread_setname_np(pthread_self(), "HomeScreenFilamentViewPlugin");
 
   const auto ecs = ECSManager::GetInstance();
@@ -462,12 +472,16 @@ std::optional<FlutterError> FilamentViewPlugin::SetCameraOrbit(
   // Get camera component
   const auto camera = ecs->getComponent<Camera>(id);
 
+  const auto oldTarget = camera->orbitOriginEntity;
   camera->orbitOriginEntity = origin_entity_id;
   camera->orbitRotation = filament::math::quatf(
     orbit_rotation[3], orbit_rotation[0], orbit_rotation[1], orbit_rotation[2]
   );
 
-  spdlog::debug("Camera target set to entity: {}", origin_entity_id);
+  if (oldTarget != origin_entity_id) {
+    spdlog::debug("Camera target set to entity: {}", origin_entity_id);
+  }
+
   return std::nullopt;
 }
 
@@ -555,7 +569,7 @@ std::optional<FlutterError> FilamentViewPlugin::ChangeLightTransformByGUID(
 std::optional<FlutterError> FilamentViewPlugin::ChangeLightColorByGUID(
   const int64_t guid,
   const std::string& color,
-  const int64_t intensity
+  const double intensity
 ) {
   ECSMessage lightData;
   lightData.addData(ECSMessageType::ChangeSceneLightProperties, guid);

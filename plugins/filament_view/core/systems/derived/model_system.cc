@@ -655,7 +655,7 @@ void ModelSystem::onSystemInit() {
   // TODO: add support for other texture formats here
 
   registerMessageHandler(ECSMessageType::ToggleVisualForEntity, [this](const ECSMessage& msg) {
-    spdlog::debug("ToggleVisualForEntity");
+    spdlog::trace("ToggleVisualForEntity");
 
     const auto guid = msg.getData<EntityGUID>(ECSMessageType::ToggleVisualForEntity);
     const auto value = msg.getData<bool>(ECSMessageType::BoolValue);
