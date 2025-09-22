@@ -201,6 +201,8 @@ std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> FilamentViewPlu
 int64_t FilamentViewPlugin::_eventIdCounter = 0;
 std::map<int64_t, std::shared_ptr<std::promise<void>>> FilamentViewPlugin::_eventCallbacks;
 
+bool _hasLoadedOnce = false;
+
 //////////////////////////////////////////////////////////////////////////////////////////
 void FilamentViewPlugin::RegisterWithRegistrar(
   flutter::PluginRegistrar* registrar,
@@ -218,6 +220,14 @@ void FilamentViewPlugin::RegisterWithRegistrar(
   PlatformViewRemoveListener removeListener,
   void* platform_view_context
 ) {
+  // Make sure we only initialize once
+  if (_hasLoadedOnce) {
+    spdlog::warn("FilamentViewPlugin::RegisterWithRegistrar called more than once!");
+    return;
+  }
+
+  _hasLoadedOnce = true;
+
   pthread_setname_np(pthread_self(), "HomeScreenFilamentViewPlugin");
 
   const auto ecs = ECSManager::GetInstance();
