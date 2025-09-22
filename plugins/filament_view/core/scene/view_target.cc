@@ -298,7 +298,11 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.msaa.sampleCount = 4;
       settings.dsr = {.enabled = false};
       settings.screenSpaceReflections = {
-        .thickness = 0.05f, .bias = 0.5f, .maxDistance = 4.0f, .stride = 2.0f, .enabled = true
+        .thickness = 0.1f,     //
+        .bias = 0.5f,          //
+        .maxDistance = 12.0f,  //
+        .stride = 1.0f,        //
+        .enabled = true        //
       };
       settings.bloom = {.strength = 0.4f, .enabled = true};
       settings.postProcessingEnabled = true;
