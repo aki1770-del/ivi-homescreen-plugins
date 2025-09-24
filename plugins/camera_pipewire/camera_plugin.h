@@ -24,8 +24,8 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include "CameraStream.h"
-#include "event_channel.h"
 #include "messages.g.h"
+#include "event_channel.h"
 #include "plugins/common/common.h"
 
 namespace camera_plugin {
@@ -33,9 +33,22 @@ namespace camera_plugin {
 class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
+  // Send one I420 frame to Dart (call from your PipeWire callback or test timer)
+  void SendI420Frame(const uint8_t* y, int y_stride,
+                     const uint8_t* u, int u_stride,
+                     const uint8_t* v, int v_stride,
+                     int width, int height);
 
+  void SendNV12Frame(const uint8_t* y, int y_stride,
+                                 const uint8_t* uv, int uv_stride,
+                                 int width, int height);
+
+  void SendJpegFrame(const std::string& jpeg_file_path);
   CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                flutter::BinaryMessenger* messenger);
+
+  bool SendI420FrameFromJpeg(const std::string& jpeg_path);
+  bool SendI420FrameFromCameraStream(CameraStream& stream);
 
   ~CameraPlugin() override;
 
@@ -78,9 +91,17 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   // Disallow copy and assign.
   CameraPlugin(const CameraPlugin&) = delete;
   CameraPlugin& operator=(const CameraPlugin&) = delete;
+  std::shared_ptr<CameraStream> GetCameraStream(int64_t texture_id) {
+    auto it = TextureId_CameraStream.find(texture_id);
+    if (it != TextureId_CameraStream.end()) {
+      return it->second;
+    }
+    return nullptr;
+  }
 
  private:
   flutter::TextureRegistrar* texture_registrar_{};
+  bool image_stream_active_ = false;
 
   struct preview {
     bool is_initialized{};
@@ -112,6 +133,15 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
   std::map<std::string, std::shared_ptr<CameraStream>> CameraId_CameraStream;
   std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
+
+  // ---- Image-stream EventChannel (for camera_linux/image_stream) ----
+  // Matches Dart: EventChannel('camera_linux/image_stream')
+  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> image_channel_;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> image_sink_;
+  // Helpers used by the .cc file
+  void StartImageStream();  // set up PipeWire or a test timer on listen
+  void StopImageStream();   // tear down on cancel
+
 };
 }  // namespace camera_plugin
 

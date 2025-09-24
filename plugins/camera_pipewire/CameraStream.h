@@ -22,6 +22,8 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/texture_registrar.h>
 #include <pipewire/pipewire.h>
+#include <spa/param/video/raw.h>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -75,8 +77,19 @@ class CameraStream {
   [[nodiscard]] int camera_width() const { return width_; }
   [[nodiscard]] int camera_height() const { return height_; }
   static std::optional<std::string> GetFilePathForPicture();
-  [[nodiscard]] std::string takePicture() const;
+  [[nodiscard]] std::string takePicture();
+  std::vector<uint8_t> requestBuffer();
 
+  std::function<void(const uint8_t* y, int y_stride,
+                   const uint8_t* u_or_uv, int u_stride,
+                   const uint8_t* v, int v_stride,
+                   int width, int height,
+                   const char* raw)> on_image_frame;
+
+  // Whatever you already have:
+
+  spa_video_info_raw current_info_;   // optional: negotiated format info
+  uint32_t current_format_;           // e.g., SPA_VIDEO_FORMAT_I420 / NV12
  private:
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};

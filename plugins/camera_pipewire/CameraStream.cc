@@ -435,6 +435,9 @@ void CameraStream::HandleProcess() {
     ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(),
                        width_, height_);
   }
+  else {
+    spdlog::debug("camera_ouput_format {}", camera_output_format);
+  }
 
   if (ret == 0) {
     {
@@ -560,10 +563,34 @@ std::optional<std::string> CameraStream::GetFilePathForPicture() {
   return path;
 }
 
-std::string CameraStream::takePicture() const {
+std::string CameraStream::takePicture() {
   auto filename = GetFilePathForPicture();
-  save_image_to_jpeg(filename.value(), decoded_buffer_.get(), width_, height_,
-                     3, 90);
+  if (!filename) {
+    spdlog::error("Failed to get file path for picture.");
+    return "";
+  }
+  if (!decoded_buffer_) {
+    spdlog::error("No decoded buffer available for picture.");
+    return "";
+  }
+  {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    save_image_to_jpeg(filename.value(), decoded_buffer_.get(), width_, height_,
+                       3, 90);
+  }
 
   return filename.value();
+}
+
+std::vector<uint8_t> CameraStream::requestBuffer() {
+  std::vector<uint8_t> buffer_copy;
+  if (!decoded_buffer_) {
+    spdlog::error("No decoded buffer available.");
+    return buffer_copy;
+  }
+  {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    buffer_copy.assign(decoded_buffer_.get(), decoded_buffer_.get() + width_ * height_ * 3);
+  }
+  return buffer_copy;
 }
