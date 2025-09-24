@@ -163,7 +163,7 @@ void ViewTarget::setupWaylandSubsurface() {
   presentation_callback_ = OnPresented;
 
   const auto present = &Presentation::GetInstance();
-  present->RequestFeedback(surface_, presentation_callback_, this);
+  present->RequestFeedback("filament-view", surface_, presentation_callback_, this);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -703,7 +703,7 @@ void ViewTarget::OnPresented(
       );
 
       const auto presentation = &Presentation::GetInstance();
-      presentation->RequestFeedback(obj->surface_, obj->presentation_callback_, obj);
+      presentation->RequestFeedback("filament-view", obj->surface_, obj->presentation_callback_, obj);
 
       obj->DrawFrame(timestamp_ms);
 
