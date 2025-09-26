@@ -27,6 +27,8 @@
 #include "messages.g.h"
 #include "event_channel.h"
 #include "plugins/common/common.h"
+#include <atomic>
+#include <glib.h>
 
 namespace camera_plugin {
 
@@ -34,6 +36,10 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
   // Send one I420 frame to Dart (call from your PipeWire callback or test timer)
+  void MaybeSendFrameI420(const uint8_t* y, int y_stride,
+                          const uint8_t* u, int u_stride,
+                          const uint8_t* v, int v_stride,
+                          int width, int height);
   void SendI420Frame(const uint8_t* y, int y_stride,
                      const uint8_t* u, int u_stride,
                      const uint8_t* v, int v_stride,
@@ -137,6 +143,7 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   // ---- Image-stream EventChannel (for camera_linux/image_stream) ----
   // Matches Dart: EventChannel('camera_linux/image_stream')
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> image_channel_;
+  std::atomic<bool> sending_{false};   // back-pressure: drop if a send is in flight
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> image_sink_;
   // Helpers used by the .cc file
   void StartImageStream();  // set up PipeWire or a test timer on listen

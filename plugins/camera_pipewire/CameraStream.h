@@ -91,6 +91,8 @@ class CameraStream {
   spa_video_info_raw current_info_;   // optional: negotiated format info
   uint32_t current_format_;           // e.g., SPA_VIDEO_FORMAT_I420 / NV12
  private:
+  uint32_t negotiated_format_ = SPA_VIDEO_FORMAT_ENCODED; // default until param_changed fires
+
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};
 
@@ -125,6 +127,7 @@ class CameraStream {
                                    pw_stream_state old_state,
                                    pw_stream_state new_state,
                                    const char* error);
+  static void OnParamChanged(void* data, uint32_t id, const struct spa_pod* param);
   static void OnStreamParamChanged(void* data,
                                    uint32_t id,
                                    const spa_pod* param);

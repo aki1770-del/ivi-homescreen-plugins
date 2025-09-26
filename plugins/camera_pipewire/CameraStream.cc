@@ -21,6 +21,9 @@
 #include <spa/param/format.h>
 #include <spa/param/video/raw-utils.h>
 #include <spa/param/video/raw.h>
+#include <spa/param/param.h>
+#include <spa/param/video/format-utils.h>
+#include <spa/debug/types.h>
 #include <spa/pod/builder.h>
 #include <spdlog/spdlog.h>
 #include <string/string_tools.h>
@@ -262,6 +265,7 @@ bool CameraStream::Start(const std::string& camera_id) {
     static pw_stream_events streamEvents{};
     streamEvents.version = PW_VERSION_STREAM_EVENTS;
     streamEvents.state_changed = OnStreamStateChanged;
+    streamEvents.param_changed = OnParamChanged;   // <-- required
     streamEvents.process = OnStreamProcess;
 
     pw_stream_add_listener(pw_stream_, &stream_listener_, &streamEvents, this);
@@ -288,12 +292,14 @@ bool CameraStream::Start(const std::string& camera_id) {
       camera_output_format = "MJPEG";
     } else if (format_env == "YUV2") {
       camera_output_format = "YUV2";
+    } else if (format_env == "I420") {
+      camera_output_format = "I420";
     } else {
-      spdlog::error(
-          "CAMERA_OUTPUT_FORMAT is set to an unsupported value ('{}'). "
-          "Supported values: MJPEG, YUV2. Defaulting to YUV2.",
+      spdlog::warn(
+          "CAMERA_OUTPUT_FORMAT='{}' not supported. "
+          "Supported: MJPEG, YUV2, I420. Defaulting to I420.",
           format_env);
-      camera_output_format = "YUV2";
+      camera_output_format = "I420";
     }
 
     spdlog::debug("[CameraStream] camera_output_format is set to {}",
@@ -314,6 +320,14 @@ bool CameraStream::Start(const std::string& camera_id) {
           SPA_FORMAT_VIDEO_format, SPA_POD_Id(SPA_VIDEO_FORMAT_YUY2),
           SPA_FORMAT_VIDEO_size, SPA_POD_Rectangle(&rect),
           SPA_FORMAT_VIDEO_framerate, SPA_POD_Fraction(&fps)));
+    } else { // I420 default
+      params[0] = (const spa_pod*)spa_pod_builder_add_object(
+          &builder, SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+          SPA_FORMAT_mediaType,      SPA_POD_Id(SPA_MEDIA_TYPE_video),
+          SPA_FORMAT_mediaSubtype,   SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
+          SPA_FORMAT_VIDEO_format,   SPA_POD_Id(SPA_VIDEO_FORMAT_I420),
+          SPA_FORMAT_VIDEO_size,     SPA_POD_Rectangle(&rect),
+          SPA_FORMAT_VIDEO_framerate,SPA_POD_Fraction(&fps));
     }
 
     // Actually connect the stream
@@ -404,72 +418,179 @@ void save_image_to_jpeg(const std::string& filename,
   spdlog::debug("image saved to {}", filename);
 }
 
+static void YUY2ToI420Planes(const uint8_t* src, int src_stride,
+                             int width, int height,
+                             uint8_t* dst_y, int y_stride,
+                             uint8_t* dst_u, int u_stride,
+                             uint8_t* dst_v, int v_stride) {
+  // Process 2 rows at a time (because I420 is 4:2:0)
+  for (int j = 0; j < height; j += 2) {
+    const uint8_t* row0 = src + j * src_stride;
+    const uint8_t* row1 = (j + 1 < height) ? (src + (j + 1) * src_stride) : row0;
+
+    uint8_t* y0 = dst_y + j * y_stride;
+    uint8_t* y1 = dst_y + (j + 1) * y_stride;
+
+    uint8_t* urow = dst_u + (j / 2) * u_stride;
+    uint8_t* vrow = dst_v + (j / 2) * v_stride;
+
+    for (int i = 0; i < width; i += 2) {
+      // Packed bytes for two pixels on row0: Y00 U0 Y01 V0
+      const int off0 = i * 2; // 2 bytes per pixel
+      uint8_t Y00 = row0[off0 + 0];
+      uint8_t U0  = row0[off0 + 1];
+      uint8_t Y01 = row0[off0 + 2];
+      uint8_t V0  = row0[off0 + 3];
+
+      // Packed bytes for two pixels on row1: Y10 U1 Y11 V1
+      const int off1 = i * 2;
+      uint8_t Y10 = row1[off1 + 0];
+      uint8_t U1  = row1[off1 + 1];
+      uint8_t Y11 = row1[off1 + 2];
+      uint8_t V1  = row1[off1 + 3];
+
+      // Write Y plane (full resolution)
+      y0[i + 0] = Y00;
+      y0[i + 1] = Y01;
+      y1[i + 0] = Y10;
+      y1[i + 1] = Y11;
+
+      // Subsample U/V: average over 2x2 block (two rows)
+      // (You could weight differently; average is fine here.)
+      urow[i / 2] = static_cast<uint8_t>((static_cast<int>(U0) + static_cast<int>(U1)) / 2);
+      vrow[i / 2] = static_cast<uint8_t>((static_cast<int>(V0) + static_cast<int>(V1)) / 2);
+    }
+  }
+}
 //------------------------------------------------------------------------------
 // Private method: called each time there's a new MJPEG frame
 //------------------------------------------------------------------------------
 void CameraStream::HandleProcess() {
-  if (!pw_stream_)
-    return;
+  if (!pw_stream_) return;
   pw_buffer* buf = pw_stream_dequeue_buffer(pw_stream_);
-  if (!buf)
-    return;
+  if (!buf) return;
 
-  if (!buf->buffer->datas[0].data) {
+  struct spa_buffer* spa_buf = buf->buffer;
+  if (!spa_buf || spa_buf->n_datas < 1 || !spa_buf->datas[0].data) {
     pw_stream_queue_buffer(pw_stream_, buf);
     return;
   }
 
-  const auto* compressedData =
-      static_cast<uint8_t*>(buf->buffer->datas[0].data);
-  const size_t compressedSize = buf->buffer->datas[0].chunk->size;
+  // Pointer/stride of the incoming raw buffer (YUY2 packed, if negotiated as such)
+  const uint8_t* in_ptr = static_cast<const uint8_t*>(spa_buf->datas[0].data);
+  const int in_stride = (spa_buf->datas[0].chunk && spa_buf->datas[0].chunk->stride)
+                          ? spa_buf->datas[0].chunk->stride
+                          : (width_ * 2); // YUY2 is 2 bytes per pixel
 
+  // Keep your existing RGB preview buffer ready
   if (!decoded_buffer_) {
     decoded_buffer_.reset(new uint8_t[width_ * height_ * 3]);
   }
 
   int ret = -1;
+
   if (camera_output_format == "YUV2") {
-    ret = decode_yuy2(compressedData, compressedSize, decoded_buffer_.get(),
-                      width_, height_);
-  } else if (camera_output_format == "MJPEG") {
-    ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(),
-                       width_, height_);
+    // --- A) Update RGB preview (your existing path) ---
+    // If your decode_yuy2 assumes tightly packed width*2 stride, we can memcpy
+    // to a temporary contiguous buffer when in_stride != width_*2 (rare).
+    if (in_stride == width_ * 2) {
+      // Directly decode from spa buffer
+      ret = decode_yuy2(in_ptr, static_cast<size_t>(width_) * height_ * 2,
+                        decoded_buffer_.get(), width_, height_);
+    } else {
+      // Make a contiguous copy (fallback)
+      std::vector<uint8_t> tight(static_cast<size_t>(width_) * height_ * 2);
+      for (int r = 0; r < height_; ++r) {
+        std::memcpy(tight.data() + static_cast<size_t>(r) * width_ * 2,
+                    in_ptr + static_cast<size_t>(r) * in_stride,
+                    static_cast<size_t>(width_) * 2);
+      }
+      ret = decode_yuy2(tight.data(), tight.size(),
+                        decoded_buffer_.get(), width_, height_);
+    }
+
+    // --- B) Build I420 planes and push to Dart for ML ---
+    // Allocate per-frame (simple & safe). You can reuse persistent buffers later.
+    const int y_stride = width_;
+    const int u_stride = width_ / 2;
+    const int v_stride = width_ / 2;
+    std::vector<uint8_t> y(static_cast<size_t>(y_stride) * height_);
+    std::vector<uint8_t> u(static_cast<size_t>(u_stride) * (height_ / 2));
+    std::vector<uint8_t> v(static_cast<size_t>(v_stride) * (height_ / 2));
+
+    YUY2ToI420Planes(in_ptr, in_stride, width_, height_,
+                     y.data(), y_stride, u.data(), u_stride, v.data(), v_stride);
+
+    if (on_image_frame) {
+      // NOTE: on_image_frame takes ownership on the Dart side after you copy
+      // inside the plugin. If you need to hop threads, you can do it there.
+      on_image_frame(y.data(), y_stride,
+                     u.data(), u_stride,
+                     v.data(), v_stride,
+                     width_, height_,
+                     "I420");
+      // If your on_image_frame enqueues async work, consider making y/u/v
+      // persistent until the hop completes. Your current plugin copies them
+      // into EncodableValues, so this is fine.
+    }
+  }
+  else if (camera_output_format == "MJPEG") {
+    const auto* compressedData = static_cast<uint8_t*>(spa_buf->datas[0].data);
+    const size_t compressedSize = spa_buf->datas[0].chunk ? spa_buf->datas[0].chunk->size : 0;
+    ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(), width_, height_);
+    // (Optional) also convert RGB->I420 here if you want to feed Dart when MJPEG is negotiated.
+  }
+  else if (camera_output_format == "I420") {
+    // Your existing I420 fast-path (if you ever get I420 negotiated)
+    if (spa_buf->n_datas >= 3 &&
+        spa_buf->datas[0].data && spa_buf->datas[1].data && spa_buf->datas[2].data) {
+
+      const uint8_t* Y = static_cast<const uint8_t*>(spa_buf->datas[0].data);
+      const uint8_t* U = static_cast<const uint8_t*>(spa_buf->datas[1].data);
+      const uint8_t* V = static_cast<const uint8_t*>(spa_buf->datas[2].data);
+
+      const int y_stride = (spa_buf->datas[0].chunk && spa_buf->datas[0].chunk->stride) ? spa_buf->datas[0].chunk->stride : width_;
+      const int u_stride = (spa_buf->datas[1].chunk && spa_buf->datas[1].chunk->stride) ? spa_buf->datas[1].chunk->stride : width_ / 2;
+      const int v_stride = (spa_buf->datas[2].chunk && spa_buf->datas[2].chunk->stride) ? spa_buf->datas[2].chunk->stride : width_ / 2;
+
+      if (on_image_frame) {
+        on_image_frame(Y, y_stride, U, u_stride, V, v_stride, width_, height_, "I420");
+      }
+      ret = 0; // for preview path below if you also populate decoded_buffer_
+    }
   }
   else {
-    spdlog::debug("camera_ouput_format {}", camera_output_format);
+    spdlog::debug("camera_output_format {}", camera_output_format);
   }
 
+  // --- Preview upload (unchanged) ---
   if (ret == 0) {
-    {
-      std::lock_guard<std::mutex> lock(frame_mutex_);
-      new_frame_available_ = true;
-      registrar_->texture_registrar()->TextureMakeCurrent();
-      glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
-      glViewport(0, 0, width_, height_);
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    registrar_->texture_registrar()->TextureMakeCurrent();
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    glViewport(0, 0, width_, height_);
 
-      glActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_2D, texture_id_);
-      glUniform1i(0, 0);
-      glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture_id_);
+    glUniform1i(0, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
-                      GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0, GL_RGB,
-                   GL_UNSIGNED_BYTE, decoded_buffer_.get());
-      glGenerateMipmap(GL_TEXTURE_2D);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width_, height_, 0, GL_RGB,
+                 GL_UNSIGNED_BYTE, decoded_buffer_.get());
+    glGenerateMipmap(GL_TEXTURE_2D);
 
-      glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-      registrar_->texture_registrar()->TextureClearCurrent();
-      registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
-    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    registrar_->texture_registrar()->TextureClearCurrent();
+    registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
   } else {
-    spdlog::error("[CameraStream] mjpeg decode failed.");
+    spdlog::error("[CameraStream] frame decode failed.");
   }
+
   pw_stream_queue_buffer(pw_stream_, buf);
 }
 
@@ -499,6 +620,29 @@ void CameraStream::OnStreamStateChanged(void* /*data*/,
                                         const char* /*error*/) {
   spdlog::debug("[CameraStream] stream state changed from {} to {}",
                 StreamStateToString(old_state), StreamStateToString(new_state));
+}
+
+void CameraStream::OnParamChanged(void* data, uint32_t id, const struct spa_pod* param) {
+  if (id != SPA_PARAM_Format || !param) return;
+
+  CameraStream* self = static_cast<CameraStream*>(data);
+
+  struct spa_video_info info;
+  spa_zero(info);
+  if (spa_format_parse(param, &info.media_type, &info.media_subtype) < 0) return;
+  if (info.media_type != SPA_MEDIA_TYPE_video || info.media_subtype != SPA_MEDIA_SUBTYPE_raw) {
+    spdlog::info("[CameraStream] negotiated non-raw format");
+    return;
+  }
+  if (spa_format_video_raw_parse(param, &info.info.raw) < 0) return;
+
+  auto fmt = info.info.raw.format;
+  const char* fmt_name = spa_debug_type_find_name(spa_type_video_format, fmt);
+  spdlog::info("[CameraStream] negotiated RAW format: {}",
+               fmt_name ? fmt_name : "unknown");
+
+  // Save for HandleProcess() branching
+  self->negotiated_format_ = fmt; // add a member: uint32_t negotiated_format_ = SPA_VIDEO_FORMAT_ENCODED;
 }
 
 void CameraStream::OnStreamProcess(void* data) {

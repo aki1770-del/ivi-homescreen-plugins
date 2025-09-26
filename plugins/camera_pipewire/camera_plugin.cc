@@ -64,6 +64,13 @@ using namespace plugin_common;
 
 namespace camera_plugin {
 
+struct FramePayload {
+  CameraPlugin* self;
+  std::vector<uint8_t> y, u, v;
+  int ys, us, vs;
+  int w, h;
+};
+
 void CameraPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrarDesktop* registrar) {
   auto plugin =
@@ -627,19 +634,84 @@ bool CameraPlugin::SendI420FrameFromJpeg(const std::string& jpeg_path) {
 }
 
 void CameraPlugin::StartImageStream() {
-  // For now start the fake timer; replace with PipeWire stream start.
-  static guint timer_id = 0;
-  if (timer_id == 0) {
-    timer_id = g_timeout_add(50, _fake_tick, this); // 2 fps
-  }
+  image_stream_active_ = true;
+  // If your CameraStream is not already running, start/Resume it here.
+  // e.g., CameraId_CameraStream[camera_id]->ResumeStream();
 }
 
 void CameraPlugin::StopImageStream() {
-  // Stop the fake timer; replace with PipeWire stop.
-  extern guint g_main_current_source(); // (not needed; we'll track our own id)
-  // If you saved timer_id in a member, remove it here. This stub keeps it static in StartImageStream.
+  image_stream_active_ = false;
+  // e.g., CameraId_CameraStream[camera_id]->PauseStream();
+  // (or disconnect PipeWire stream if you want to free resources)
 }
 
+std::atomic<bool> sending_{false};
+
+void CameraPlugin::MaybeSendFrameI420(const uint8_t* y, int y_stride,
+                                      const uint8_t* u, int u_stride,
+                                      const uint8_t* v, int v_stride,
+                                      int width, int height) {
+  if (!image_stream_active_ || !image_sink_) return;
+
+  // Acquire the "token" (if already true, a send is in flight → drop this frame)
+  bool expected = false;
+  if (!sending_.compare_exchange_strong(expected, true,
+                                        std::memory_order_acq_rel)) {
+    return;
+                                        }
+
+  // Copy planes now (producer thread) so data is valid when we hop threads
+  auto* payload = new FramePayload{
+    this,
+    std::vector<uint8_t>(y, y + static_cast<size_t>(y_stride) * height),
+    std::vector<uint8_t>(u, u + static_cast<size_t>(u_stride) * (height / 2)),
+    std::vector<uint8_t>(v, v + static_cast<size_t>(v_stride) * (height / 2)),
+    y_stride, u_stride, v_stride,
+    width, height
+  };
+
+  // Hop to the GLib main context to talk to Flutter (EventSink must be main thread)
+  g_main_context_invoke(
+      /*context*/ nullptr,
+      [](gpointer data) -> gboolean {
+        std::unique_ptr<FramePayload> P(static_cast<FramePayload*>(data));
+        CameraPlugin* self = P->self;
+
+        // Sink may have been cancelled meanwhile
+        if (self->image_stream_active_ && self->image_sink_) {
+          self->SendI420Frame(P->y.data(), P->ys,
+                              P->u.data(), P->us,
+                              P->v.data(), P->vs,
+                              P->w, P->h);
+        }
+
+        // Release back-pressure token
+        self->sending_.store(false, std::memory_order_release);
+        return G_SOURCE_REMOVE;
+      },
+      payload);
+}
+std::atomic<int64_t> last_ns_{0};
+const int64_t min_interval_ns = 1000000000LL / 10; // 10 fps
+
+static inline int64_t monotonic_time_ns() {
+#if GLIB_CHECK_VERSION(2,28,0)
+  // g_get_monotonic_time() returns microseconds
+  return (int64_t)g_get_monotonic_time() * 1000;
+#else
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+#endif
+}
+
+bool ShouldSendNow() {
+  int64_t now = monotonic_time_ns();
+  int64_t prev = last_ns_.load(std::memory_order_relaxed);
+  if (now - prev < min_interval_ns) return false;
+  last_ns_.store(now, std::memory_order_relaxed);
+  return true;
+}
 void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
                                  const uint8_t* u, int u_stride,
                                  const uint8_t* v, int v_stride,
@@ -678,7 +750,7 @@ void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
   EncodableMap event{
       {EncodableValue("width"),       EncodableValue(width)},
       {EncodableValue("height"),      EncodableValue(height)},
-      {EncodableValue("formatGroup"), EncodableValue("yuv421")},
+      {EncodableValue("formatGroup"), EncodableValue("yuv420")},
       {EncodableValue("raw"),         EncodableValue("I420")},
       {EncodableValue("planes"),      EncodableValue(std::move(planes))},
   };
