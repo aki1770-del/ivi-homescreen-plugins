@@ -310,21 +310,20 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 1000.0f;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
       settings.shadowType = filament::View::ShadowType::PCF;
-      settings.ssao = {
-        .radius = 1.0f,                                       //
-        .power = 0.7f,                                        //
-        .bias = 0.01f,                                        //
-        .resolution = 1.0f,                                   //
-        .intensity = 2.0f,                                    //
-        .bilateralThreshold = 0.05f,                          //
-        .quality = filament::View::QualityLevel::HIGH,        //
-        .lowPassFilter = filament::View::QualityLevel::HIGH,  //
-        .upsampling = filament::View::QualityLevel::HIGH,     //
-        .enabled = true,                                      //
-        .bentNormals = true,                                  //
-        .minHorizonAngleRad = 0.523599f,                      // 30 degrees
-        .ssct = {.enabled = false}                            //
-      };
+      settings.ssao = {};
+      settings.ssao.radius = 1.0f;
+      settings.ssao.power = 0.7f;
+      settings.ssao.bias = 0.01f;
+      settings.ssao.resolution = 1.0f;
+      settings.ssao.intensity = 2.0f;
+      settings.ssao.bilateralThreshold = 0.05f;
+      settings.ssao.quality = filament::View::QualityLevel::HIGH;
+      settings.ssao.lowPassFilter = filament::View::QualityLevel::HIGH;
+      settings.ssao.upsampling = filament::View::QualityLevel::HIGH;
+      settings.ssao.enabled = true;
+      settings.ssao.bentNormals = true;
+      settings.ssao.minHorizonAngleRad = 0.523599f;  // 30 degrees
+      settings.ssao.ssct = {.enabled = false};
       fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
