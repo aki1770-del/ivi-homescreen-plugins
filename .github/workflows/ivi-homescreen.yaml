@@ -100,26 +100,26 @@ jobs:
           ls -laR $LIBCAMERA_STAGING
 
       - name: Cache filament
-        id: cache-filament
+        id: cache-filament-1-65-2
         uses: actions/cache@v4
         with:
-          key: ${{ runner.os }}-filament
+          key: ${{ runner.os }}-filament-1-65-2
           path: |
             ${{github.workspace}}/filament/cmake-build-release/staging/release/*
 
       - name: Build Filament
-        if: steps.cache-filament.outputs.cache-hit != 'true'
+        if: steps.cache-filament-1-65-2.outputs.cache-hit != 'true'
         working-directory: ${{github.workspace}}
         run: |
           git clone -b release https://github.com/google/filament.git
           cd filament
-          git checkout v1.60.1
+          git checkout v1.65.2
           PATCHES=${{github.workspace}}/.github/workflows/patches
-          git apply $PATCHES/filament/0001-disable-backend-tests.patch
+          git apply $PATCHES/filament/0001-disable-backend-tests-1.65.2.patch
           git apply $PATCHES/filament/0002-install-required-files.patch
           git apply $PATCHES/filament/0003-move-include-contents-to-include-filament.patch
-          git apply $PATCHES/filament/0004-move-libraries-so-they-install.patch
-          git apply $PATCHES/filament/0006-spirv-tools-threads.patch
+          git apply $PATCHES/filament/0004-move-libraries-so-they-install-1.65.2.patch
+          git apply $PATCHES/filament/0005-spirv-tools-threads.patch
           FILAMENT_BUILD_DIR=$PWD/cmake-build-release
           FILAMENT_STAGING_DIR=${FILAMENT_BUILD_DIR}/staging/release
           mkdir -p $FILAMENT_BUILD_DIR
