@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <core/include/resource.h>
 #include <core/scene/indirect_light/indirect_light.h>
 #include <core/scene/view_target.h>
 #include <core/systems/base/system.h>
