@@ -64,13 +64,6 @@ using namespace plugin_common;
 
 namespace camera_plugin {
 
-struct FramePayload {
-  CameraPlugin* self;
-  std::vector<uint8_t> y, u, v;
-  int ys, us, vs;
-  int w, h;
-};
-
 void CameraPlugin::RegisterWithRegistrar(
     flutter::PluginRegistrarDesktop* registrar) {
   auto plugin =
@@ -99,7 +92,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
             std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& sink)
             -> std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>> {
           spdlog::info("[camera_plugin] image_stream on_listen");
-          image_stream_active_ = true;
+          //image_stream_active_ = true;
           image_sink_ = std::move(sink);
           StartImageStream();  // start PipeWire or a test generator
           return nullptr;
@@ -167,12 +160,8 @@ void CameraPlugin::Create(
       g_main_context_invoke(nullptr, [](gpointer data) -> gboolean {
         std::unique_ptr<Payload> P(static_cast<Payload*>(data));
         if (!P->self->image_sink_) return G_SOURCE_REMOVE;
-
-        if (P->raw == "NV12") {
-          P->self->SendNV12Frame(P->y.data(), P->ys, P->u.data(), P->us, P->w, P->h);
-        } else {
-          P->self->SendI420Frame(P->y.data(), P->ys, P->u.data(), P->us,
-                                 P->v.data(), P->vs, P->w, P->h);
+        if (P->raw == "I420") {
+          P->self->SendI420Frame(P->y.data(), P->ys, P->u.data(), P->us,P->v.data(), P->vs, P->w, P->h);
         }
         return G_SOURCE_REMOVE;
       }, p);
@@ -185,9 +174,7 @@ void CameraPlugin::Create(
   spdlog::debug("[camera_plugin] camera_id {}'s texture_id: {}", camera_id,
                 texture_id);
   result(ErrorOr<int64_t>(texture_id));
-
 }
-
 /******************************************************************************
  * decode_mjpeg
  ******************************************************************************/
@@ -371,268 +358,6 @@ void CameraPlugin::ResumePreview(
 
 // ===================== Image-stream helpers =====================
 
-// Optional: tiny 2 fps gray-frame generator to prove the channel works.
-// Remove this once PipeWire calls SendI420Frame from its callback.
-static gboolean _fake_tick(gpointer self) {
-  auto* plugin = static_cast<CameraPlugin*>(self);
-/*
-  const int width = 640, height = 480;
-  const int y_stride = width;
-  const int uv_stride = width / 2;
-  const size_t y_size = y_stride * height;
-  const size_t u_size = uv_stride * (height / 2);
-  const size_t v_size = uv_stride * (height / 2);
-  std::vector<uint8_t> y(y_size, 128), u(u_size, 128), v(v_size, 128);
-  */
-  //plugin->SendI420FrameFromJpeg("/home/tcna/Pictures/PhotoCapture_2025_0404_155719_278.jpeg");
-  auto stream_ptr = plugin->GetCameraStream(3);
-  if (stream_ptr) {
-    plugin->SendI420FrameFromCameraStream(*stream_ptr);
-  }
-  return TRUE; // keep timer
-}
-
-// BT.601 limited-range conversion, clamped to [0,255]
-static inline uint8_t clamp_to_u8(int v) {
-  if (v < 0) return 0;
-  if (v > 255) return 255;
-  return static_cast<uint8_t>(v);
-}
-
-// Convert interleaved RGB24 to I420.
-// width,height must be even. y/u/v already sized: y=width*height, u=v=(width/2)*(height/2)
-static void RGB24ToI420(const uint8_t* rgb, int rgb_stride,
-                        uint8_t* y, int y_stride,
-                        uint8_t* u, int u_stride,
-                        uint8_t* v, int v_stride,
-                        int width, int height) {
-  // Process 2x2 blocks to subsample U/V
-  for (int j = 0; j < height; j += 2) {
-    const uint8_t* row0 = rgb + j * rgb_stride;
-    const uint8_t* row1 = rgb + (j + 1) * rgb_stride;
-    uint8_t* y0 = y + j * y_stride;
-    uint8_t* y1 = y + (j + 1) * y_stride;
-    uint8_t* urow = u + (j / 2) * u_stride;
-    uint8_t* vrow = v + (j / 2) * v_stride;
-
-    for (int i = 0; i < width; i += 2) {
-      // Top-left
-      int r00 = row0[3 * i + 0];
-      int g00 = row0[3 * i + 1];
-      int b00 = row0[3 * i + 2];
-      // Top-right
-      int r01 = row0[3 * (i + 1) + 0];
-      int g01 = row0[3 * (i + 1) + 1];
-      int b01 = row0[3 * (i + 1) + 2];
-      // Bottom-left
-      int r10 = row1[3 * i + 0];
-      int g10 = row1[3 * i + 1];
-      int b10 = row1[3 * i + 2];
-      // Bottom-right
-      int r11 = row1[3 * (i + 1) + 0];
-      int g11 = row1[3 * (i + 1) + 1];
-      int b11 = row1[3 * (i + 1) + 2];
-
-      auto Yfun = [](int R, int G, int B) {
-        // BT.601 limited range: Y = 16 + 0.257R + 0.504G + 0.098B
-        int y = 16 + ((66*R + 129*G + 25*B + 128) >> 8);
-        return clamp_to_u8(y);
-      };
-      auto Ufun = [](int R, int G, int B) {
-        // U = 128 - 0.148R - 0.291G + 0.439B
-        int u = 128 + ((-38*R - 74*G + 112*B + 128) >> 8);
-        return clamp_to_u8(u);
-      };
-      auto Vfun = [](int R, int G, int B) {
-        // V = 128 + 0.439R - 0.368G - 0.071B
-        int v = 128 + ((112*R - 94*G - 18*B + 128) >> 8);
-        return clamp_to_u8(v);
-      };
-
-      // Write Ys
-      y0[i + 0] = Yfun(r00,g00,b00);
-      y0[i + 1] = Yfun(r01,g01,b01);
-      y1[i + 0] = Yfun(r10,g10,b10);
-      y1[i + 1] = Yfun(r11,g11,b11);
-
-      // Average U/V over the 2x2 block
-      int U00 = Ufun(r00,g00,b00), V00 = Vfun(r00,g00,b00);
-      int U01 = Ufun(r01,g01,b01), V01 = Vfun(r01,g01,b01);
-      int U10 = Ufun(r10,g10,b10), V10 = Vfun(r10,g10,b10);
-      int U11 = Ufun(r11,g11,b11), V11 = Vfun(r11,g11,b11);
-
-      urow[i/2] = clamp_to_u8((U00 + U01 + U10 + U11) / 4);
-      vrow[i/2] = clamp_to_u8((V00 + V01 + V10 + V11) / 4);
-    }
-  }
-}
-
-// Decode a JPEG file to RGB24. Returns width, height, data (row-major, 3 bytes/pixel).
-static bool DecodeJpegRGB(const std::string& path,
-                          int* out_w, int* out_h,
-                          std::vector<uint8_t>* out_rgb,
-                          int* out_stride) {
-  FILE* fp = std::fopen(path.c_str(), "rb");
-  if (!fp) return false;
-
-  jpeg_decompress_struct cinfo;
-  jpeg_error_mgr jerr;
-  cinfo.err = jpeg_std_error(&jerr);
-
-  jpeg_create_decompress(&cinfo);
-  jpeg_stdio_src(&cinfo, fp);
-
-  if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
-    jpeg_destroy_decompress(&cinfo);
-    std::fclose(fp);
-    return false;
-  }
-
-  cinfo.out_color_space = JCS_RGB;  // RGB24
-  if (!jpeg_start_decompress(&cinfo)) {
-    jpeg_destroy_decompress(&cinfo);
-    std::fclose(fp);
-    return false;
-  }
-
-  int w = static_cast<int>(cinfo.output_width);
-  int h = static_cast<int>(cinfo.output_height);
-
-  // Ensure even dims for I420; if odd, we’ll crop the last row/col here.
-  if (w % 2) --w;
-  if (h % 2) --h;
-
-  const int stride = w * 3;
-  out_rgb->assign(static_cast<size_t>(stride) * h, 0);
-
-  std::vector<uint8_t> scanline(static_cast<size_t>(cinfo.output_width) * 3);
-  JSAMPROW rowp[1] = { scanline.data() };
-
-  for (int row = 0; row < h; ++row) {
-    jpeg_read_scanlines(&cinfo, rowp, 1);
-    // Crop if the decoded width is larger than our even width `w`.
-    std::memcpy(out_rgb->data() + static_cast<size_t>(row) * stride,
-                scanline.data(), static_cast<size_t>(w) * 3);
-  }
-
-  // Drain remaining scanlines if the image was taller (odd) than h.
-  while (cinfo.output_scanline < cinfo.output_height) {
-    jpeg_read_scanlines(&cinfo, rowp, 1);
-  }
-
-  jpeg_finish_decompress(&cinfo);
-  jpeg_destroy_decompress(&cinfo);
-  std::fclose(fp);
-
-  *out_w = w;
-  *out_h = h;
-  *out_stride = stride;
-  return true;
-}
-
-#include <cstdio>
-#include <jpeglib.h>
-#include <stdexcept>
-#include <string>
-
-// rgb must be RGB24 (3 bytes/pixel), row-major
-static bool SaveRGBAsJPEG(uint8_t* rgb,   // <-- note: non-const
-                          int w,
-                          int h,
-                          int rgb_stride,
-                          const std::string& filename,
-                          int quality = 90) {
-  FILE* f = std::fopen(filename.c_str(), "wb");
-  if (!f) return false;
-
-  jpeg_compress_struct cinfo;
-  jpeg_error_mgr jerr;
-  cinfo.err = jpeg_std_error(&jerr);
-  jpeg_create_compress(&cinfo);
-  jpeg_stdio_dest(&cinfo, f);
-
-  cinfo.image_width = w;
-  cinfo.image_height = h;
-  cinfo.input_components = 3;
-  cinfo.in_color_space = JCS_RGB;
-
-  jpeg_set_defaults(&cinfo);
-  jpeg_set_quality(&cinfo, quality, TRUE);
-  jpeg_start_compress(&cinfo, TRUE);
-
-  JSAMPROW row_pointer[1];
-  while (cinfo.next_scanline < cinfo.image_height) {
-    const size_t offset = static_cast<size_t>(cinfo.next_scanline) * rgb_stride;
-    row_pointer[0] = reinterpret_cast<JSAMPROW>(rgb + offset); // no const cast
-    jpeg_write_scanlines(&cinfo, row_pointer, 1);
-  }
-
-  jpeg_finish_compress(&cinfo);
-  jpeg_destroy_compress(&cinfo);
-  std::fclose(f);
-  return true;
-}
-
-
-bool CameraPlugin::SendI420FrameFromCameraStream(CameraStream& stream) {
-  //int w = stream.width();
-  //int h = stream.height()
-  int w = 640;
-  int h = 480;
-
-  int rgb_stride = w * 3;
-
-  std::vector<uint8_t> rgb = stream.requestBuffer();
-  if (rgb.size() != static_cast<size_t>(rgb_stride) * h) {
-    // LOG: failed to get valid buffer
-    return false;
-  }
-
-  (void)SaveRGBAsJPEG(rgb.data(), w, h, rgb_stride, "/home/tcna/dev/frame.jpg", 90);
-
-  const int y_stride  = w;
-  const int uv_stride = w / 2;
-
-  std::vector<uint8_t> y(static_cast<size_t>(y_stride) * h);
-  std::vector<uint8_t> u(static_cast<size_t>(uv_stride) * (h / 2));
-  std::vector<uint8_t> v(static_cast<size_t>(uv_stride) * (h / 2));
-
-  RGB24ToI420(rgb.data(), rgb_stride,
-              y.data(), y_stride,
-              u.data(), uv_stride,
-              v.data(), uv_stride,
-              w, h);
-
-  SendI420Frame(y.data(), y_stride, u.data(), uv_stride, v.data(), uv_stride, w, h);
-  return true;
-}
-
-bool CameraPlugin::SendI420FrameFromJpeg(const std::string& jpeg_path) {
-  int w = 0, h = 0, rgb_stride = 0;
-  std::vector<uint8_t> rgb;
-  if (!DecodeJpegRGB(jpeg_path, &w, &h, &rgb, &rgb_stride)) {
-    // LOG: failed to load/parse jpeg
-    return false;
-  }
-
-  const int y_stride  = w;
-  const int uv_stride = w / 2;
-
-  std::vector<uint8_t> y(static_cast<size_t>(y_stride) * h);
-  std::vector<uint8_t> u(static_cast<size_t>(uv_stride) * (h / 2));
-  std::vector<uint8_t> v(static_cast<size_t>(uv_stride) * (h / 2));
-
-  RGB24ToI420(rgb.data(), rgb_stride,
-              y.data(), y_stride,
-              u.data(), uv_stride,
-              v.data(), uv_stride,
-              w, h);
-
-  // Reuse your existing sender
-  SendI420Frame(y.data(), y_stride, u.data(), uv_stride, v.data(), uv_stride, w, h);
-  return true;
-}
-
 void CameraPlugin::StartImageStream() {
   image_stream_active_ = true;
   // If your CameraStream is not already running, start/Resume it here.
@@ -647,50 +372,6 @@ void CameraPlugin::StopImageStream() {
 
 std::atomic<bool> sending_{false};
 
-void CameraPlugin::MaybeSendFrameI420(const uint8_t* y, int y_stride,
-                                      const uint8_t* u, int u_stride,
-                                      const uint8_t* v, int v_stride,
-                                      int width, int height) {
-  if (!image_stream_active_ || !image_sink_) return;
-
-  // Acquire the "token" (if already true, a send is in flight → drop this frame)
-  bool expected = false;
-  if (!sending_.compare_exchange_strong(expected, true,
-                                        std::memory_order_acq_rel)) {
-    return;
-                                        }
-
-  // Copy planes now (producer thread) so data is valid when we hop threads
-  auto* payload = new FramePayload{
-    this,
-    std::vector<uint8_t>(y, y + static_cast<size_t>(y_stride) * height),
-    std::vector<uint8_t>(u, u + static_cast<size_t>(u_stride) * (height / 2)),
-    std::vector<uint8_t>(v, v + static_cast<size_t>(v_stride) * (height / 2)),
-    y_stride, u_stride, v_stride,
-    width, height
-  };
-
-  // Hop to the GLib main context to talk to Flutter (EventSink must be main thread)
-  g_main_context_invoke(
-      /*context*/ nullptr,
-      [](gpointer data) -> gboolean {
-        std::unique_ptr<FramePayload> P(static_cast<FramePayload*>(data));
-        CameraPlugin* self = P->self;
-
-        // Sink may have been cancelled meanwhile
-        if (self->image_stream_active_ && self->image_sink_) {
-          self->SendI420Frame(P->y.data(), P->ys,
-                              P->u.data(), P->us,
-                              P->v.data(), P->vs,
-                              P->w, P->h);
-        }
-
-        // Release back-pressure token
-        self->sending_.store(false, std::memory_order_release);
-        return G_SOURCE_REMOVE;
-      },
-      payload);
-}
 std::atomic<int64_t> last_ns_{0};
 const int64_t min_interval_ns = 1000000000LL / 10; // 10 fps
 
@@ -758,112 +439,4 @@ void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
   image_sink_->Success(flutter::EncodableValue(std::move(event)));
 }
 
-void CameraPlugin::SendNV12Frame(const uint8_t* y, int y_stride,
-                                 const uint8_t* uv, int uv_stride,
-                                 int width, int height) {
-  if (!image_sink_) return;
-  using flutter::EncodableList; using flutter::EncodableMap; using flutter::EncodableValue;
-
-  std::vector<uint8_t> yv(y, y + y_stride * height);
-  std::vector<uint8_t> uvv(uv, uv + uv_stride * (height / 2));
-
-  EncodableList planes;
-  planes.emplace_back(EncodableMap{
-    {EncodableValue("bytes"),       EncodableValue(std::move(yv))},
-    {EncodableValue("bytesPerRow"), EncodableValue(y_stride)},
-    {EncodableValue("bytesPerPixel"), EncodableValue(1)},  // Y samples are 1 byte
-
-  });
-  planes.emplace_back(EncodableMap{
-    {EncodableValue("bytes"),       EncodableValue(std::move(uvv))},
-    {EncodableValue("bytesPerRow"), EncodableValue(uv_stride)},
-    {EncodableValue("bytesPerPixel"), EncodableValue(2)},  // interleaved UV -> pixel stride 2
-
-  });
-
-  EncodableMap event{
-    {EncodableValue("width"),       EncodableValue(width)},
-    {EncodableValue("height"),      EncodableValue(height)},
-    {EncodableValue("formatGroup"), EncodableValue("yuv420")},
-    {EncodableValue("raw"),         EncodableValue("NV12")},
-    {EncodableValue("planes"),      EncodableValue(std::move(planes))},
-  };
-  image_sink_->Success(flutter::EncodableValue(std::move(event)));
-}
-
-
-
-void CameraPlugin::SendJpegFrame(const std::string& jpeg_path) {
-    if (!image_sink_) return;
-  using flutter::EncodableList; using flutter::EncodableMap; using flutter::EncodableValue;
-
-  // ---- 1) Probe dimensions with libjpeg (no full decode) ----
-  int width = 0, height = 0;
-  {
-    FILE* fp = std::fopen(jpeg_path.c_str(), "rb");
-    if (!fp) {
-      // Optional: report to Dart
-      // image_sink_->Error("io", "Failed to open JPEG: " + jpeg_path);
-      return;
-    }
-    jpeg_decompress_struct cinfo;
-    jpeg_error_mgr jerr;
-    cinfo.err = jpeg_std_error(&jerr);
-
-    jpeg_create_decompress(&cinfo);
-    jpeg_stdio_src(&cinfo, fp);
-    const int hdr_ok = jpeg_read_header(&cinfo, TRUE);
-    if (hdr_ok == JPEG_HEADER_OK) {
-      width  = static_cast<int>(cinfo.image_width);
-      height = static_cast<int>(cinfo.image_height);
-    }
-    jpeg_destroy_decompress(&cinfo);
-    std::fclose(fp);
-
-    if (width <= 0 || height <= 0) {
-      // image_sink_->Error("format", "Invalid JPEG header: " + jpeg_path);
-      return;
-    }
-  }
-
-  // ---- 2) Read the compressed JPEG bytes ----
-  std::vector<uint8_t> jpeg_bytes;
-  {
-    std::ifstream in(jpeg_path, std::ios::binary | std::ios::ate);
-    if (!in) {
-      // image_sink_->Error("io", "Failed to read JPEG: " + jpeg_path);
-      return;
-    }
-    const std::streamsize size = in.tellg();
-    if (size <= 0) {
-      // image_sink_->Error("io", "Empty JPEG: " + jpeg_path);
-      return;
-    }
-    in.seekg(0, std::ios::beg);
-    jpeg_bytes.resize(static_cast<size_t>(size));
-    if (!in.read(reinterpret_cast<char*>(jpeg_bytes.data()), size)) {
-      // image_sink_->Error("io", "Short read for JPEG: " + jpeg_path);
-      return;
-    }
-  }
-
-  // ---- 3) Package one-plane JPEG payload and send ----
-  EncodableList planes;
-  planes.emplace_back(EncodableMap{
-      {EncodableValue("bytes"),         EncodableValue(std::move(jpeg_bytes))},
-      // Stride & bpp are not meaningful for compressed data; send 0.
-      {EncodableValue("bytesPerRow"),   EncodableValue(0)},
-      {EncodableValue("bytesPerPixel"), EncodableValue(0)},
-  });
-
-  EncodableMap event{
-      {EncodableValue("width"),       EncodableValue(width)},
-      {EncodableValue("height"),      EncodableValue(height)},
-      {EncodableValue("formatGroup"), EncodableValue("jpeg")},  // <—
-      {EncodableValue("raw"),         EncodableValue("JPEG")},  // <—
-      {EncodableValue("planes"),      EncodableValue(std::move(planes))},
-  };
-
-  image_sink_->Success(EncodableValue(std::move(event)));
-}
 }  // namespace camera_plugin

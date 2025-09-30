@@ -36,25 +36,14 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
   // Send one I420 frame to Dart (call from your PipeWire callback or test timer)
-  void MaybeSendFrameI420(const uint8_t* y, int y_stride,
-                          const uint8_t* u, int u_stride,
-                          const uint8_t* v, int v_stride,
-                          int width, int height);
+
   void SendI420Frame(const uint8_t* y, int y_stride,
                      const uint8_t* u, int u_stride,
                      const uint8_t* v, int v_stride,
                      int width, int height);
 
-  void SendNV12Frame(const uint8_t* y, int y_stride,
-                                 const uint8_t* uv, int uv_stride,
-                                 int width, int height);
-
-  void SendJpegFrame(const std::string& jpeg_file_path);
   CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                flutter::BinaryMessenger* messenger);
-
-  bool SendI420FrameFromJpeg(const std::string& jpeg_path);
-  bool SendI420FrameFromCameraStream(CameraStream& stream);
 
   ~CameraPlugin() override;
 
