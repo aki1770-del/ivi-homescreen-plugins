@@ -24,6 +24,8 @@
 
 #include <flutter/encodable_value.h>
 
+#define _MATPARAM_VEC_MAX_SIZE 4
+
 namespace plugin_filament_view {
 
 class TextureDefinitions;
@@ -32,9 +34,15 @@ class TextureSampler;
 
 using MaterialTextureValue = std::variant<std::unique_ptr<TextureDefinitions>>;
 using MaterialFloatValue = float;
+using MaterialIntValue = int32_t;
+using MaterialBoolValue = bool;
 using MaterialColorValue = ::filament::math::vec4<float>;
+using MaterialFloatVectorValue = std::vector<float>;
 
 class MaterialParameter {
+  private:
+    enum class _MaterialField { NAME, TYPE, VALUE, UNKNOWN };
+
   public:
     enum class MaterialType {
       // color can be presented by int or Color like Colors.white
@@ -42,7 +50,9 @@ class MaterialParameter {
       BOOL,
       BOOL_VECTOR,
       FLOAT,
-      FLOAT_VECTOR,
+      FLOAT2,
+      FLOAT3,
+      FLOAT4,
       INT,
       INT_VECTOR,
       MAT3,
@@ -50,9 +60,11 @@ class MaterialParameter {
       TEXTURE,
     };
 
-    MaterialParameter(std::string name, MaterialType type, MaterialTextureValue value);
-    MaterialParameter(std::string name, MaterialType type, MaterialFloatValue value);
-    MaterialParameter(std::string name, MaterialType type, MaterialColorValue value);
+    MaterialParameter(std::string name, const MaterialType type, MaterialTextureValue value);
+    MaterialParameter(std::string name, const MaterialType type, MaterialFloatValue value);
+    MaterialParameter(std::string name, const MaterialType type, MaterialIntValue value);
+    MaterialParameter(std::string name, const MaterialType type, MaterialColorValue value);
+    MaterialParameter(std::string name, const MaterialType type, MaterialFloatVectorValue value);
 
     static std::unique_ptr<MaterialParameter> Deserialize(
       const std::string& flutter_assets_path,
@@ -100,8 +112,14 @@ class MaterialParameter {
 
     [[nodiscard]] std::unique_ptr<MaterialParameter> clone() const {
       switch (type_) {
+        case MaterialType::FLOAT2:
+          [[fallthrough]];
+        case MaterialType::FLOAT3:
+          [[fallthrough]];
+        case MaterialType::FLOAT4:
+          [[fallthrough]];
         case MaterialType::COLOR:
-          return std::make_unique<MaterialParameter>(name_, type_, colorValue_.value());
+          return std::make_unique<MaterialParameter>(name_, type_, fVecValue_.value());
         case MaterialType::FLOAT:
           return std::make_unique<MaterialParameter>(name_, type_, fValue_.value());
         case MaterialType::TEXTURE:
@@ -114,11 +132,11 @@ class MaterialParameter {
             }
           }
           break;
+        case MaterialType::INT:
+          break;
         // Handle other types (BOOL, BOOL_VECTOR, INT, etc.)
         case MaterialType::BOOL:
-        case MaterialType::INT:
-          // Add cloning logic for these types
-          break;
+          // TODO: Add cloning logic for these types
         default:
           throw std::runtime_error("Unsupported MaterialType in clone.");
       }
@@ -126,22 +144,13 @@ class MaterialParameter {
     }
 
   private:
-    static constexpr char kColor[] = "COLOR";
-    static constexpr char kBool[] = "BOOL";
-    static constexpr char kBoolVector[] = "BOOL_VECTOR";
-    static constexpr char kFloat[] = "FLOAT";
-    static constexpr char kFloatVector[] = "FLOAT_VECTOR";
-    static constexpr char kInt[] = "INT";
-    static constexpr char kIntVector[] = "INT_VECTOR";
-    static constexpr char kMat3[] = "MAT3";
-    static constexpr char kMat4[] = "MAT4";
-    static constexpr char kTexture[] = "TEXTURE";
-
     std::string name_;
     MaterialType type_;
     std::optional<MaterialTextureValue> textureValue_;
     std::optional<MaterialFloatValue> fValue_;
-    std::optional<MaterialColorValue> colorValue_;
+    std::optional<MaterialFloatVectorValue> fVecValue_;
+    std::optional<MaterialIntValue> iValue_;
+    std::optional<MaterialBoolValue> bValue_;
 
     // TODO delete this, colorOf functionality exists in base filament.
     static MaterialColorValue HexToColorFloat4(const std::string& hex);
@@ -149,5 +158,33 @@ class MaterialParameter {
     static const char* getTextForType(MaterialType type);
 
     static MaterialType getTypeForText(const std::string& type);
+
+    static _MaterialField GetFieldForText(const std::string& field) {
+      if (field == "name") {
+        return _MaterialField::NAME;
+      }
+      if (field == "type") {
+        return _MaterialField::TYPE;
+      }
+      if (field == "value") {
+        return _MaterialField::VALUE;
+      }
+      return _MaterialField::UNKNOWN;
+    }
+
+    static size_t GetVectorSizeForType(MaterialType type) {
+      switch (type) {
+        case MaterialType::COLOR:
+          [[fallthrough]];
+        case MaterialType::FLOAT4:
+          return 4;
+        case MaterialType::FLOAT3:
+          return 3;
+        case MaterialType::FLOAT2:
+          return 2;
+        default:
+          return 1;
+      }
+    }
 };
 }  // namespace plugin_filament_view
