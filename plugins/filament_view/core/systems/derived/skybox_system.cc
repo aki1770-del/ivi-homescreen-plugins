@@ -209,12 +209,14 @@ std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromKTXUrl(const 
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
-std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromColor(const std::string& color) {
+std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromColor(
+  const filament::math::float4& color
+) {
   SPDLOG_TRACE("++SkyboxManager::setSkyboxFromColor");
   const auto promise(std::make_shared<std::promise<Resource<std::string_view>>>());
   auto future(promise->get_future());
 
-  if (color.empty()) {
+  if (color.w == 0) {
     promise->set_value(Resource<std::string_view>::Error("Color is Invalid"));
     return future;
   }
@@ -224,8 +226,7 @@ std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromColor(const s
     const auto filamentSystem = ecs->getSystem<FilamentSystem>("setSkyboxFromColor");
     const auto engine = filamentSystem->getFilamentEngine();
 
-    const auto colorArray = colorOf(color);
-    const auto skybox = filament::Skybox::Builder().color(colorArray).build(*engine);
+    const auto skybox = filament::Skybox::Builder().color(color).build(*engine);
     filamentSystem->getFilamentScene()->setSkybox(skybox);
     promise->set_value(
       Resource<std::string_view>::Success("Loaded environment successfully from color")

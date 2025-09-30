@@ -48,7 +48,7 @@ class SkyboxSystem : public System {
 
     std::future<Resource<std::string_view>> setSkyboxFromKTXUrl(const std::string& url);
 
-    std::future<Resource<std::string_view>> setSkyboxFromColor(const std::string& color);
+    std::future<Resource<std::string_view>> setSkyboxFromColor(const filament::math::float4& color);
 
     Resource<std::string_view> loadSkyboxFromHdrBuffer(
       const std::vector<uint8_t>& buffer,

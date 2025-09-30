@@ -18,6 +18,8 @@
 
 #include "shell/platform/common/client_wrapper/include/flutter/encodable_value.h"
 
+#include <core/utils/vectorutils.h>
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,7 +28,7 @@ namespace plugin_filament_view {
 
 class Skybox {
   public:
-    Skybox(std::string assetPath, std::string url, std::string color);
+    Skybox(std::string assetPath, std::string url, filament::math::float4 color);
 
     virtual ~Skybox() = default;
 
@@ -36,15 +38,14 @@ class Skybox {
 
     [[nodiscard]] const std::string& getUrl() const { return url_; }
 
-    [[nodiscard]] const std::string& getColor() const { return color_; }
+    [[nodiscard]] inline const filament::math::float4& getColor() const { return color_; }
 
     [[nodiscard]] std::string szGetURLPath() const { return url_; }
-    [[nodiscard]] std::string szGetColor() const { return color_; }
 
   protected:
     std::string assetPath_;
     std::string url_;
-    std::string color_;
+    filament::math::float4 color_;
 };
 
 class HdrSkybox final : public Skybox {
@@ -57,7 +58,7 @@ class HdrSkybox final : public Skybox {
       : Skybox(
           assetPath.has_value() ? std::move(assetPath.value()) : "",
           url.has_value() ? std::move(url.value()) : "",
-          ""
+          filament::math::float4(0.0f, 0.0f, 0.0f, 1.0f)
         ),
         showSun_(showSun.has_value() ? showSun.value() : false) {}
 
@@ -77,7 +78,7 @@ class KxtSkybox final : public Skybox {
       : Skybox(
           assetPath.has_value() ? std::move(assetPath.value()) : "",
           url.has_value() ? std::move(url.value()) : "",
-          ""
+          filament::math::float4(0.0f, 0.0f, 0.0f, 1.0f)
         ) {}
 
     ~KxtSkybox() override = default;
@@ -90,12 +91,13 @@ class ColorSkybox final : public Skybox {
     explicit ColorSkybox(
       std::optional<std::string> assetPath,
       std::optional<std::string> url,
-      std::optional<std::string> color
+      std::optional<filament::math::float4> color
     )
       : Skybox(
           assetPath.has_value() ? std::move(assetPath.value()) : "",
           url.has_value() ? std::move(url.value()) : "",
-          color.has_value() ? std::move(color.value()) : ""
+          color.has_value() ? std::move(color.value())
+                            : filament::math::float4{0.0f, 0.0f, 0.0f, 1.0f}
         ) {}
 
     ~ColorSkybox() override = default;
