@@ -90,6 +90,35 @@ bool Deserialize::DecodeParameterWithDefault(
   return false;
 }
 
+bool Deserialize::DecodeColor3WithDefault(
+  const char* key,
+  filament::math::float3* out_value,
+  const flutter::EncodableMap& params,
+  const filament::math::float3& default_value
+) {
+  if (const auto it = params.find(flutter::EncodableValue(key));
+      it != params.end() && std::holds_alternative<std::vector<double>>(it->second)) {
+
+    const auto& colorList = std::get<std::vector<double>>(it->second);
+    if (colorList.size() >= 3) {
+      *out_value = {
+        static_cast<float>(colorList[0]),  //
+        static_cast<float>(colorList[1]),  //
+        static_cast<float>(colorList[2])   //
+      };
+      return true;
+    } else {
+      spdlog::warn(
+        "Color list for key '{}' does not have enough elements, it has {}", key, colorList.size()
+      );
+    }
+  } else {
+    spdlog::debug("Key '{}' not found or wrong type for color3", key);
+  }
+  *out_value = default_value;
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////
 void Deserialize::DecodeParameterWithDefault(
   const char* key,

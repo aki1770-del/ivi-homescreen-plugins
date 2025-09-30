@@ -124,7 +124,7 @@ class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, publi
     ) override;
     std::optional<FlutterError> ChangeLightColorByGUID(
       const int64_t guid,
-      const std::string& color,
+      const std::vector<double>& color,
       double intensity
     ) override;
     std::optional<FlutterError> EnqueueAnimation(const int64_t guid, int64_t animation_index)

@@ -74,19 +74,14 @@ void LightSystem::BuildLight(Light& light) {
 
   auto builder = filament::LightManager::Builder(light.getLightType());
 
-  // As of 11.18.2024 it seems like the color ranges are not the same
-  // as their documentation expects 0-1 values, but the actual is 0-255 value
-  if (!light.getColor().empty()) {
-    auto colorValue = colorOf(light.getColor());
-    builder.color({colorValue[0], colorValue[1], colorValue[2]});
-  } else if (light.getColorTemperature() > 0) {
+  if (light.getColorTemperature() > 0) {
     auto cct = filament::Color::cct(light.getColorTemperature());
     auto red = cct.r;
     auto green = cct.g;
     auto blue = cct.b;
     builder.color({red * 255, green * 255, blue * 255});
   } else {
-    builder.color({255, 255, 255});
+    builder.color({light.color[0], light.color[1], light.color[2]});
   }
 
   // Note while not all of these vars are used in every scenario
@@ -133,9 +128,7 @@ void LightSystem::onSystemInit() {
 
     const auto guid = msg.getData<EntityGUID>(ECSMessageType::ChangeSceneLightProperties);
 
-    const auto colorValue = msg.getData<std::string>(
-      ECSMessageType::ChangeSceneLightPropertiesColorValue
-    );
+    const auto colorValue = msg.getData<std::vector<double>>(ECSMessageType::floatVec4);
 
     const auto intensityValue = msg.getData<float>(
       ECSMessageType::ChangeSceneLightPropertiesIntensity
@@ -146,7 +139,11 @@ void LightSystem::onSystemInit() {
     runtime_assert(theLight != nullptr, fmt::format("Entity({}): Light not found", guid));
 
     theLight->setIntensity(intensityValue);
-    theLight->setColor(colorValue);
+    theLight->color = float3(
+      static_cast<float>(colorValue[0]), static_cast<float>(colorValue[1]),
+      static_cast<float>(colorValue[2])
+    );
+    // Ignoring alpha channel for now: colorValue[3]
 
     RemoveLightFromScene(*theLight);
     BuildLightAndAddToScene(*theLight);
