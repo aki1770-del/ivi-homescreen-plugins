@@ -301,6 +301,7 @@ ViewTarget* ViewTargetSystem::getViewTarget(size_t index) const {
 
 ////////////////////////////////////////////////////////////////////////////////////
 void ViewTargetSystem::KickOffFrameRenderingLoops() const {
+  spdlog::debug("Kicking off frame rendering loops for {} view targets", _viewTargets.size());
   for (const auto& viewTarget : _viewTargets) {
     viewTarget->setInitialized();
   }
