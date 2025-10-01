@@ -213,8 +213,11 @@ void ViewTarget::setupView(uint32_t width, uint32_t height) {
 
   // fview_->setShadowingEnabled(false);
   // fview_->setScreenSpaceRefractionEnabled(false);
-  // fview_->setStencilBufferEnabled(false);
   // fview_->setDynamicLightingOptions(0.01, 1000.0f);
+
+  // NOTE: IMPORTANT! Filament doesn't allow stencil buffers on Metal/Vulkan
+  //       with Post-Processing enabled
+  fview_->setStencilBufferEnabled(false);
 
   ChangeQualitySettings(ViewTarget::ePredefinedQualitySettings::Ultra);
 
@@ -255,7 +258,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 100.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::LOW};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(false);
       break;
 
@@ -270,7 +272,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 250.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -288,7 +289,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 500.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -324,7 +324,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.ssao.bentNormals = true;
       settings.ssao.minHorizonAngleRad = 0.523599f;  // 30 degrees
       settings.ssao.ssct = {.enabled = false};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
   }
