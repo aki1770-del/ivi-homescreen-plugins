@@ -213,8 +213,11 @@ void ViewTarget::setupView(uint32_t width, uint32_t height) {
 
   // fview_->setShadowingEnabled(false);
   // fview_->setScreenSpaceRefractionEnabled(false);
-  // fview_->setStencilBufferEnabled(false);
   // fview_->setDynamicLightingOptions(0.01, 1000.0f);
+
+  // NOTE: IMPORTANT! Filament doesn't allow stencil buffers on Metal/Vulkan
+  //       with Post-Processing enabled
+  fview_->setStencilBufferEnabled(false);
 
   ChangeQualitySettings(ViewTarget::ePredefinedQualitySettings::Ultra);
 
@@ -255,7 +258,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 100.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::LOW};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(false);
       break;
 
@@ -270,7 +272,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 250.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -288,7 +289,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 500.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -324,7 +324,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.ssao.bentNormals = true;
       settings.ssao.minHorizonAngleRad = 0.523599f;  // 30 degrees
       settings.ssao.ssct = {.enabled = false};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
   }
@@ -654,7 +653,12 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
   // Wait for previous frame to complete
   // NOTE: this HAS to be done here, because the CallEvent above needs to complete on this thread
   //       so we need to give the event loop a chance to process it
-  if (!!obj->framePromise) obj->framePromise->get_future().wait();
+  if (!!obj->framePromise) {
+    // spdlog::debug("[OnFrame], waiting for previous frame to finish...", __FUNCTION__);
+    obj->framePromise->get_future().wait();
+  } else {
+    // spdlog::debug("[OnFrame], first frame!", __FUNCTION__);
+  }
 
   // Post and await promise
   const auto promise = std::make_shared<std::promise<void>>();
@@ -663,7 +667,7 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
   // TODO: there's a 0.05ms lag when posting the task - SHOULDN'T HAPPEN!
   // NOTE: let's use separate strands for work and rendering?
   post(*ECSManager::GetInstance()->getStrand(), [data, obj, callback, time, promise] {
-    // spdlog::debug("=== (wl) callback start ===");
+    // spdlog::debug("[OnFrame] === (wl) callback start ===");
     obj->callback_ = nullptr;
 
     // std::lock_guard<std::mutex> lock(obj->frameLock_);
@@ -686,7 +690,7 @@ void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time)
     // spdlog::debug("=== (wl) surface commit ===");
     // NOTE: DO NOT CALL wl_surface_commit, it already happens elsewhere
 
-    // spdlog::debug("=== (wl) callback end ===");
+    // spdlog::debug("[OnFrame] === (wl) callback end ===");
     promise->set_value();
   });
 

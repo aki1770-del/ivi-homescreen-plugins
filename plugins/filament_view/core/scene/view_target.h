@@ -52,9 +52,13 @@ class ViewTarget {
     ViewTarget& operator=(const ViewTarget&) = delete;
 
     void setInitialized() {
+      spdlog::debug(
+        "ViewTarget::setInitialized (previously {})", initialized_ ? "already true" : "false"
+      );
       if (initialized_) return;
 
       initialized_ = true;
+      spdlog::debug("ViewTarget::setInitialized calling OnFrame for the first time!");
       OnFrame(this, nullptr, 0);
     }
 
