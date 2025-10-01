@@ -63,12 +63,15 @@ target_link_libraries(filament INTERFACE
         libpng.a
         libstb.a
         libutils.a
-        libzstd.a
-        # libmatdbg.a # required for linking with debug libs
+        libzstd.a    
 
         z
         toolchain::toolchain
 )
+# Include libmatdbg.a for debug builds
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        target_link_libraries(filament INTERFACE libmatdbg.a)
+endif ()
 
 add_library(plugin_filament_view STATIC
         filament_view_plugin_c_api.cc
