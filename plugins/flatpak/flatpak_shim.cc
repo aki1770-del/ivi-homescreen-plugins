@@ -31,11 +31,18 @@
 #include "plugins/common/common.h"
 
 #include "appstream_catalog.h"
+#include "asio/post.hpp"
 #include "component.h"
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
+#include "portals.h"
+#include "screenshot.h"
 
 namespace flatpak_plugin {
+
+std::unique_ptr<Portals> portal_;
+std::unordered_map<std::string, FlatpakShim::Instance> FlatpakShim::instances;
+
 std::optional<std::string> FlatpakShim::getOptionalAttribute(
     const xmlNode* node,
     const char* attrName) {
@@ -1068,7 +1075,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
 
 ErrorOr<bool> FlatpakShim::ApplicationStart(
     const std::string& id,
-    const flutter::EncodableMap* /* configuration */) {
+    const asio::io_context::strand& strand) {
   if (id.empty()) {
     return ErrorOr<bool>(
         FlutterError("INVALID_APP_ID", "Application ID is required"));
@@ -1077,6 +1084,7 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
   spdlog::debug("[FlatpakPlugin] Starting application: {}", id);
 
   // Check if the application is installed first
+  FlatpakInstalledRef* installed = nullptr;
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
@@ -1128,6 +1136,8 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
         found_arch = ref_arch ? ref_arch : "";
         found_branch = ref_branch ? ref_branch : "";
         app_found = true;
+        g_object_ref(ref);
+        installed = ref;
         break;
       }
     }
@@ -1147,10 +1157,44 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
       "branch: {})",
       id, found_app_name, found_arch, found_branch);
 
-  // TODO: Implement actual application launching using
-  // flatpak_installation_launch_full
+  create_sandbox(
+      installed, strand,
+      [installation, found_app_name, found_arch, found_branch,
+       installed](bool success) {
+        if (!success) {
+          spdlog::error("[FlatpakPlugin] Failed to start application");
+          g_object_unref(installed);
+          g_object_unref(installation);
+          return;
+        }
+        FlatpakInstance* instance = nullptr;
+        GError* error = nullptr;
+        flatpak_installation_launch_full(
+            installation, FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP,
+            found_app_name.c_str(), found_arch.c_str(), found_branch.c_str(),
+            nullptr, &instance, nullptr, &error);
+        if (error) {
+          spdlog::error("[FlatpakPlugin] Failed to run app: {}",
+                        error->message);
+          g_clear_error(&error);
+          g_object_unref(installation);
+        }
+        if (instance) {
+          spdlog::info(
+              "[FlatpakPlugin] Successfully launched application: {} (PID: {})",
+              found_app_name, flatpak_instance_get_pid(instance));
+          Instance app;
+          app.instance = instance;
+          app.app_id = found_app_name;
 
-  g_object_unref(installation);
+          const pid_t pid = flatpak_instance_get_pid(instance);
+          app.child_id = pid;
+          instances[found_app_name] = app;
+        }
+        g_object_unref(installed);
+        g_object_unref(installation);
+      });
+
   return ErrorOr<bool>(true);
 }
 
@@ -1160,78 +1204,39 @@ ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
         FlutterError("INVALID_APP_ID", "Application ID is required"));
   }
 
-  spdlog::debug("[FlatpakPlugin] Stopping application: {}", id);
-
-  // Check if the application is installed first
-  GError* error = nullptr;
-  auto installation = flatpak_installation_new_user(nullptr, &error);
-  if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
-    g_clear_error(&error);
-    return ErrorOr<bool>(
-        FlutterError("INSTALLATION_ERROR", "Failed to get user installation"));
+  spdlog::info("[FlatpakPlugin] Stopping application: {}", id);
+  auto app = instances.find(id);
+  if (app == instances.end()) {
+    return ErrorOr<bool>(false);
   }
 
-  const auto refs =
-      flatpak_installation_list_installed_refs(installation, nullptr, &error);
-  if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
-    g_clear_error(&error);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("STOP_FAILED", "Failed to get installed apps"));
-  }
+  FlatpakInstance* instance = app->second.instance;
 
-  bool app_found = false;
-  std::string found_app_name;
-
-  // Search for the application
-  for (guint i = 0; i < refs->len && !app_found; i++) {
-    const auto ref =
-        static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
-
-    if (flatpak_ref_get_kind(FLATPAK_REF(ref)) != FLATPAK_REF_KIND_APP) {
-      continue;
+  const pid_t child_pid = flatpak_instance_get_child_pid(instance);
+  if (child_pid > 0) {
+    spdlog::info("[FlatpakPlugin] Sending SIGTERM to child PID: {}", child_pid);
+    if (kill(child_pid, SIGTERM) != 0) {
+      spdlog::error("[FlatpakPlugin] Failed to send SIGTERM: {}",
+                    strerror(errno));
     }
 
-    if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
-      std::string ref_name_str(ref_name);
-      const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
-      const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
-
-      std::string full_app_id = "app/";
-      full_app_id += ref_name_str + "/";
-      full_app_id += (ref_arch ? ref_arch : "");
-      full_app_id += "/";
-      full_app_id += (ref_branch ? ref_branch : "");
-
-      if (full_app_id == id || ref_name_str == id) {
-        found_app_name = ref_name_str;
-        app_found = true;
+    bool exited = false;
+    for (int i = 0; i < 50; i++) {
+      if (kill(child_pid, 0) != 0) {
+        exited = true;
+        spdlog::info("[FlatpakPlugin] App exited gracefully: {}", id);
         break;
       }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!exited) {
+      spdlog::error("[FlatpakPlugin] Forcing kill of entire process group");
+      kill(child_pid, SIGKILL);
     }
   }
-
-  g_ptr_array_unref(refs);
-
-  if (!app_found) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("APP_NOT_FOUND", "Application not found"));
-  }
-
-  spdlog::info("[FlatpakPlugin] Would stop application: {} (name: {})", id,
-               found_app_name);
-
-  // TODO: Implement actual application stopping
-  // This could involve using process management APIs to find and terminate
-  // running Flatpak applications
-
-  g_object_unref(installation);
+  g_object_unref(instance);
+  instances.erase(app);
+  spdlog::info("[FlatpakPlugin] App stopped and cleaned up: {}", id);
   return ErrorOr<bool>(true);
 }
 
@@ -1604,7 +1609,7 @@ std::string FlatpakShim::get_metadata_as_string(
 
   if (!g_bytes) {
     if (error != nullptr) {
-      spdlog::error("[FlatpakPlugin] Error loading metadata: %s\n",
+      spdlog::error("[FlatpakPlugin] Error loading metadata: {}\n",
                     error->message);
       g_clear_error(&error);
     }
@@ -2028,6 +2033,222 @@ std::string FlatpakShim::create_appdata(const Component& component) {
   document.Accept(writer);
 
   return buffer.GetString();
+}
+
+void FlatpakShim::create_sandbox(FlatpakInstalledRef* installed_ref,
+                                 const asio::io_context::strand& strand,
+                                 std::function<void(bool)> callback) {
+  const std::string metadata = get_metadata_as_string(installed_ref);
+  const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
+  spdlog::debug("[FlatpakPlugin] Create sandbox for: {}",
+                sandbox.application.name);
+
+  if (!portal_) {
+    portal_ = std::make_unique<Portals>(strand.context());
+    portal_->initialize_portals(
+        const_cast<asio::io_context::strand&>(strand),
+        [sandbox, strand,
+         callback = std::move(callback)](bool success) mutable {
+          if (!success) {
+            spdlog::error("[FlatpakPlugin] Portal not ready");
+            callback(false);
+            return;
+          }
+          std::vector<std::string> permissions;
+          for (const auto& dev : sandbox.context.devices) {
+            if (dev == "dri") {
+              permissions.emplace_back("GPU Access");
+            }
+            if (dev == "all") {
+              permissions.emplace_back("All Devices");
+            }
+          }
+
+          for (const auto& filesystem : sandbox.context.filesystems) {
+            if (filesystem.find("xdg-") == 0) {
+              permissions.emplace_back("Access " + filesystem.substr(4) +
+                                       " folder");
+            }
+          }
+
+          if (std::find(sandbox.context.sockets.begin(),
+                        sandbox.context.sockets.end(),
+                        "pulseaudio") != sandbox.context.sockets.end()) {
+            permissions.emplace_back("Audio Access");
+          }
+
+          portal_->check_permissions(
+              const_cast<asio::io_context::strand&>(strand),
+              sandbox.application.name, permissions,
+              [sandbox, strand, permissions,
+               callback = std::move(callback)](bool already_granted) mutable {
+                if (already_granted) {
+                  spdlog::info(
+                      "[FlatpakPlugin] Permissions already granted for app",
+                      sandbox.application.name);
+                  setup_portal_sessions(
+                      sandbox, const_cast<asio::io_context::strand&>(strand),
+                      std::move(callback));
+                  return;
+                }
+                bool granted = portal_->create_dialog(sandbox.application.name,
+                                                      permissions);
+                portal_->store_permissions(
+                    const_cast<asio::io_context::strand&>(strand),
+                    sandbox.application.name, permissions, granted,
+                    [sandbox, granted, strand,
+                     callback = std::move(callback)](bool success) mutable {
+                      if (!granted) {
+                        spdlog::error(
+                            "[FlatpakPlugin] Portal not granted for : {}",
+                            sandbox.application.name);
+                        callback(false);
+                        return;
+                      }
+                      setup_portal_sessions(
+                          sandbox,
+                          const_cast<asio::io_context::strand&>(strand),
+                          std::move(callback));
+                    });
+              });
+        });
+  } else {
+    setup_portal_sessions(sandbox,
+                          const_cast<asio::io_context::strand&>(strand),
+                          std::move(callback));
+  }
+}
+
+void FlatpakShim::setup_portal_sessions(const sandbox& configs,
+                                        asio::io_context::strand& strand,
+                                        std::function<void(bool)> callback) {
+  if (!configs.session_bus.empty()) {
+    portal_->setup_portals(
+        const_cast<asio::io_context::strand&>(strand), configs.session_bus,
+        [configs, callback = std::move(callback)](bool success) mutable {
+          g_setenv("XDG_DESKTOP_PORTAL_PATH", "/org/freedesktop/portal/desktop",
+                   TRUE);
+          g_setenv("FLATPAK_ID", configs.application.name.c_str(), TRUE);
+          for (const auto& [fst, snd] : configs.environment) {
+            g_setenv(fst.c_str(), snd.c_str(), true);
+          }
+          callback(true);
+        });
+  } else {
+    g_setenv("FLATPAK_ID", configs.application.name.c_str(), TRUE);
+    callback(true);
+  }
+}
+
+FlatpakShim::sandbox FlatpakShim::parse_metadata(const std::string& metadata) {
+  FlatpakShim::sandbox sandbox;
+  auto application = extract_metadataSections(metadata, "Application");
+  auto context = extract_metadataSections(metadata, "Context");
+  const auto session_bus =
+      extract_metadataSections(metadata, "Session Bus Policy");
+  const auto system_bus =
+      extract_metadataSections(metadata, "System Bus Policy");
+  auto extra_data = extract_metadataSections(metadata, "Extra Data");
+  const auto build = extract_metadataSections(metadata, "Build");
+  sandbox.environment = extract_metadataSections(metadata, "Environment");
+
+  // parse application data
+  if (application.count("name")) {
+    sandbox.application.name = application["name"];
+  }
+  if (application.count("runtime")) {
+    sandbox.application.runtime = application["runtime"];
+  }
+  if (application.count("sdk")) {
+    sandbox.application.sdk = application["sdk"];
+  }
+  if (application.count("base")) {
+    sandbox.application.base = application["base"];
+  }
+  if (application.count("command")) {
+    sandbox.application.command = application["command"];
+  }
+
+  // parse context
+  if (context.count("shared")) {
+    sandbox.context.shared =
+        plugin_common::StringTools::split(context["shared"], ";");
+  }
+  if (context.count("sockets")) {
+    sandbox.context.sockets =
+        plugin_common::StringTools::split(context["sockets"], ";");
+  }
+  if (context.count("devices")) {
+    sandbox.context.devices =
+        plugin_common::StringTools::split(context["devices"], ";");
+  }
+  if (context.count("filesystems")) {
+    sandbox.context.filesystems =
+        plugin_common::StringTools::split(context["filesystems"], ";");
+  }
+
+  // parse session bus
+  for (const auto& [fst, snd] : session_bus) {
+    sandbox.session_bus.emplace_back(fst);
+  }
+
+  // parse system bus
+  for (const auto& [fst, snd] : system_bus) {
+    sandbox.system_bus.emplace_back(fst);
+  }
+
+  // parse extra data
+  if (extra_data.count("name")) {
+    sandbox.extra.name = extra_data["name"];
+  }
+  if (extra_data.count("checksum")) {
+    sandbox.extra.checksum = extra_data["checksum"];
+  }
+  if (extra_data.count("size")) {
+    sandbox.extra.size = extra_data["size"];
+  }
+  if (extra_data.count("uri")) {
+    sandbox.extra.uri = extra_data["uri"];
+  }
+
+  // parse build
+  if (build.count("built-extensions")) {
+    sandbox.built_extensions =
+        plugin_common::StringTools::split(context["built-extensions"], ";");
+  }
+  return sandbox;
+}
+
+std::map<std::string, std::string> FlatpakShim::extract_metadataSections(
+    const std::string& metadata,
+    const std::string& section) {
+  std::map<std::string, std::string> values;
+
+  std::string escapedName = std::regex_replace(
+      section, std::regex(R"([\.\[\](){}*+?^$|\\])"), R"(\$&)");
+  std::string pattern = R"(\[)" + escapedName + R"(\]\s*\n((?:[^[].*\n?)*))";
+  std::regex sectionReg(pattern);
+  if (std::smatch match; std::regex_search(metadata, match, sectionReg)) {
+    std::string content = match[1];
+    std::regex kvPattern(R"(^([a-zA-Z][a-zA-Z0-9_.-]*)\s*=\s*([^\n]+))");
+
+    std::istringstream stream(content);
+    std::string line;
+    while (std::getline(stream, line)) {
+      plugin_common::StringTools::trimSpaces(line);
+
+      if (!line.empty() && line[0] == '[') {
+        break;
+      }
+
+      if (std::smatch match2; std::regex_match(line, match2, kvPattern)) {
+        std::string val = match2[2];
+        plugin_common::StringTools::trimSpaces(val);
+        values[match2[1]] = val;
+      }
+    }
+  }
+  return values;
 }
 
 }  // namespace flatpak_plugin

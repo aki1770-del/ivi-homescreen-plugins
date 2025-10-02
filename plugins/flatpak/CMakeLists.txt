@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-pkg_check_modules(FLATPAK_DEPS IMPORTED_TARGET REQUIRED flatpak libxml-2.0 zlib)
+pkg_check_modules(FLATPAK_DEPS IMPORTED_TARGET REQUIRED flatpak libxml-2.0 zlib gtk+-3.0)
 
 add_subdirectory(cache)
 
@@ -28,6 +28,7 @@ add_library(plugin_flatpak STATIC
         icon.cc
         release.cc
         screenshot.cc
+        portals.cc
 )
 target_include_directories(plugin_flatpak PRIVATE include)
 target_compile_options(plugin_flatpak PRIVATE

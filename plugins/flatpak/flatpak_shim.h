@@ -24,11 +24,11 @@
 #define FLATPAK_EXTERN extern "C"
 #include <flatpak/flatpak.h>
 #include <glib/garray.h>
+#include <asio/io_context_strand.hpp>
 
 #include "appstream_catalog.h"
 #include "component.h"
 #include "messages.g.h"
-#include "screenshot.h"
 
 namespace flatpak_plugin {
 
@@ -192,14 +192,14 @@ struct FlatpakShim {
 
   /**
    * \brief Start flatpak application.
-   * \param id id of the application to start.
-   * \param configuration Sandbox and specific configurations for the
-   * application. \return An ErrorOr object containing the EncodableList or an
+   * \param id Id of the application to start application.
+   * \param strand Asio object passed to function to execute post-function
+   * code on the same thread.
+   * \return An ErrorOr object containing the EncodableList or an
    * error.
    */
-  static ErrorOr<bool> ApplicationStart(
-      const std::string& id,
-      const flutter::EncodableMap* configuration);
+  static ErrorOr<bool> ApplicationStart(const std::string& id,
+                                        const asio::io_context::strand& strand);
 
   /**
    * \brief Stop flatpak Application.
@@ -298,6 +298,42 @@ struct FlatpakShim {
       std::vector<char>& decompressedData);
 
  private:
+  struct sandbox {
+    struct application {
+      std::string name;
+      std::string runtime;
+      std::string sdk;
+      std::string base;
+      std::string command;
+    } application;
+
+    struct context {
+      std::vector<std::string> shared;
+      std::vector<std::string> sockets;
+      std::vector<std::string> devices;
+      std::vector<std::string> filesystems;
+    } context;
+
+    struct extra {
+      std::string name;
+      std::string checksum;
+      std::string size;
+      std::string uri;
+    } extra;
+
+    std::vector<std::string> session_bus;
+    std::vector<std::string> system_bus;
+    std::map<std::string, std::string> environment;
+    std::vector<std::map<std::string, std::string>> extensions;
+    std::vector<std::string> built_extensions;
+  };
+  struct Instance {
+    FlatpakInstance* instance;
+    guint child_id;
+    std::string app_id;
+  };
+  static std::unordered_map<std::string, Instance> instances;
+
   static std::optional<Application> create_component(
       FlatpakRemoteRef* app_ref,
       const std::optional<AppstreamCatalog>& app_catalog);
@@ -305,6 +341,20 @@ struct FlatpakShim {
   static std::string create_metadata(const Component& component);
 
   static std::string create_appdata(const Component& component);
+
+  static void create_sandbox(FlatpakInstalledRef* installed_ref,
+                             const asio::io_context::strand& strand,
+                             std::function<void(bool)> callback);
+
+  static sandbox parse_metadata(const std::string& metadata);
+
+  static std::map<std::string, std::string> extract_metadataSections(
+      const std::string& metadata,
+      const std::string& section);
+
+  static void setup_portal_sessions(const sandbox& configs,
+                                    asio::io_context::strand& strand,
+                                    std::function<void(bool)> callback);
 };
 
 }  // namespace flatpak_plugin

@@ -73,9 +73,7 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   ErrorOr<bool> ApplicationUninstall(const std::string& id) override;
 
   // Start application using specified configuration.
-  ErrorOr<bool> ApplicationStart(
-      const std::string& id,
-      const flutter::EncodableMap* configuration) override;
+  ErrorOr<bool> ApplicationStart(const std::string& id) override;
 
   // Stop application with given id.
   ErrorOr<bool> ApplicationStop(const std::string& id) override;

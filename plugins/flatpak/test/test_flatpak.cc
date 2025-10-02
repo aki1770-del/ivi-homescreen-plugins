@@ -1,3 +1,4 @@
+#include <asio/steady_timer.hpp>
 #include <chrono>
 #include <fstream>
 #include <utility>
@@ -265,4 +266,25 @@ TEST_F(FlatpakPluginTest, FindAppInRemoteSearchTest) {
   // assuming flathub remote is added
   EXPECT_FALSE(value.empty());
   EXPECT_EQ(key, "flathub");
+}
+
+TEST_F(FlatpakPluginTest, RunAppTest) {
+  asio::io_context io_context;
+  const asio::io_context::strand strand(io_context);
+  bool tested = false;
+  const auto result =
+      FlatpakShim::ApplicationStart("com.spotify.Client", strand);
+  ASSERT_TRUE(result.value());
+
+  auto timer =
+      std::make_shared<asio::steady_timer>(io_context, std::chrono::minutes(3));
+  timer->async_wait([&tested, timer](const asio::error_code& ec) {
+    if (!ec) {
+      auto stop_result = FlatpakShim::ApplicationStop("com.spotify.Client");
+      EXPECT_TRUE(stop_result.value());
+      tested = true;
+    }
+  });
+  io_context.run();
+  EXPECT_TRUE(result.value());
 }

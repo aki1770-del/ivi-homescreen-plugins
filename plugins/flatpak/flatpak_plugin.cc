@@ -21,7 +21,9 @@
 #include <vector>
 
 #include <zlib.h>
+#include <asio/dispatch.hpp>
 #include <asio/post.hpp>
+#include <future>
 
 #include "messages.g.h"
 #include "plugins/common/common.h"
@@ -155,10 +157,16 @@ ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {
   return FlatpakShim::ApplicationUninstall(id);
 }
 
-ErrorOr<bool> FlatpakPlugin::ApplicationStart(
-    const std::string& id,
-    const flutter::EncodableMap* configuration) {
-  return FlatpakShim::ApplicationStart(id, configuration);
+ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {
+  std::promise<ErrorOr<bool>> promise;
+  auto future = promise.get_future();
+
+  asio::dispatch(*strand_, [this, id, &promise]() {
+    auto result = FlatpakShim::ApplicationStart(id, *strand_);
+    promise.set_value(std::move(result));
+  });
+  io_context_->run();
+  return future.get();
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {
