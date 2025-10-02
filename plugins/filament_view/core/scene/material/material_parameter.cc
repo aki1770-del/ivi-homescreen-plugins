@@ -16,6 +16,8 @@
 
 #include "material_parameter.h"
 
+#include <core/utils/asserts.h>
+
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -47,11 +49,34 @@ MaterialParameter::MaterialParameter(
     type_(type),
     fValue_(value) {}
 
-////////////////////////////////////////////////////////////////////////////
-MaterialParameter::MaterialParameter(std::string name, MaterialType type, MaterialColorValue value)
+MaterialParameter::MaterialParameter(
+  std::string name,
+  const MaterialType type,
+  MaterialIntValue value
+)
   : name_(std::move(name)),
     type_(type),
-    colorValue_(value) {}
+    iValue_(value) {}
+
+MaterialParameter::MaterialParameter(
+  std::string name,
+  const MaterialType type,
+  MaterialColorValue value
+)
+  : name_(std::move(name)),
+    type_(type),
+    fVecValue_(MaterialFloatVectorValue(4, 0.0f)) {
+  memcpy(fVecValue_.value().data(), &value, sizeof(float) * 4);
+}
+
+MaterialParameter::MaterialParameter(
+  std::string name,
+  const MaterialType type,
+  MaterialFloatVectorValue value
+)
+  : name_(std::move(name)),
+    type_(type),
+    fVecValue_(std::move(value)) {}
 
 ////////////////////////////////////////////////////////////////////////////
 std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
@@ -62,9 +87,11 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
 
   std::optional<std::string> name;
   std::optional<MaterialType> type;
-  std::optional<MaterialFloatValue> fValue;
-  std::optional<MaterialColorValue> colorValue;
+
   std::optional<flutter::EncodableMap> encodMapValue;
+  std::optional<flutter::EncodableList> encodListValue;
+
+  std::unique_ptr<MaterialParameter> retval = nullptr;
 
   for (const auto& [fst, snd] : params) {
     auto key = std::get<std::string>(fst);
@@ -73,52 +100,109 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
       continue;
     }
 
-    if (key == "name" && std::holds_alternative<std::string>(snd)) {
-      name = std::get<std::string>(snd);
-    } else if (key == "type" && std::holds_alternative<std::string>(snd)) {
-      type = getTypeForText(std::get<std::string>(snd));
-    } else if (key == "value" && type == MaterialType::FLOAT) {
-      fValue = std::get<double>(snd);
-    } else if (key == "value" && type == MaterialType::COLOR) {
-      // color comes across a a radix string #FFFFFFFF
-      colorValue = HexToColorFloat4(std::get<std::string>(snd));
-    } else if (key == "value" && type == MaterialType::TEXTURE) {
-      encodMapValue = std::get<flutter::EncodableMap>(snd);
-    } else if (!snd.IsNull()) {
-      spdlog::debug("[MaterialParameter] Unhandled Parameter {} ", key.c_str());
-      plugin_common::Encodable::PrintFlutterEncodableValue(key.c_str(), snd);
+    const _MaterialField field = GetFieldForText(key);
+
+    switch (field) {
+      case _MaterialField::NAME:
+        runtime_assert(std::holds_alternative<std::string>(snd), "name must be a string");
+        name = std::get<std::string>(snd);
+        break;
+      case _MaterialField::TYPE:
+        runtime_assert(name.has_value(), "name is missing or set after type");
+        runtime_assert(
+          std::holds_alternative<std::string>(snd),
+          fmt::format("type must be a string (key: {})", key)
+        );
+        type = getTypeForText(std::get<std::string>(snd));
+        break;
+
+      case _MaterialField::VALUE:
+        runtime_assert(
+          type.has_value(),
+          fmt::format("type is missing or set after value (name: {})", name.value())
+        );
+        switch (type.value()) {
+          case MaterialType::FLOAT:
+            runtime_assert(std::holds_alternative<double>(snd), "value must be a double");
+            retval = std::make_unique<MaterialParameter>(
+              name.value(), type.value(), static_cast<float>(std::get<double>(snd))
+            );
+            break;
+          case MaterialType::INT:
+            runtime_assert(std::holds_alternative<int>(snd), "value must be an int");
+            retval = std::make_unique<MaterialParameter>(
+              name.value(), type.value(), std::get<int>(snd)
+            );
+            break;
+          case MaterialType::FLOAT2:
+            [[fallthrough]];
+          case MaterialType::FLOAT3:
+            [[fallthrough]];
+          case MaterialType::COLOR:
+            [[fallthrough]];
+          case MaterialType::FLOAT4: {
+            const size_t size = GetVectorSizeForType(type.value());
+
+            runtime_assert(
+              std::holds_alternative<flutter::EncodableList>(snd),
+              fmt::format(
+                "value must be a EncodableList (name: {}, type: {})",  //
+                name.value(), getTextForType(type.value())
+              )
+            );
+            // temporarily store in encodListValue
+            encodListValue = std::get<flutter::EncodableList>(snd);
+            const auto& list = encodListValue.value();
+            runtime_assert(
+              list.size() == size, fmt::format("vector value must have {} elements", size)
+            );
+            for (const auto& item : list) {
+              runtime_assert(
+                std::holds_alternative<double>(item), "color value elements must be double"
+              );
+            }
+
+            // create vector with correct length
+            MaterialFloatVectorValue fvec(size, 0.0f);
+            float* vec = fvec.data();
+            for (size_t i = 0; i < size; ++i) {
+              vec[i] = static_cast<float>(std::get<double>(list[i]));
+            }
+
+            retval = std::make_unique<MaterialParameter>(name.value(), type.value(), fvec);
+          } break;
+          case MaterialType::TEXTURE:
+            runtime_assert(
+              std::holds_alternative<flutter::EncodableMap>(snd), "value must be a map"
+            );
+            encodMapValue = std::get<flutter::EncodableMap>(snd);
+            retval = std::make_unique<MaterialParameter>(
+              name.value(), type.value(), TextureDefinitions::Deserialize(encodMapValue.value())
+            );
+            break;
+          case MaterialType::BOOL:
+            runtime_assert(std::holds_alternative<bool>(snd), "value must be a bool");
+            retval = std::make_unique<MaterialParameter>(
+              name.value(), type.value(), std::get<bool>(snd)
+            );
+            break;
+          default:
+            throw std::runtime_error(fmt::format(
+              "[MaterialParameter::Deserialize] Unhandled Parameter value type {}",
+              getTextForType(type.value())
+            ));
+        }
+        break;
+      case _MaterialField::UNKNOWN:
+        [[fallthrough]];
+      default:
+        SPDLOG_WARN("[MaterialParameter::Deserialize] unknown key {} {}", key, __FUNCTION__);
+        break;
     }
   }
 
-  if (!type.has_value()) {
-    throw std::runtime_error(
-      "[MaterialParameter::Deserialize] Unhandled Parameter - no type in arg "
-      "list"
-    );
-  }
-
-  switch (type.value()) {
-    case MaterialType::TEXTURE:
-      return std::make_unique<MaterialParameter>(
-        name.has_value() ? name.value() : "", type.value(),
-        TextureDefinitions::Deserialize(encodMapValue.value())
-      );
-
-    case MaterialType::FLOAT:
-      return std::make_unique<MaterialParameter>(
-        name.has_value() ? name.value() : "", type.value(), fValue.value()
-      );
-
-    case MaterialType::COLOR:
-      return std::make_unique<MaterialParameter>(
-        name.has_value() ? name.value() : "", type.value(), colorValue.value()
-      );
-
-    default:
-      throw std::runtime_error(fmt::format(
-        "[MaterialParameter::Deserialize] Unhandled Parameter {}", getTextForType(type.value())
-      ));
-  }
+  runtime_assert(retval != nullptr, "Failed to deserialize MaterialParameter");
+  return retval;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -126,60 +210,108 @@ MaterialParameter::~MaterialParameter() = default;
 
 ////////////////////////////////////////////////////////////////////////////
 void MaterialParameter::debugPrint(const char* tag) {
-  spdlog::debug("++++++++ (MaterialParameter) ++++++++");
-  spdlog::debug("tag {} name {} type {} ", tag, name_, getTextForType(type_));
-  if (type_ == MaterialType::TEXTURE) {
-    if (textureValue_.has_value()) {
-      const auto texture =
-        std::get<std::unique_ptr<TextureDefinitions>>(textureValue_.value()).get();
-      if (texture) {
-        texture->debugPrint("texture");
+  spdlog::debug("{}name: '{}', type: '{}',  ", tag, name_, getTextForType(type_));
+
+  // Print value based on type
+  switch (type_) {
+    case MaterialType::COLOR:
+      spdlog::debug(
+        "{}value: [{:.3}, {:.3}, {:.3}, {:.3}]", tag,  //
+        fVecValue_.value()[0], fVecValue_.value()[1], fVecValue_.value()[2], fVecValue_.value()[3]
+      );
+      break;
+    case MaterialType::FLOAT2:
+      spdlog::debug(
+        "{}value: [{:.3}, {:.3}]", tag,  //
+        fVecValue_.value()[0], fVecValue_.value()[1]
+      );
+      break;
+    case MaterialType::FLOAT3:
+      spdlog::debug(
+        "{}value: [{:.3}, {:.3}, {:.3}]", tag,  //
+        fVecValue_.value()[0], fVecValue_.value()[1], fVecValue_.value()[2]
+      );
+      break;
+    case MaterialType::FLOAT4:
+      spdlog::debug(
+        "{}value: [{:.3}, {:.3}, {:.3}, {:.3}]", tag,  //
+        fVecValue_.value()[0], fVecValue_.value()[1], fVecValue_.value()[2], fVecValue_.value()[3]
+      );
+      break;
+    case MaterialType::FLOAT:
+      spdlog::debug(
+        "{}value: {:.3}", tag,  //
+        fValue_.value()
+      );
+      break;
+    case MaterialType::INT:
+      spdlog::debug(
+        "{}value: {}", tag,  //
+        iValue_.value()
+      );
+      break;
+    case MaterialType::TEXTURE: {
+      if (textureValue_.has_value()) {
+        const auto texture =
+          std::get<std::unique_ptr<TextureDefinitions>>(textureValue_.value()).get();
+        if (texture) {
+          texture->debugPrint(std::string(tag + std::string("  texture:")).c_str());
+        }
       } else {
-        spdlog::debug("[MaterialParameter] Texture Empty");
+        spdlog::debug("{}value: <no texture>", tag);
       }
-    }
+    } break;
+    default:
+      spdlog::debug("{}value: <unhandled type>", tag);
+      break;
   }
-  spdlog::debug("-------- (MaterialParameter) --------");
 }
 
 ////////////////////////////////////////////////////////////////////////////
 const char* MaterialParameter::getTextForType(MaterialType type) {
   return (const char*[]){
-    kColor, kBool, kBoolVector, kFloat, kFloatVector, kInt, kIntVector, kMat3, kMat4, kTexture,
+    "COLOR",  "BOOL", "BOOL_VECTOR", "FLOAT", "FLOAT2", "FLOAT3",
+    "FLOAT4", "INT",  "INT_VECTOR",  "MAT3",  "MAT4",   "TEXTURE",
   }[static_cast<int>(type)];
 }
 
 ////////////////////////////////////////////////////////////////////////////
 MaterialParameter::MaterialType MaterialParameter::getTypeForText(const std::string& type) {
   // TODO Change to map for faster lookup
-  if (type == kColor) {
+  if (type == "COLOR") {
     return MaterialType::COLOR;
   }
-  if (type == kBool) {
+  if (type == "BOOL") {
     return MaterialType::BOOL;
   }
-  if (type == kBoolVector) {
+  if (type == "BOOL_VECTOR") {
     return MaterialType::BOOL_VECTOR;
   }
-  if (type == kFloat) {
+  if (type == "FLOAT") {
     return MaterialType::FLOAT;
   }
-  if (type == kFloatVector) {
-    return MaterialType::FLOAT_VECTOR;
+  if (type == "FLOAT2") {
+    return MaterialType::FLOAT2;
   }
-  if (type == kInt) {
+  if (type == "FLOAT3") {
+    return MaterialType::FLOAT3;
+  }
+  if (type == "FLOAT4") {
+    return MaterialType::FLOAT4;
+  }
+  if (type == "INT") {
     return MaterialType::INT;
   }
-  if (type == kIntVector) {
+  if (type == "INT_VECTOR") {
     return MaterialType::INT_VECTOR;
   }
-  if (type == kMat3) {
+  if (type == "MAT3") {
     return MaterialType::MAT3;
   }
-  if (type == kMat4) {
+  if (type == "MAT4") {
     return MaterialType::MAT4;
   }
-  if (type == kTexture) {
+  if (type == "TEXTURE") {
     return MaterialType::TEXTURE;
   }
   return MaterialType::INT;

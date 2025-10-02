@@ -19,6 +19,7 @@
 
 #include <core/components/derived/collider.h>
 #include <core/components/derived/commonrenderable.h>
+#include <core/components/derived/material_definitions.h>
 #include <core/components/derived/transform.h>
 #include <core/entity/base/entityobject.h>
 #include <core/utils/bounding_volumes.h>

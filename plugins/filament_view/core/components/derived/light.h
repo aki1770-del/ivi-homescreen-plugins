@@ -28,11 +28,13 @@ class Light : public Component {
     friend class LightSystem;
 
   public:
+    filament::math::float3 color;
+
     // Constructors
     Light()
       : Component(std::string(__FUNCTION__)),
         m_Type(filament::LightManager::Type::DIRECTIONAL),
-        m_fColorTemperature(6500000.0f),
+        m_fColorTemperature(0.0f),
         m_fIntensity(100000.0f),
         m_f3Position(0.0f, 1.0f, 0.0f),
         m_f3Direction(0.0f, -1.0f, 0.0f),
@@ -48,7 +50,6 @@ class Light : public Component {
     explicit Light(const flutter::EncodableMap& params);
 
     [[nodiscard]] inline filament::LightManager::Type getLightType() const { return m_Type; }
-    [[nodiscard]] inline const std::string& getColor() const { return m_szColor; }
     [[nodiscard]] inline float getColorTemperature() const { return m_fColorTemperature; }
     [[nodiscard]] inline float getIntensity() const { return m_fIntensity; }
     [[nodiscard]] inline const filament::math::float3& getPosition() const { return m_f3Position; }
@@ -65,7 +66,6 @@ class Light : public Component {
     [[nodiscard]] inline float getSunHaloFalloff() const { return m_fSunHaloFalloff; }
 
     inline void setLightType(filament::LightManager::Type type) { m_Type = type; }
-    inline void setColor(const std::string& color) { m_szColor = color; }
     inline void setColorTemperature(float temperature) { m_fColorTemperature = temperature; }
     inline void setIntensity(float intensity) { m_fIntensity = intensity; }
     inline void setPosition(const filament::math::float3& position) { m_f3Position = position; }
@@ -91,7 +91,6 @@ class Light : public Component {
     FilamentEntity m_poFilamentEntityLight;
 
     filament::LightManager::Type m_Type;
-    std::string m_szColor;
     float m_fColorTemperature;
     float m_fIntensity;
 

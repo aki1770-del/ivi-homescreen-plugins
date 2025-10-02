@@ -342,8 +342,8 @@ void SceneTextDeserializer::setUpSkybox() const {
       }
     } else if (dynamic_cast<ColorSkybox*>(skybox)) {
       if (const auto color_skybox = dynamic_cast<ColorSkybox*>(skybox);
-          !color_skybox->szGetColor().empty()) {
-        skyboxSystem->setSkyboxFromColor(color_skybox->szGetColor());
+          color_skybox->getColor().w > 0) {
+        skyboxSystem->setSkyboxFromColor(color_skybox->getColor());
       }
     }
   }

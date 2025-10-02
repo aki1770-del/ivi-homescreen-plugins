@@ -24,7 +24,6 @@
 #include <filament/Scene.h>
 
 #include <core/components/base/component.h>
-#include <core/components/derived/material_definitions.h>
 #include <core/utils/smarter_pointers.h>
 #include <utility>
 
