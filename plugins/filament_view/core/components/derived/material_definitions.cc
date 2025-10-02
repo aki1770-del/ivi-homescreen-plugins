@@ -141,7 +141,7 @@ void MaterialDefinitions::ApplyMaterialParameterToInstance(
 
   switch (param->type_) {
     case MaterialParameter::MaterialType::COLOR: {
-      const filament::math::float4* f4 = reinterpret_cast<const filament::math::float4*>(fVec);
+      const auto* f4 = reinterpret_cast<const filament::math::float4*>(fVec);
       materialInstance->setParameter(szParamName, filament::RgbaType::LINEAR, *f4);
     } break;
 
@@ -154,17 +154,17 @@ void MaterialDefinitions::ApplyMaterialParameterToInstance(
     } break;
 
     case MaterialParameter::MaterialType::FLOAT2: {
-      const filament::math::float2* f2 = reinterpret_cast<const filament::math::float2*>(fVec);
+      const auto* f2 = reinterpret_cast<const filament::math::float2*>(fVec);
       materialInstance->setParameter(szParamName, *f2);
     } break;
 
     case MaterialParameter::MaterialType::FLOAT3: {
-      const filament::math::float3* f3 = reinterpret_cast<const filament::math::float3*>(fVec);
+      const auto* f3 = reinterpret_cast<const filament::math::float3*>(fVec);
       materialInstance->setParameter(szParamName, *f3);
     } break;
 
     case MaterialParameter::MaterialType::FLOAT4: {
-      const filament::math::float4* f4 = reinterpret_cast<const filament::math::float4*>(fVec);
+      const auto* f4 = reinterpret_cast<const filament::math::float4*>(fVec);
       materialInstance->setParameter(szParamName, *f4);
     } break;
 

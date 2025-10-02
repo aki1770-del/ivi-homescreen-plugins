@@ -11,6 +11,7 @@ Light::Light(const flutter::EncodableMap& params)
   : Component(std::string(__FUNCTION__)),
     m_Type(filament::LightManager::Type::DIRECTIONAL),
     m_fColorTemperature(6500.0f),
+    color(1.0f, 1.0f, 1.0f),
     m_fIntensity(100000.0f),
     m_f3Position(0.0f, 0.0f, 0.0f),
     m_f3Direction(0.0f, -1.0f, 0.0f),
