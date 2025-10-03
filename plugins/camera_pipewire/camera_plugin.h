@@ -118,15 +118,10 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   std::map<std::string, std::shared_ptr<CameraStream>> CameraId_CameraStream;
   std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
 
-  // ---- Image-stream EventChannel (for camera_linux/image_stream) ----
-  // Matches Dart: EventChannel('camera_linux/image_stream')
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> image_channel_;
-  std::atomic<bool> sending_{false};   // back-pressure: drop if a send is in flight
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> image_sink_;
-  // Helpers used by the .cc file
-  void StartImageStream();  // set up PipeWire or a test timer on listen
-  void StopImageStream();   // tear down on cancel
-
+  void StartImageStream();
+  void StopImageStream();
 };
 }  // namespace camera_plugin
 

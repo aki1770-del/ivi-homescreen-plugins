@@ -25,9 +25,7 @@
 #include "plugins/common/common.h"
 #include <flutter/standard_method_codec.h>
 #include <flutter/event_stream_handler_functions.h>
-#include <glib.h>  // for g_timeout_add (only for the optional fake generator)
-#include <fstream>
-#include <jpeglib.h>
+#include <glib.h>
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -79,7 +77,6 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
     spdlog::error("failed to initialize PipeWire manager!");
   }
 
-    // ---- Create EventChannel for image stream (must match Dart name) ----
     auto messenger = registrar_->messenger();
     image_channel_ = std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
         messenger, "camera_linux/image_stream",
@@ -142,7 +139,6 @@ void CameraPlugin::Create(
                                const char* raw) {
       if (!image_stream_active_ || !image_sink_) return;
 
-      // SAFETY: hop to the main loop before touching image_sink_.
       struct Payload {
         CameraPlugin* self;
         std::vector<uint8_t> y, u, v;
@@ -156,7 +152,7 @@ void CameraPlugin::Create(
         (v ? std::vector<uint8_t>(v, v + vs * (h/2)) : std::vector<uint8_t>()),
         ys, us, vs, w, h, raw ? std::string(raw) : std::string("I420")
       };
-      // Post to main thread (GLib). If you don't use GLib, queue & post some other way.
+
       g_main_context_invoke(nullptr, [](gpointer data) -> gboolean {
         std::unique_ptr<Payload> P(static_cast<Payload*>(data));
         if (!P->self->image_sink_) return G_SOURCE_REMOVE;
@@ -356,8 +352,6 @@ void CameraPlugin::ResumePreview(
   result({});
 }
 
-// ===================== Image-stream helpers =====================
-
 void CameraPlugin::StartImageStream() {
   image_stream_active_ = true;
   // If your CameraStream is not already running, start/Resume it here.
@@ -370,29 +364,6 @@ void CameraPlugin::StopImageStream() {
   // (or disconnect PipeWire stream if you want to free resources)
 }
 
-std::atomic<bool> sending_{false};
-
-std::atomic<int64_t> last_ns_{0};
-const int64_t min_interval_ns = 1000000000LL / 10; // 10 fps
-
-static inline int64_t monotonic_time_ns() {
-#if GLIB_CHECK_VERSION(2,28,0)
-  // g_get_monotonic_time() returns microseconds
-  return (int64_t)g_get_monotonic_time() * 1000;
-#else
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
-#endif
-}
-
-bool ShouldSendNow() {
-  int64_t now = monotonic_time_ns();
-  int64_t prev = last_ns_.load(std::memory_order_relaxed);
-  if (now - prev < min_interval_ns) return false;
-  last_ns_.store(now, std::memory_order_relaxed);
-  return true;
-}
 void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
                                  const uint8_t* u, int u_stride,
                                  const uint8_t* v, int v_stride,
@@ -403,7 +374,6 @@ void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
   using flutter::EncodableMap;
   using flutter::EncodableValue;
 
-  // Copy into message-owned vectors (simple & safe for first pass).
   std::vector<uint8_t> yv(y, y + y_stride * height);
   std::vector<uint8_t> uv(u, u + u_stride * (height / 2));
   std::vector<uint8_t> vv(v, v + v_stride * (height / 2));
@@ -412,19 +382,19 @@ void CameraPlugin::SendI420Frame(const uint8_t* y, int y_stride,
   planes.emplace_back(EncodableMap{
       {EncodableValue("bytes"),       EncodableValue(std::move(yv))},
       {EncodableValue("bytesPerRow"), EncodableValue(y_stride)},
-      {EncodableValue("bytesPerPixel"), EncodableValue(1)},          // <-- add this
+      {EncodableValue("bytesPerPixel"), EncodableValue(1)},
 
   });
   planes.emplace_back(EncodableMap{
       {EncodableValue("bytes"),       EncodableValue(std::move(uv))},
       {EncodableValue("bytesPerRow"), EncodableValue(u_stride)},
-      {EncodableValue("bytesPerPixel"), EncodableValue(1)},          // <-- add this
+      {EncodableValue("bytesPerPixel"), EncodableValue(1)},
 
   });
   planes.emplace_back(EncodableMap{
       {EncodableValue("bytes"),       EncodableValue(std::move(vv))},
       {EncodableValue("bytesPerRow"), EncodableValue(v_stride)},
-      {EncodableValue("bytesPerPixel"), EncodableValue(1)},          // <-- add this
+      {EncodableValue("bytesPerPixel"), EncodableValue(1)},
 
   });
 
