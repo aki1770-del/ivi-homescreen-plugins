@@ -41,36 +41,3 @@ target_link_libraries(plugin_camera_pipewire PUBLIC
         platform_homescreen
         plugin_common
 )
-
-# Where CLion runner loads .so files
-set(BLOBS_DIR "${CMAKE_BINARY_DIR}/shell/blobs")
-
-# TF Lite build root (adjust if yours differs)
-set(TFLITE_ROOT "/home/tcna/dev/tensorflow/tensorflow/lite/build" CACHE PATH "TF Lite build root")
-
-# All Abseil .so's (any subdir)
-file(GLOB_RECURSE ABSL_ALL
-        "${TFLITE_ROOT}/_deps/abseil-cpp-build/absl/*/libabsl_*.so*")
-
-# XNNPACK & friends (from your ldd -r)
-file(GLOB_RECURSE XNNPACK_LIB      "${TFLITE_ROOT}/**/libXNNPACK.so")
-file(GLOB_RECURSE PTHREADPOOL_LIB  "${TFLITE_ROOT}/**/libpthreadpool.so")
-file(GLOB_RECURSE CPUINFO_LIB      "${TFLITE_ROOT}/**/libcpuinfo.so")
-file(GLOB_RECURSE EIGHTBIT_LIB     "${TFLITE_ROOT}/**/libeight_bit_int_gemm.so")
-file(GLOB_RECURSE FFT2D_LIBS       "${TFLITE_ROOT}/**/libfft2d_fftsg*.so*")
-file(GLOB_RECURSE FARMHASH_LIB     "${TFLITE_ROOT}/**/libfarmhash.so")
-
-add_custom_target(bundle_tflite_deps ALL
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ABSL_ALL}        "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${XNNPACK_LIB}     "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${PTHREADPOOL_LIB} "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CPUINFO_LIB}     "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${EIGHTBIT_LIB}    "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FFT2D_LIBS}      "${BLOBS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${FARMHASH_LIB}    "${BLOBS_DIR}"
-        VERBATIM
-)
-
-# ensure it runs; tie it to something CLion always builds
-add_dependencies(plugin_camera_pipewire bundle_tflite_deps)

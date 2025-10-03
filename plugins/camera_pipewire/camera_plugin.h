@@ -35,8 +35,6 @@ namespace camera_plugin {
 class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
-  // Send one I420 frame to Dart (call from your PipeWire callback or test timer)
-
   void SendI420Frame(const uint8_t* y, int y_stride,
                      const uint8_t* u, int u_stride,
                      const uint8_t* v, int v_stride,
@@ -86,13 +84,6 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   // Disallow copy and assign.
   CameraPlugin(const CameraPlugin&) = delete;
   CameraPlugin& operator=(const CameraPlugin&) = delete;
-  std::shared_ptr<CameraStream> GetCameraStream(int64_t texture_id) {
-    auto it = TextureId_CameraStream.find(texture_id);
-    if (it != TextureId_CameraStream.end()) {
-      return it->second;
-    }
-    return nullptr;
-  }
 
  private:
   flutter::TextureRegistrar* texture_registrar_{};
