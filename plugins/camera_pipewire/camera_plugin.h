@@ -24,11 +24,9 @@
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include "CameraStream.h"
-#include "messages.g.h"
 #include "event_channel.h"
+#include "messages.g.h"
 #include "plugins/common/common.h"
-#include <atomic>
-#include <glib.h>
 
 namespace camera_plugin {
 
