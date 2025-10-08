@@ -33,10 +33,6 @@ namespace camera_plugin {
 class CameraPlugin final : public flutter::Plugin, public CameraApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
-  void SendI420Frame(const uint8_t* y, int y_stride,
-                     const uint8_t* u, int u_stride,
-                     const uint8_t* v, int v_stride,
-                     int width, int height);
 
   CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                flutter::BinaryMessenger* messenger);
@@ -85,7 +81,6 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
  private:
   flutter::TextureRegistrar* texture_registrar_{};
-  bool image_stream_active_ = false;
 
   struct preview {
     bool is_initialized{};
@@ -117,11 +112,6 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
   std::map<std::string, std::shared_ptr<CameraStream>> CameraId_CameraStream;
   std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
-
-  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>> image_channel_;
-  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> image_sink_;
-  void StartImageStream();
-  void StopImageStream();
 };
 }  // namespace camera_plugin
 

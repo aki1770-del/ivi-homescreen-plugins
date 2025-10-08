@@ -77,12 +77,6 @@ class CameraStream {
   static std::optional<std::string> GetFilePathForPicture();
   [[nodiscard]] std::string takePicture() const;
 
-  std::function<void(const uint8_t* y, int y_stride,
-                   const uint8_t* u_or_uv, int u_stride,
-                   const uint8_t* v, int v_stride,
-                   int width, int height,
-                   const char* raw)> on_image_frame;
-
  private:
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};
