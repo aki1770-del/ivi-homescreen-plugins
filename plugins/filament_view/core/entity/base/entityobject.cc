@@ -100,9 +100,13 @@ void EntityObject::debugPrintComponents() const {
     componentNames.push_back(component->getTypeName());
   }
 
+  std::ostringstream oss;
+  for (size_t i = 0; i < componentNames.size(); ++i) {
+    if (i != 0) oss << ", ";
+    oss << componentNames[i];
+  }
   spdlog::debug(
-    "EntityObject '{}'({}) has {} components: {}", name, guid_, componentNames.size(),
-    fmt::join(componentNames, ", ")
+    "EntityObject '{}'({}) has {} components: {}", name, guid_, componentNames.size(), oss.str()
   );
 }
 
