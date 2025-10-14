@@ -69,7 +69,7 @@ target_link_libraries(filament INTERFACE
         toolchain::toolchain
 )
 # Include libmatdbg.a for debug builds
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+if (FILAMENT_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(filament INTERFACE libmatdbg.a)
 endif ()
 
