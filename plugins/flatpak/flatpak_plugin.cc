@@ -26,23 +26,25 @@
 #include <future>
 
 #include "messages.g.h"
+#include <flutter/plugin_registrar_homescreen.h>
 #include "plugins/common/common.h"
 
 namespace flatpak_plugin {
 
 // static
 void FlatpakPlugin::RegisterWithRegistrar(flutter::PluginRegistrar* registrar) {
-  auto plugin = std::make_unique<FlatpakPlugin>();
+  auto plugin = std::make_unique<FlatpakPlugin>(registrar);
 
   SetUp(registrar->messenger(), plugin.get());
 
   registrar->AddPlugin(std::move(plugin));
 }
 
-FlatpakPlugin::FlatpakPlugin()
+FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
     : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
-      work_(io_context_->get_executor()),
-      strand_(std::make_unique<asio::io_context::strand>(*io_context_)) {
+    work_(io_context_->get_executor()),
+      strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
+      registrar_(registrar) {
   thread_ = std::thread([&] { io_context_->run(); });
 
   asio::post(*strand_, [&]() {
@@ -60,7 +62,10 @@ FlatpakPlugin::FlatpakPlugin()
       spdlog::debug("\t\t{}", *arch);
     }
   }
-  manager_ = CacheManager::Builder()
+
+  portal_manager_ = std::make_shared<PortalManager>(*io_context_);
+  portal_manager_->initialize();
+  cache_manager_ = CacheManager::Builder()
                  .WithDatabasePath("/tmp/flatpak_plugin.db")
                  .WithCachePolicy(CachePolicy::CACHE_FIRST)
                  .WithAutoCleanup(true, std::chrono::minutes(5))
@@ -112,12 +117,12 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetSupportedArches() {
 
 // Get configuration of user installation.
 ErrorOr<Installation> FlatpakPlugin::GetUserInstallation() {
-  auto result = manager_->GetUserInstallation(false);
+  auto result = cache_manager_->GetUserInstallation(false);
   return ErrorOr<Installation>(std::move(result.value()));
 }
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetSystemInstallations() {
-  auto result = manager_->GetSystemInstallations(false);
+  auto result = cache_manager_->GetSystemInstallations(false);
   if (!result.has_value()) {
     return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
   }
@@ -133,7 +138,7 @@ ErrorOr<bool> FlatpakPlugin::RemoteRemove(const std::string& id) {
 }
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsInstalled() {
-  auto result = manager_->GetApplicationsInstalled(false);
+  auto result = cache_manager_->GetApplicationsInstalled(false);
   if (!result.has_value()) {
     return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
   }
@@ -142,15 +147,27 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsInstalled() {
 
 ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
     const std::string& id) {
-  auto result = manager_->GetApplicationsRemote(id, false);
+  auto result = cache_manager_->GetApplicationsRemote(id, false);
   if (!result.has_value()) {
     return ErrorOr<flutter::EncodableList>(flutter::EncodableList());
   }
   return ErrorOr<flutter::EncodableList>(std::move(result.value()));
 }
 
-ErrorOr<bool> FlatpakPlugin::ApplicationInstall(const std::string& id) {
-  return FlatpakShim::ApplicationInstall(id);
+void FlatpakPlugin::ApplicationInstall(
+    const std::string& /*id*/,
+    std::function<void(std::optional<FlutterError> reply)> /*result*/) {
+
+  // TODO: Implement async installation with progress reporting
+  // auto shim = std::make_shared<FlatpakShim>(
+  //     this,
+  //     registrar_->messenger(),
+  //     strand_.get());
+  //
+  // asio::dispatch(*strand_, [this, id, result, shim]() {
+  //   shim->SetupTransactionEventChannel(registrar_->messenger());
+  //   shim->ApplicationInstall(id, result);
+  // });
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {
@@ -158,14 +175,17 @@ ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {
+  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),strand_.get());
+
   std::promise<ErrorOr<bool>> promise;
   auto future = promise.get_future();
 
-  asio::dispatch(*strand_, [this, id, &promise]() {
-    auto result = FlatpakShim::ApplicationStart(id, *strand_);
+  asio::dispatch(*strand_, [this, id, &promise, shim]() {
+    shim->SetupTransactionEventChannel(registrar_->messenger());
+    auto result = shim->ApplicationStart(id, *strand_, portal_manager_);
     promise.set_value(std::move(result));
   });
-  io_context_->run();
+
   return future.get();
 }
 

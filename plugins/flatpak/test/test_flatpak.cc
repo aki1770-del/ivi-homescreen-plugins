@@ -1,5 +1,6 @@
 #include <asio/steady_timer.hpp>
-#include <chrono>
+#include <thread>
+#include <future>
 #include <fstream>
 #include <utility>
 
@@ -9,14 +10,51 @@
 
 #include "flatpak/component.h"
 #include "flatpak/flatpak_shim.h"
+#include "spdlog/spdlog.h"
 
 using namespace flatpak_plugin;
+class TestBinaryMessenger : public flutter::BinaryMessenger {
+public:
+  void Send(const std::string& channel,
+            const uint8_t* message,
+            size_t message_size,
+            flutter::BinaryReply reply) const override {
+    // No-op for tests
+    if (reply) {
+      reply(nullptr, 0);
+    }
+  }
+
+  void SetMessageHandler(const std::string& channel,
+                        flutter::BinaryMessageHandler handler) override {
+    handlers_[channel] = std::move(handler);
+  }
+
+private:
+  mutable std::map<std::string, flutter::BinaryMessageHandler> handlers_;
+};
 
 class FlatpakPluginTest : public ::testing::Test {
- protected:
-  void SetUp() override {}
-  void TearDown() override {}
+protected:
+  void SetUp() override {
+    // Initialize test messenger
+    test_messenger_ = std::make_unique<TestBinaryMessenger>();
+  }
+
+  void TearDown() override {
+    test_messenger_.reset();
+  }
+
+  flutter::BinaryMessenger* GetTestMessenger() {
+    return test_messenger_.get();
+  }
+
+private:
+  std::unique_ptr<TestBinaryMessenger> test_messenger_;
 };
+
+// Minimal test messenger implementation
+
 
 class ComponentTest : public ::testing::Test {
  protected:
@@ -222,17 +260,92 @@ TEST_F(FlatpakPluginTest, AddEmptyRemoteTest) {
 
 // Install a real application and uninstall it in another test to clean
 // environment.
-TEST_F(FlatpakPluginTest, ApplicationInstallTest) {
-  if (const auto result =
-          FlatpakShim::ApplicationInstall("org.gnome.Calculator");
-      !result.has_error()) {
-    EXPECT_EQ(result.value(), true);
-  }
-}
+TEST_F(FlatpakPluginTest, InstallAppTest) {
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
 
-TEST_F(FlatpakPluginTest, ApplicationInstallInvalidTest) {
-  const auto result = FlatpakShim::ApplicationInstall("invalid.app.test");
-  EXPECT_TRUE(result.has_error());
+  std::thread io_thread([io_context]() {
+    io_context->run();
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
+
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, value = std::move(value)]() mutable {
+        try {
+          promise->set_value(std::move(value));
+        } catch (...) {
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+  auto future = guard->promise->get_future();
+
+  auto messenger = GetTestMessenger();
+
+  auto shim = std::make_shared<FlatpakShim>(
+      nullptr,
+      messenger,
+      strand.get()
+  );
+
+  auto app_id = "com.valvesoftware.Steam";
+
+  shim->ApplicationInstall(app_id,
+      [guard, app_id, shim](const ErrorOr<bool>& result) {
+        guard->set_value(result);
+      });
+
+  auto status = future.wait_for(std::chrono::minutes(10));
+
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Installation timed out after 10 minutes";
+
+  auto result = future.get();
+
+  ASSERT_TRUE(result.value())
+      << "Installation failed: " << result.error().message();
+
+  GError* error = nullptr;
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to get installation";
+
+  auto refs = flatpak_installation_list_installed_refs(
+      installation, nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to list installed refs";
+
+  bool found = false;
+  for (guint i = 0; i < refs->len; i++) {
+    auto ref = static_cast<FlatpakInstalledRef*>(
+        g_ptr_array_index(refs, i));
+    const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
+    if (ref_name && app_id == std::string(ref_name)) {
+      found = true;
+      break;
+    }
+  }
+
+  g_ptr_array_unref(refs);
+  g_object_unref(installation);
+
+  EXPECT_TRUE(found) << "App " << app_id << " not found in installed refs";
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  work_guard.reset();
+  io_context->stop();
+
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
 }
 
 TEST_F(FlatpakPluginTest, ApplicationUninstallTest) {
@@ -269,22 +382,129 @@ TEST_F(FlatpakPluginTest, FindAppInRemoteSearchTest) {
 }
 
 TEST_F(FlatpakPluginTest, RunAppTest) {
-  asio::io_context io_context;
-  const asio::io_context::strand strand(io_context);
-  bool tested = false;
-  const auto result =
-      FlatpakShim::ApplicationStart("com.spotify.Client", strand);
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
+
+  std::thread io_thread([io_context]() {
+    pthread_setname_np(pthread_self(), "test-io-thread");
+    io_context->run();
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
+
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, &value]() {
+        try {
+          promise->set_value(std::move(value));
+        } catch (const std::exception&) {
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+  auto future = guard->promise->get_future();
+
+  auto portal_manager = std::make_shared<PortalManager>(*io_context);
+  portal_manager->initialize();
+
+  auto messenger = GetTestMessenger();
+  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+
+  auto id = "com.valvesoftware.Steam";
+
+  auto result = shim->ApplicationStart(id, *strand, portal_manager);
+
+  if (result.has_error()) {
+    FAIL() << "ApplicationStart failed: " << result.error().message();
+  }
+
   ASSERT_TRUE(result.value());
 
-  auto timer =
-      std::make_shared<asio::steady_timer>(io_context, std::chrono::minutes(3));
-  timer->async_wait([&tested, timer](const asio::error_code& ec) {
-    if (!ec) {
-      auto stop_result = FlatpakShim::ApplicationStop("com.spotify.Client");
-      EXPECT_TRUE(stop_result.value());
-      tested = true;
-    }
+  std::this_thread::sleep_for(std::chrono::minutes(2));
+
+  bool running = FlatpakShim::is_app_running(id);
+  EXPECT_TRUE(running);
+
+  auto stop_result = FlatpakShim::ApplicationStop(id);
+  ASSERT_TRUE(stop_result.value());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+  running = FlatpakShim::is_app_running(id);
+  EXPECT_FALSE(running);
+
+  work_guard.reset();
+  io_context->stop();
+
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
+}
+
+TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
+  auto portal_manager = std::make_shared<PortalManager>(*io_context);
+  portal_manager->initialize();
+
+  std::thread io_thread([io_context]() {
+    pthread_setname_np(pthread_self(), "asio_worker");
+    io_context->run();
   });
-  io_context.run();
-  EXPECT_TRUE(result.value());
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  std::vector<std::string> apps = {
+      "md.obsidian.Obsidian",
+      "com.spotify.Client",
+      "com.visualstudio.code"
+  };
+  auto messenger = GetTestMessenger();
+
+  for (const auto& app_id : apps) {
+    auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+    auto result = shim->ApplicationStart(app_id, *strand, portal_manager);
+
+    if (result.has_error()) {
+      EXPECT_TRUE(result.value())
+          << "App " << app_id << " failed to start: "
+          << result.error().message();
+    } else {
+      EXPECT_TRUE(result.value());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+
+  std::this_thread::sleep_for(std::chrono::minutes(2));
+
+  for (const auto& app_id : apps) {
+    bool running = FlatpakShim::is_app_running(app_id);
+    EXPECT_TRUE(running);
+  }
+
+  for (const auto& app_id : apps) {
+    auto result = FlatpakShim::ApplicationStop(app_id);
+    EXPECT_TRUE(result.value());
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+  for (const auto& app_id : apps) {
+    bool running = FlatpakShim::is_app_running(app_id);
+    EXPECT_FALSE(running);
+  }
+
+  work_guard.reset();
+  io_context->stop();
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
 }

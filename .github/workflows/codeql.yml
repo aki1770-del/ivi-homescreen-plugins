@@ -12,6 +12,9 @@
 name: "CodeQL Advanced"
 
 on:
+  push:
+    branches:
+      - v2.0
   pull_request:
     types: [ opened, synchronize, reopened, closed ]
   release:

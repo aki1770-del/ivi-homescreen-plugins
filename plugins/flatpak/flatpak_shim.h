@@ -25,20 +25,34 @@
 #include <flatpak/flatpak.h>
 #include <glib/garray.h>
 #include <asio/io_context_strand.hpp>
+#include <utility>
 
+#include <flutter/event_channel.h>
 #include "appstream_catalog.h"
+#include "asio/steady_timer.hpp"
 #include "component.h"
 #include "messages.g.h"
+#include "plugins/flatpak/portals/portal_manager.h"
 
 namespace flatpak_plugin {
+class FlatpakPlugin;
 
 /**
  * \brief A utility class providing various helper functions for interacting
  * with Flatpak installations, remotes, and applications.
  */
-struct FlatpakShim {
+struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   static constexpr size_t BUFFER_SIZE =
       32768;  ///< Buffer size used for decompressing.
+
+  explicit FlatpakShim(FlatpakPlugin* plugin = nullptr,
+                       flutter::BinaryMessenger* messenger = nullptr,
+                       asio::io_context::strand* strand = nullptr)
+      : plugin_(plugin), messenger_(messenger), strand_(strand) {
+    if (messenger_) {
+      SetupTransactionEventChannel(messenger_);
+    }
+  }
 
   /**
    * \brief Retrieves an optional attribute from an XML node.
@@ -177,11 +191,12 @@ struct FlatpakShim {
   static ErrorOr<bool> RemoteRemove(const std::string& id);
 
   /**
-   * \brief Install flatpak application.
+   * \brief Install flatpak application async.
    * \param id id of the application wanted to install.
-   * \return An ErrorOr object containing the EncodableList or an error.
+   * \param callback Callback invoked when installation completes or fails.
    */
-  static ErrorOr<bool> ApplicationInstall(const std::string& id);
+  void ApplicationInstall(const std::string& id,
+                          const std::function<void(ErrorOr<bool>)>& callback);
 
   /**
    * \brief Uninstall flatpak application.
@@ -193,13 +208,15 @@ struct FlatpakShim {
   /**
    * \brief Start flatpak application.
    * \param id Id of the application to start application.
-   * \param strand Asio object passed to function to execute post-function
-   * code on the same thread.
+   * \param strand Asio strand to execute async operations.
+   * \param portal_manager Ptr to portal manager to execute portal operations.
    * \return An ErrorOr object containing the EncodableList or an
    * error.
    */
-  static ErrorOr<bool> ApplicationStart(const std::string& id,
-                                        const asio::io_context::strand& strand);
+  ErrorOr<bool> ApplicationStart(
+      const std::string& id,
+      asio::io_context::strand& strand,
+      const std::shared_ptr<PortalManager>& portal_manager);
 
   /**
    * \brief Stop flatpak Application.
@@ -297,6 +314,25 @@ struct FlatpakShim {
       const std::vector<char>& compressedData,
       std::vector<char>& decompressedData);
 
+  /**
+   * \brief Stop monitoring all running Applications
+   */
+  static void stop_all_monitoring();
+
+  /**
+   * \brief Checking status of application if app is running or not.
+   * \param app_name Name of application.
+   * \return True or false depending on application status if the app is running
+   * or not.
+   */
+  static bool is_app_running(const std::string& app_name);
+
+  /**
+   * \brief Sets up the event channel for transaction events.
+   * \param messenger Pointer to the BinaryMessenger used for communication.
+   */
+  void SetupTransactionEventChannel(flutter::BinaryMessenger* messenger);
+
  private:
   struct sandbox {
     struct application {
@@ -324,15 +360,66 @@ struct FlatpakShim {
     std::vector<std::string> session_bus;
     std::vector<std::string> system_bus;
     std::map<std::string, std::string> environment;
-    std::vector<std::map<std::string, std::string>> extensions;
+    std::vector<std::string> extensions;
     std::vector<std::string> built_extensions;
   };
-  struct Instance {
+  struct MonitorSession {
+    std::string name;
+    pid_t pid;
+    std::shared_ptr<asio::steady_timer> timer;
+    std::weak_ptr<PortalManager> portal_manager;
     FlatpakInstance* instance;
-    guint child_id;
-    std::string app_id;
+    bool cancelled{false};
+    asio::io_context::strand* strand;
+
+    MonitorSession(asio::io_context::strand* strand_ptr,
+                   std::string name,
+                   pid_t pid,
+                   const std::shared_ptr<PortalManager>& p_m,
+                   FlatpakInstance* inst)
+        : name(std::move(name)),
+          pid(pid),
+          timer(std::make_shared<asio::steady_timer>(strand_ptr->context())),
+          portal_manager(p_m),
+          instance(inst),
+          strand(strand_ptr) {}
+
+    ~MonitorSession() {
+      if (instance) {
+        g_object_unref(instance);
+        instance = nullptr;
+      }
+    }
   };
-  static std::unordered_map<std::string, Instance> instances;
+
+  template <typename T>
+  struct GObjectGuard {
+    T* obj;
+    explicit GObjectGuard(T* o) : obj(o) {}
+    ~GObjectGuard() {
+      if (obj)
+        g_object_unref(obj);
+    }
+    T* get() const { return obj; }
+    T* release() {
+      T* tmp = obj;
+      obj = nullptr;
+      return tmp;
+    }
+  };
+
+  static std::mutex monitor_mutex_;
+  static std::map<std::string, std::shared_ptr<MonitorSession>>
+      active_sessions_;
+  FlatpakPlugin* plugin_;
+  flutter::BinaryMessenger* messenger_;
+  asio::io_context::strand* strand_;
+
+  // Event channel for streaming transaction progress to Flutter
+  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
+      event_channel_;
+  std::shared_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
+  mutable std::mutex event_sink_mutex_;
 
   static std::optional<Application> create_component(
       FlatpakRemoteRef* app_ref,
@@ -343,8 +430,9 @@ struct FlatpakShim {
   static std::string create_appdata(const Component& component);
 
   static void create_sandbox(FlatpakInstalledRef* installed_ref,
-                             const asio::io_context::strand& strand,
-                             std::function<void(bool)> callback);
+                             asio::io_context::strand& strand,
+                             const std::function<void(bool)>& callback,
+                             PortalManager* portal_manager);
 
   static sandbox parse_metadata(const std::string& metadata);
 
@@ -352,9 +440,66 @@ struct FlatpakShim {
       const std::string& metadata,
       const std::string& section);
 
-  static void setup_portal_sessions(const sandbox& configs,
-                                    asio::io_context::strand& strand,
-                                    std::function<void(bool)> callback);
+  static void setup_portal_sessions(
+      const sandbox& configs,
+      const asio::io_context::strand& strand,
+      PortalManager* portal_manager,
+      const std::function<void(ErrorOr<bool>)>& callback);
+
+  static void monitor_app(const std::shared_ptr<MonitorSession>& session);
+
+  static void cleanup_app(const std::shared_ptr<MonitorSession>& session);
+
+  static void check_app(const std::shared_ptr<MonitorSession>& session);
+
+  void check_runtime(FlatpakInstalledRef* installed_ref,
+                     FlatpakInstallation* installation,
+                     asio::io_context::strand& strand,
+                     const std::function<void(ErrorOr<bool>)>& callback);
+
+  void install_runtime(
+      const std::string& runtime,
+      asio::io_context::strand& strand,
+      FlatpakInstallation* installation,
+      const std::function<void(ErrorOr<bool>)>& complete_callback);
+
+  static bool is_runtime_installed_for_app(const std::string& runtime,
+                                           FlatpakInstallation* installation);
+
+  static void install_extensions(
+      const std::vector<std::string>& extensions,
+      asio::io_context::strand& strand,
+      FlatpakInstallation* installation,
+      const std::function<void(ErrorOr<bool>)>& complete_callback);
+
+  // flutter streaming callback functions
+  void SendTransactionEvent(flutter::EncodableMap& event) const;
+
+  // callback triggered by "changed" signal
+  static void OnProgressChanged(FlatpakTransactionProgress* progress,
+                                gpointer user_data);
+
+  // callback when there is a new operation in transaction
+  static void OnNewOperation(FlatpakTransaction* transaction,
+                             FlatpakTransactionOperation* operation,
+                             FlatpakTransactionProgress* progress,
+                             gpointer user_data);
+
+  // callback when transaction operation completed
+  static void OnOperationComplete(FlatpakTransaction* transaction,
+                                  FlatpakTransactionOperation* operation,
+                                  const char* commit,
+                                  FlatpakTransactionResult result,
+                                  gpointer user_data);
+
+  // callback when transaction operation reports an error
+  static gboolean OnOperationError(FlatpakTransaction* transaction,
+                                   FlatpakTransactionOperation* operation,
+                                   const GError* error,
+                                   FlatpakTransactionErrorDetails error_details,
+                                   gpointer user_data);
+  static gboolean OnTransactionReady(FlatpakTransaction* transaction,
+                                     gpointer user_data);
 };
 
 }  // namespace flatpak_plugin
