@@ -8,6 +8,13 @@
 
 #include "firebase_storage_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin FirebaseStoragePlugin = {
+    "firebase_storage",
+    FirebaseStoragePluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void FirebaseStoragePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   firebase_storage_linux::FirebaseStoragePlugin::RegisterWithRegistrar(

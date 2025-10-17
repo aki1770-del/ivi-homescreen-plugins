@@ -20,6 +20,13 @@
 
 #include "go_router_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin GoRouterPlugin = {
+    "com.flutter.go_router",
+    GoRouterPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void GoRouterPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   go_router_plugin::GoRouterPlugin::RegisterWithRegistrar(

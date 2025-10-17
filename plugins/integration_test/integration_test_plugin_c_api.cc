@@ -20,6 +20,13 @@
 
 #include "integration_test_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin IntergrationTestPlugin = {
+    "IntegrationTestPlugin",
+    IntegrationTestPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void IntegrationTestPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar) {
   integration_test_plugin::IntegrationTestPlugin::RegisterWithRegistrar(

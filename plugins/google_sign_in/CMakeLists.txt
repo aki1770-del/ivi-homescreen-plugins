@@ -20,7 +20,7 @@ add_library(plugin_google_sign_in STATIC
         messages.g.cc
 )
 
-target_include_directories(plugin_google_sign_in PRIVATE include)
+target_include_directories(plugin_google_sign_in PUBLIC include)
 
 target_link_libraries(plugin_google_sign_in PUBLIC
         flutter

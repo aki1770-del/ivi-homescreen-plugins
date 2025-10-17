@@ -20,7 +20,7 @@ add_library(plugin_integration_test STATIC
         messages.cc
 )
 
-target_include_directories(plugin_integration_test PRIVATE include)
+target_include_directories(plugin_integration_test PUBLIC include)
 
 target_link_libraries(plugin_integration_test PUBLIC
         flutter

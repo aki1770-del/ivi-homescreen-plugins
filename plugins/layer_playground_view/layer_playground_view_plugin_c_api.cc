@@ -20,6 +20,13 @@
 
 #include "layer_playground_view_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin LayerPlaygroundPlugin = {
+    "LayerPlayground",
+    nullptr,
+    "@views/simple-box-view-type",
+    LayerPlaygroundPluginCApiRegisterWithRegistrar
+};
+
 void LayerPlaygroundPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar,
     const int32_t id,

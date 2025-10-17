@@ -20,6 +20,13 @@
 
 #include "flatpak_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin FlatpakPlugin = {
+    "plugins.flutter.io/flatpak",
+    FlatpakPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void FlatpakPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   flatpak_plugin::FlatpakPlugin::RegisterWithRegistrar(

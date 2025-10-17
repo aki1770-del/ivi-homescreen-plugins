@@ -9,6 +9,13 @@
 
 #include "firebase_auth_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin FirebaseAuthPlugin = {
+    "firebase_auth",
+    FirebaseAuthPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void FirebaseAuthPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   firebase_auth_linux::FirebaseAuthPlugin::RegisterWithRegistrar(

@@ -8,7 +8,7 @@
 #ifndef FLUTTER_PLUGIN_CLOUD_FIRESTORE_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_CLOUD_FIRESTORE_PLUGIN_C_API_H_
 
-#include <flutter_plugin_registrar.h>
+#include "flutter_homescreen_plugin.h"
 
 #ifdef FLUTTER_PLUGIN_IMPL
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
@@ -16,15 +16,13 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void CloudFirestorePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar);
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin CloudFirestorePlugin;
+
+
 
 #endif  // FLUTTER_PLUGIN_CLOUD_FIRESTORE_PLUGIN_C_API_H_

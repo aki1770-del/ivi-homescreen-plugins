@@ -20,6 +20,13 @@
 
 #include "secure_storage_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin SecureStoragePlugin = {
+    "secure_storage",
+    SecureStoragePluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void SecureStoragePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   plugin_secure_storage::SecureStoragePlugin::RegisterWithRegistrar(

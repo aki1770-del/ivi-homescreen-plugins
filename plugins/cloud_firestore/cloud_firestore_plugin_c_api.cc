@@ -9,6 +9,13 @@
 
 #include "cloud_firestore_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin CloudFirestorePlugin = {
+    "cloud_firestore",
+    CloudFirestorePluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void CloudFirestorePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   cloud_firestore_linux::CloudFirestorePlugin::RegisterWithRegistrar(

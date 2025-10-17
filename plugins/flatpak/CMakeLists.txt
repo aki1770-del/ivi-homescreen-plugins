@@ -29,7 +29,7 @@ add_library(plugin_flatpak STATIC
         release.cc
         screenshot.cc
 )
-target_include_directories(plugin_flatpak PRIVATE include)
+target_include_directories(plugin_flatpak PUBLIC include)
 target_compile_options(plugin_flatpak PRIVATE
         -Wno-deprecated-declarations
 )

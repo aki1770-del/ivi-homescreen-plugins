@@ -21,6 +21,13 @@
 #include "nav_render_surface.h"
 #include "nav_render_texture.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin NavRenderViewPlugin = {
+    "NavRenderView",
+    NavRenderViewPluginCApiRegisterWithRegistrar,
+    "views/nav-render-view",
+    NavRenderViewPluginCApiRegisterWithRegistrar
+};
+
 void NavRenderViewPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar,
     const int32_t id,

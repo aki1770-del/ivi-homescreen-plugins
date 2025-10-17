@@ -20,6 +20,13 @@
 
 #include "file_selector_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin FileSelectorPlugin = {
+    "file_selector",
+    FileSelectorPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void FileSelectorPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   plugin_file_selector::FileSelectorPlugin::RegisterWithRegistrar(

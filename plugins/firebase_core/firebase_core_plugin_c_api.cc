@@ -9,6 +9,13 @@
 
 #include "firebase_core_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin FirebaseCorePlugin = {
+    "firebase_core",
+    FirebaseCorePluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void FirebaseCorePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   firebase_core_linux::FirebaseCorePlugin::RegisterWithRegistrar(

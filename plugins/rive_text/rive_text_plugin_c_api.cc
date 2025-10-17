@@ -22,6 +22,13 @@
 #include "librive_text.h"
 #include "rive_text_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin RiveTextPlugin = {
+  "rive_text",
+  RiveTextPluginCApiRegisterWithRegistrar,
+  nullptr,
+  nullptr
+};
+
 void RiveTextPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   if (!plugin_rive_text::LibRiveText::IsPresent()) {

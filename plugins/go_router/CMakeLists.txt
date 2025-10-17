@@ -20,7 +20,7 @@ add_library(plugin_go_router STATIC
         messages.cc
 )
 
-target_include_directories(plugin_go_router PRIVATE include)
+target_include_directories(plugin_go_router PUBLIC include)
 
 target_link_libraries(plugin_go_router PUBLIC
         flutter

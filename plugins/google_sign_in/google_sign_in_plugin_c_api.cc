@@ -20,6 +20,20 @@
 
 #include "google_sign_in_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin GoogleSignInPlugin = {
+    "google_sign_in",
+    GoogleSignInPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
+FLUTTER_PLUGIN_EXPORT FlutterPlugin GoogleSignInPlugin = {
+    "google_sign_in",
+    GoogleSignInPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void GoogleSignInPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   google_sign_in_plugin::GoogleSignInPlugin::RegisterWithRegistrar(

@@ -18,6 +18,13 @@
 #include "camera_plugin.h"
 #include "flutter/plugin_registrar_homescreen.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin CameraPipewirePlugin = {
+    "camera_pipewire",
+    CameraPipewirePluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void CameraPipewirePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   camera_plugin::CameraPlugin::RegisterWithRegistrar(

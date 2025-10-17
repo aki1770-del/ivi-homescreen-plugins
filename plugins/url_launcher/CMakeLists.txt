@@ -20,7 +20,7 @@ add_library(plugin_url_launcher STATIC
         messages.g.cc
 )
 
-target_include_directories(plugin_url_launcher PRIVATE include)
+target_include_directories(plugin_url_launcher PUBLIC include)
 
 target_link_libraries(plugin_url_launcher PUBLIC
         flutter

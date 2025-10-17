@@ -1,0 +1,94 @@
+/*
+ * Copyright 2024 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "ivi_homescreen_plugins_library.h"
+
+@PLUGIN_HEADERS@
+
+void IviHomescreenPluginsRegisterPlugins(FlutterDesktopEngineRef engine) {
+  (void)engine;
+
+  // Register platform view plugins from array
+  const FlutterPlugin plugins[] = {
+@PLUGIN_DATA_ARRAY@
+  };
+
+  #pragma unroll
+  for (const auto& plugin : plugins) {
+    if(plugin.doRegister == nullptr) {
+      continue;
+    }
+
+    plugin.doRegister(FlutterDesktopGetPluginRegistrar(engine, plugin.name));
+  }
+}
+
+bool IviHomescreenPluginsPlatformViewTryCreate(
+    FlutterDesktopPluginRegistrarRef registrar,
+    int32_t id,
+    const std::string& viewType,
+    int32_t direction,
+    double top,
+    double left,
+    double width,
+    double height,
+    const std::vector<uint8_t>& params,
+    const std::string& flutter_asset_directory,
+    FlutterDesktopEngineRef engine,
+    PlatformViewAddListener addListener,
+    PlatformViewRemoveListener removeListener,
+    void* platform_view_context
+) {
+  // Array of platform view create functions
+  const FlutterPlugin platformViewPlugins[] = {
+@PLUGIN_DATA_ARRAY@
+  };
+
+  #pragma unroll
+  for (const auto & plugin : platformViewPlugins) {
+    if (plugin.platformViewName != nullptr && viewType == plugin.platformViewName) {
+      if(plugin.createPlatformView == nullptr) {
+        continue;
+      }
+
+      auto create_func = plugin.createPlatformView;
+      create_func(registrar, id, viewType, direction, top, left, width, height, params,
+                  flutter_asset_directory, engine, addListener, removeListener,
+                  platform_view_context);
+      return true;
+    }
+  }
+
+  // (void)flutter_asset_directory;
+  // (void)addListener;
+  // (void)removeListener;
+  // (void)platform_view_context;
+  // (void)registrar;
+  // (void)id;
+  // (void)direction;
+  // (void)top;
+  // (void)left;
+  // (void)width;
+  // (void)height;
+  // (void)params;
+  return false;
+}
+
+FlutterPluginLibrary IviHomescreenPluginsPluginLibrary = {
+    "Ivi Homescreen Plugins",
+    IviHomescreenPluginsRegisterPlugins,
+    IviHomescreenPluginsPlatformViewTryCreate
+};

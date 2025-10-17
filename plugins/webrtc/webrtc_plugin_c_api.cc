@@ -20,6 +20,13 @@
 
 #include "webrtc_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin WebrtcPlugin = {
+    "webrtc",
+    WebrtcPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void WebrtcPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   flutter_webrtc_plugin::WebrtcPlugin::RegisterWithRegistrar(

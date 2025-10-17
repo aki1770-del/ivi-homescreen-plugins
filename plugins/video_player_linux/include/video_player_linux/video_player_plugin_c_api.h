@@ -17,7 +17,7 @@
 #ifndef PLUGINS_VIDEO_PLAYER_LINUX_INCLUDE_VIDEO_PLAYER_LINUX_VIDEO_PLAYER_PLUGIN_C_API_H_
 #define PLUGINS_VIDEO_PLAYER_LINUX_INCLUDE_VIDEO_PLAYER_LINUX_VIDEO_PLAYER_PLUGIN_C_API_H_
 
-#include "flutter_homescreen.h"
+#include "flutter_homescreen_plugin.h"
 
 #ifdef FLUTTER_PLUGIN_IMPL
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
@@ -25,15 +25,13 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar);
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin VideoPlayerLinuxPlugin;
+
+
 
 #endif  // PLUGINS_VIDEO_PLAYER_LINUX_INCLUDE_VIDEO_PLAYER_LINUX_VIDEO_PLAYER_PLUGIN_C_API_H_

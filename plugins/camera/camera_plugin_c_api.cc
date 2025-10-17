@@ -20,6 +20,13 @@
 
 #include "camera_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin CameraPlugin = {
+    "camera",
+    CameraPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void CameraPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   camera_plugin::CameraPlugin::RegisterWithRegistrar(

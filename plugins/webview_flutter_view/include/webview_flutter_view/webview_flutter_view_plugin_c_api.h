@@ -17,9 +17,7 @@
 #ifndef FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H
 #define FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H
 
-#include <flutter_plugin_registrar.h>
-#include "flutter_homescreen.h"
-#include "platform_views/platform_view_listener.h"
+#include "flutter_homescreen_plugin.h"
 
 #include <string>
 #include <vector>
@@ -30,9 +28,7 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void WebviewFlutterPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar);
@@ -53,8 +49,8 @@ FLUTTER_PLUGIN_EXPORT void WebviewFlutterPluginCApiPlatformViewCreate(
     PlatformViewRemoveListener remove_listener,
     void* platform_views_context);
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin WebviewFlutterViewPlugin;
+
+
 
 #endif  // FLUTTER_PLUGIN_WEBVIEW_FLUTTER_PLUGIN_C_API_H

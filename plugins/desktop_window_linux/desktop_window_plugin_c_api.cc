@@ -20,6 +20,13 @@
 
 #include "desktop_window_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin DesktopWindowLinuxPlugin = {
+    "com.toyotaconnected.desktop_window_linux",
+    DesktopWindowLinuxPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   desktop_window_linux_plugin::DesktopWindowLinuxPlugin::RegisterWithRegistrar(

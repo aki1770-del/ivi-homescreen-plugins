@@ -20,6 +20,13 @@
 
 #include "video_player_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin VideoPlayerLinuxPlugin = {
+    "VideoPlayerLinux",
+    VideoPlayerLinuxPluginCApiRegisterWithRegistrar,
+    "",
+    nullptr
+};
+
 void VideoPlayerLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   video_player_linux::VideoPlayerPlugin::RegisterWithRegistrar(

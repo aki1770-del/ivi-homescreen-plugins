@@ -20,6 +20,13 @@
 
 #include "audioplayers_linux_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin AudioPlayersLinuxPlugin = {
+    "audioplayers_linux",
+    AudioPlayersLinuxPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void AudioPlayersLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   audioplayers_linux_plugin::AudioplayersLinuxPlugin::RegisterWithRegistrar(

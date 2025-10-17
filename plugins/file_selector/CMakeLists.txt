@@ -20,7 +20,7 @@ add_library(plugin_file_selector STATIC
         messages.cc
 )
 
-target_include_directories(plugin_file_selector PRIVATE include)
+target_include_directories(plugin_file_selector PUBLIC include)
 
 target_link_libraries(plugin_file_selector PUBLIC
         flutter

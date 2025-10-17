@@ -22,7 +22,7 @@ add_library(plugin_secure_storage STATIC
         messages.cc
 )
 
-target_include_directories(plugin_secure_storage PRIVATE include)
+target_include_directories(plugin_secure_storage PUBLIC include)
 
 target_link_libraries(plugin_secure_storage PUBLIC
         flutter

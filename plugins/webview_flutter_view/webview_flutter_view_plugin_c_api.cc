@@ -20,6 +20,13 @@
 
 #include "webview_flutter_view_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin WebviewFlutterViewPlugin = {
+    "WebviewFlutterView",
+    WebviewFlutterPluginCApiRegisterWithRegistrar,
+    "plugins.flutter.io/webview",
+    WebviewFlutterPluginCApiPlatformViewCreate
+};
+
 void WebviewFlutterPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar) {
   plugin_webview_flutter::WebviewFlutterPlugin::RegisterWithRegistrar(

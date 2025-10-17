@@ -20,6 +20,13 @@
 
 #include "url_launcher_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin UrlLauncherPlugin = {
+    "url_launcher",
+    UrlLauncherPluginCApiRegisterWithRegistrar,
+    nullptr,
+    nullptr
+};
+
 void UrlLauncherPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   url_launcher_linux::UrlLauncherPlugin::RegisterWithRegistrar(

@@ -20,7 +20,7 @@ add_library(plugin_desktop_window_linux STATIC
         messages.cc
 )
 
-target_include_directories(plugin_desktop_window_linux PRIVATE include)
+target_include_directories(plugin_desktop_window_linux PUBLIC include)
 
 target_link_libraries(plugin_desktop_window_linux PUBLIC
         flutter

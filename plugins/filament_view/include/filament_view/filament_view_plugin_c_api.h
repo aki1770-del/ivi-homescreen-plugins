@@ -31,9 +31,7 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void FilamentViewPluginCApiRegisterWithRegistrar(
   FlutterDesktopPluginRegistrar* registrar,
@@ -52,8 +50,6 @@ FLUTTER_PLUGIN_EXPORT void FilamentViewPluginCApiRegisterWithRegistrar(
   void* platform_view_context
 );
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+
 
 #endif  // FLUTTER_PLUGIN_FILAMENT_VIEW_PLUGIN_C_API_H_

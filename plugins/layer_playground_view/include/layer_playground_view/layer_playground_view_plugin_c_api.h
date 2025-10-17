@@ -17,9 +17,7 @@
 #ifndef FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_
 
-#include <flutter_plugin_registrar.h>
-#include "flutter_homescreen.h"
-#include "platform_view_listener.h"
+#include "flutter_homescreen_plugin.h"
 
 #include <string>
 #include <vector>
@@ -30,9 +28,7 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void LayerPlaygroundPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar,
@@ -50,8 +46,8 @@ FLUTTER_PLUGIN_EXPORT void LayerPlaygroundPluginCApiRegisterWithRegistrar(
     PlatformViewRemoveListener remove_listener,
     void* platform_views_context);
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin LayerPlaygroundPlugin;
+
+
 
 #endif  // FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_C_API_H_

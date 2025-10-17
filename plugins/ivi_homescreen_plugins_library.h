@@ -14,26 +14,36 @@
  * limitations under the License.
  */
 
-#ifndef GENERATED_PLUGIN_REGISTRANT_H_
-#define GENERATED_PLUGIN_REGISTRANT_H_
+#ifndef IVI_HOMESCREEN_PLUGINS_LIBRARY_H
+#define IVI_HOMESCREEN_PLUGINS_LIBRARY_H
 #include <encodable_value.h>
 
-#include "platform_view_listener.h"
+#include "flutter_homescreen_plugin.h"
 
 #include <method_result.h>
 #include <memory>
 
-typedef struct FlutterDesktopEngineState* FlutterDesktopEngineRef;
 
-void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine);
 
-void PluginsAoiPlatformViewCreate(
-    FlutterDesktopEngineRef engine,
+void IviHomescreenPluginsRegisterPlugins(FlutterDesktopEngineRef engine);
+
+bool IviHomescreenPluginsPlatformViewTryCreate(
+    FlutterDesktopPluginRegistrarRef registrar,
+    int32_t id,
+    const std::string& viewType,
+    int32_t direction,
+    double top,
+    double left,
+    double width,
+    double height,
+    const std::vector<uint8_t>& params,
     const std::string& flutter_asset_directory,
-    const flutter::EncodableValue* arguments,
+    FlutterDesktopEngineRef engine,
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
-    void* platform_view_context,
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+    void* platform_view_context
+);
 
-#endif  // GENERATED_PLUGIN_REGISTRANT_H_
+extern FlutterPluginLibrary IviHomescreenPluginsPluginLibrary;
+
+#endif  // IVI_HOMESCREEN_PLUGINS_LIBRARY_H

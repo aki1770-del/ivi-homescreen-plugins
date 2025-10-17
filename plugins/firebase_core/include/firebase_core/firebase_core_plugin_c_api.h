@@ -8,7 +8,7 @@
 #ifndef FLUTTER_PLUGIN_FIREBASE_CORE_PLUGIN_C_API_H_
 #define FLUTTER_PLUGIN_FIREBASE_CORE_PLUGIN_C_API_H_
 
-#include <flutter_plugin_registrar.h>
+#include "flutter_homescreen_plugin.h"
 
 #ifdef FLUTTER_PLUGIN_IMPL
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
@@ -18,5 +18,7 @@
 
 FLUTTER_PLUGIN_EXPORT void FirebaseCorePluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar);
+
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin FirebaseCorePlugin;
 
 #endif  // FLUTTER_PLUGIN_FIREBASE_CORE_PLUGIN_C_API_H_

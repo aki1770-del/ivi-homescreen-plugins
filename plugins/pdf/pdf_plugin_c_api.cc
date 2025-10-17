@@ -22,6 +22,13 @@
 #include "libpdfium.h"
 #include "pdf_plugin.h"
 
+FLUTTER_PLUGIN_EXPORT FlutterPlugin PdfPlugin = {
+  "pdf",
+  PrintingPluginCApiRegisterWithRegistrar,
+  nullptr,
+  nullptr
+};
+
 void PrintingPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrarRef registrar) {
   if (plugin_pdf::LibPdfium::IsPresent()) {

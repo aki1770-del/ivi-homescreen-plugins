@@ -17,8 +17,7 @@
 #ifndef FLUTTER_PLUGIN_DESKTOP_WINDOW_PLUGIN_C_API_H
 #define FLUTTER_PLUGIN_DESKTOP_WINDOW_PLUGIN_C_API_H
 
-#include <flutter_plugin_registrar.h>
-#include "flutter_homescreen.h"
+#include "flutter_homescreen_plugin.h"
 
 #ifdef FLUTTER_PLUGIN_IMPL
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
@@ -26,15 +25,13 @@
 #define FLUTTER_PLUGIN_EXPORT __attribute__((visibility("default")))
 #endif
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+
 
 FLUTTER_PLUGIN_EXPORT void DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
     FlutterDesktopPluginRegistrar* registrar);
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
+extern FLUTTER_PLUGIN_EXPORT FlutterPlugin DesktopWindowLinuxPlugin;
+
+
 
 #endif  // FLUTTER_PLUGIN_DESKTOP_WINDOW_PLUGIN_C_API_H
