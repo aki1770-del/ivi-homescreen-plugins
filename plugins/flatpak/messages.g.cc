@@ -965,15 +965,16 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 return;
               }
               const auto& id_arg = std::get<std::string>(encodable_id_arg);
-          api->ApplicationInstall(id_arg, [reply](std::optional<FlutterError>&& output) {
-            if (output.has_value()) {
-              reply(WrapError(output.value()));
-              return;
-            }
-            EncodableList wrapped;
-            wrapped.push_back(EncodableValue());
-            reply(EncodableValue(std::move(wrapped)));
-          });
+              api->ApplicationInstall(
+                  id_arg, [reply](std::optional<FlutterError>&& output) {
+                    if (output.has_value()) {
+                      reply(WrapError(output.value()));
+                      return;
+                    }
+                    EncodableList wrapped;
+                    wrapped.push_back(EncodableValue());
+                    reply(EncodableValue(std::move(wrapped)));
+                  });
             } catch (const std::exception& exception) {
               reply(WrapError(exception.what()));
             }

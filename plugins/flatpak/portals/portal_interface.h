@@ -24,10 +24,7 @@
 /**
  * \brief This enum Representing and Identify different D-Bus portal interface.
  */
-enum class BUS_TYPE {
-  SESSION,
-  SYSTEM
-};
+enum class BUS_TYPE { SESSION, SYSTEM };
 
 /**
  * \brief This struct represents portal interface description.
@@ -38,21 +35,21 @@ struct PortalInterface {
   std::string service_name;
   BUS_TYPE bus_type;
 
-  bool operator==(const PortalInterface &other) const {
-    return interface_name == other.interface_name &&
-           bus_type == other.bus_type;
+  bool operator==(const PortalInterface& other) const {
+    return interface_name == other.interface_name && bus_type == other.bus_type;
   }
 
-  bool operator<(const PortalInterface &other) const {
-    return std::tie(interface_name, bus_type) < std::tie(other.interface_name, other.bus_type);
+  bool operator<(const PortalInterface& other) const {
+    return std::tie(interface_name, bus_type) <
+           std::tie(other.interface_name, other.bus_type);
   }
 };
 
 struct PortalInterfaceHash {
-  size_t operator()(const PortalInterface &portal) const {
+  size_t operator()(const PortalInterface& portal) const {
     return std::hash<std::string>{}(portal.interface_name) ^
            (std::hash<int>{}(static_cast<int>(portal.bus_type)) << 1);
   }
 };
 
-#endif //PORTAL_INTERFACE_H
+#endif  // PORTAL_INTERFACE_H

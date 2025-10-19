@@ -22,17 +22,19 @@
 
 namespace flatpak_plugin {
 
-PortalManager::PortalManager(asio::io_context& io_context) :
-  io_context_(io_context), portal_proxy_(portal_bus_){}
+PortalManager::PortalManager(asio::io_context& io_context)
+    : io_context_(io_context), portal_proxy_(portal_bus_) {}
 
 void PortalManager::initialize() {
   portal_bus_.init();
 }
 
-void PortalManager::register_application(const std::string& app_id, const std::vector<PortalInterface>& interfaces) {
+void PortalManager::register_application(
+    const std::string& app_id,
+    const std::vector<PortalInterface>& interfaces) {
   std::lock_guard<std::mutex> lock(app_mutex_);
   // create application context
-  PortalContext Context(app_id,io_context_);
+  PortalContext Context(app_id, io_context_);
   Context.interfaces = interfaces;
 
   // create proxies for all interfaces
@@ -40,7 +42,7 @@ void PortalManager::register_application(const std::string& app_id, const std::v
     auto proxy = portal_proxy_.GetProxy(interface);
     Context.owned_proxies.emplace_back(proxy);
   }
-  app_context_.emplace(app_id,std::move(Context));
+  app_context_.emplace(app_id, std::move(Context));
 }
 
 void PortalManager::unregister_application(const std::string& app_id) {
@@ -55,32 +57,41 @@ void PortalManager::unregister_application(const std::string& app_id) {
 }
 
 template <typename ResultCallback, typename... Args>
-void PortalManager::call_method(const std::string& app_id, const PortalInterface& interface, const std::string& method_name, ResultCallback&& callback, Args&&... args) {
+void PortalManager::call_method(const std::string& app_id,
+                                const PortalInterface& interface,
+                                const std::string& method_name,
+                                ResultCallback&& callback,
+                                Args&&... args) {
   auto& Context = get_app_context(app_id);
 
-  asio::post(*Context.strand,[=,this]() {
+  asio::post(*Context.strand, [=, this]() {
     auto proxy = portal_proxy_.GetProxy(interface);
-    proxy->callMethodAsync(method_name).onInterface(interface.interface_name).withArguments(std::forward<Args>(args)...).uponReplyInvoke([callback, strand = Context.strand.get()](const sdbus::Error *error, auto... results) {
-      asio::post(*strand, [=]() {
-                        if (error) {
-                            callback(error, results...);
-                        } else {
-                            callback(nullptr, results...);
-                        }
-                    });
-    });
+    proxy->callMethodAsync(method_name)
+        .onInterface(interface.interface_name)
+        .withArguments(std::forward<Args>(args)...)
+        .uponReplyInvoke([callback, strand = Context.strand.get()](
+                             const sdbus::Error* error, auto... results) {
+          asio::post(*strand, [=]() {
+            if (error) {
+              callback(error, results...);
+            } else {
+              callback(nullptr, results...);
+            }
+          });
+        });
   });
 }
-
 
 PortalContext& PortalManager::get_app_context(const std::string& app_id) {
   std::lock_guard<std::mutex> lock(app_mutex_);
   const auto it = app_context_.find(app_id);
   if (it == app_context_.end()) {
-    spdlog::error("[FlatpakPlugin] PortalManager::get_app_context: app_id not found");
-    throw std::runtime_error("PortalManager::get_app_context: app_id not found");
+    spdlog::error(
+        "[FlatpakPlugin] PortalManager::get_app_context: app_id not found");
+    throw std::runtime_error(
+        "PortalManager::get_app_context: app_id not found");
   }
   return it->second;
 }
 
-}
+}  // namespace flatpak_plugin

@@ -153,7 +153,8 @@ void addQuadToScene() {
   short4 tbn = math::packSnorm16(
     mat3f::packTangentFrame(
       math::mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-    ).xyzw
+    )
+      .xyzw
   );
 
   const static math::short4 normals[]{tbn, tbn, tbn, tbn};
@@ -188,13 +189,15 @@ void addQuadToScene() {
   filamat::MaterialBuilder::init();
   filamat::MaterialBuilder builder;
   builder.name("Some material")
-    .material("    void material(inout MaterialInputs material) {\n"
-              "        prepareMaterial(material);\n"
-              "        material.baseColor.rgb = materialParams.baseColor;\n"
-              "        material.metallic = materialParams.metallic;\n"
-              "        material.roughness = materialParams.roughness;\n"
-              "        material.reflectance = materialParams.reflectance;\n"
-              "    }")
+    .material(
+      "    void material(inout MaterialInputs material) {\n"
+      "        prepareMaterial(material);\n"
+      "        material.baseColor.rgb = materialParams.baseColor;\n"
+      "        material.metallic = materialParams.metallic;\n"
+      "        material.roughness = materialParams.roughness;\n"
+      "        material.reflectance = materialParams.reflectance;\n"
+      "    }"
+    )
     .parameter("baseColor", filament::backend::UniformType::FLOAT3)
     .parameter("metallic", filament::backend::UniformType::FLOAT)
     .parameter("roughness", filament::backend::UniformType::FLOAT)

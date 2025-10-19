@@ -576,8 +576,10 @@ void ModelSystem::loadModelFromFile(EntityGUID modelGuid, const std::string& bas
 
         // release source data
         if (model->getInstancingMode() == ModelInstancingMode::none) {
-          spdlog::trace("[loadModelFromFile] Non-secondary loaded: releasing source "
-                        "data");
+          spdlog::trace(
+            "[loadModelFromFile] Non-secondary loaded: releasing source "
+            "data"
+          );
           asset->releaseSourceData();  // TODO: do we also call this for
                                        // primaries after instancing?
         }

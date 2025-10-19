@@ -32,8 +32,9 @@ void PortalBus::init() {
 }
 
 sdbus::IConnection& PortalBus::getConnection(BUS_TYPE type) {
- if (!initialized_) {
-   init();
- }
-  return (type == BUS_TYPE::SESSION)? *session_connection_ : *system_connection_;
+  if (!initialized_) {
+    init();
+  }
+  return (type == BUS_TYPE::SESSION) ? *session_connection_
+                                     : *system_connection_;
 }

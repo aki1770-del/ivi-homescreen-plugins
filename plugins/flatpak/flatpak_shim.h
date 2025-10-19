@@ -185,7 +185,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   /**
    * \brief Removing remote from flatpak.
-   * \param id id of the remote wanted to remove, name and URL is a must.
+   * \param id id of the remote wanted to remove, name and URL are a must.
    * \return An ErrorOr object containing the EncodableList or an error.
    */
   static ErrorOr<bool> RemoteRemove(const std::string& id);
@@ -430,7 +430,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   static std::string create_appdata(const Component& component);
 
   static void create_sandbox(FlatpakInstalledRef* installed_ref,
-                             asio::io_context::strand& strand,
+                             const asio::io_context::strand& strand,
                              const std::function<void(bool)>& callback,
                              PortalManager* portal_manager);
 
@@ -459,6 +459,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   void install_runtime(
       const std::string& runtime,
+      const std::string& remote,
       asio::io_context::strand& strand,
       FlatpakInstallation* installation,
       const std::function<void(ErrorOr<bool>)>& complete_callback);
@@ -466,8 +467,9 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   static bool is_runtime_installed_for_app(const std::string& runtime,
                                            FlatpakInstallation* installation);
 
-  static void install_extensions(
+  void install_extensions(
       const std::vector<std::string>& extensions,
+      const std::string& remote,
       asio::io_context::strand& strand,
       FlatpakInstallation* installation,
       const std::function<void(ErrorOr<bool>)>& complete_callback);
@@ -480,21 +482,18 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
                                 gpointer user_data);
 
   // callback when there is a new operation in transaction
-  static void OnNewOperation(FlatpakTransaction* transaction,
-                             FlatpakTransactionOperation* operation,
+  static void OnNewOperation(FlatpakTransactionOperation* operation,
                              FlatpakTransactionProgress* progress,
                              gpointer user_data);
 
   // callback when transaction operation completed
-  static void OnOperationComplete(FlatpakTransaction* transaction,
-                                  FlatpakTransactionOperation* operation,
+  static void OnOperationComplete(FlatpakTransactionOperation* operation,
                                   const char* commit,
                                   FlatpakTransactionResult result,
                                   gpointer user_data);
 
   // callback when transaction operation reports an error
-  static gboolean OnOperationError(FlatpakTransaction* transaction,
-                                   FlatpakTransactionOperation* operation,
+  static gboolean OnOperationError(FlatpakTransactionOperation* operation,
                                    const GError* error,
                                    FlatpakTransactionErrorDetails error_details,
                                    gpointer user_data);

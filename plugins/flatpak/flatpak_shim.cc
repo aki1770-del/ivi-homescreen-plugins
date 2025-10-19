@@ -42,7 +42,6 @@
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
 #include "plugins/flatpak/flatpak_plugin.h"
-#include "portals.h"
 #include "portals/portal_manager.h"
 #include "screenshot.h"
 
@@ -662,7 +661,7 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
                                         "Failed to get user installation"));
     }
 
-    // Check if remote already exists
+    // Check if a remote already exists
     auto existing_remote = flatpak_installation_get_remote_by_name(
         installation, configuration.name().c_str(), nullptr, nullptr);
     if (existing_remote) {
@@ -852,7 +851,7 @@ void FlatpakShim::ApplicationInstall(
   auto remote_name = remote_and_ref.first;
   auto ref_name = remote_and_ref.second;
 
-  // Check if app is already installed
+  // Check if the app is already installed
   auto installed_ref = flatpak_installation_get_installed_ref(
       installation, FLATPAK_REF_KIND_APP, flatpak_ref_get_name(found_ref),
       flatpak_ref_get_arch(found_ref), flatpak_ref_get_branch(found_ref),
@@ -930,7 +929,7 @@ void FlatpakShim::ApplicationInstall(
 
   spdlog::info("[FlatpakPlugin] Added install operation, starting transaction");
 
-  // Notify Flutter that installation is starting
+  // Notify Flutter that the installation is starting
   flutter::EncodableMap start_event;
   start_event[flutter::EncodableValue("type")] =
       flutter::EncodableValue("installation_started");
@@ -946,7 +945,7 @@ void FlatpakShim::ApplicationInstall(
 
   auto self = shared_from_this();
 
-  // run transaction in detached thread
+  // run transaction in a detached thread
   std::thread([self, transaction_raw, callback, ref_name, remote_name,
                strand_ptr = strand_, installation_raw, found_ref_raw]() {
     pthread_setname_np(pthread_self(), "flatpak-install");
@@ -980,14 +979,15 @@ void FlatpakShim::ApplicationInstall(
       return;
     }
 
-    // check if app was already installed
+    // check if the app was already installed
     spdlog::info(
         "[FlatpakPlugin] Phase 1 complete, checking if app was installed...");
 
     // wait for filesystem sync
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // Check if app is now installed ,it might have been installed in phase 1
+    // Check if the app is now installed, it might have been installed in phase
+    // 1
     GError* check_error = nullptr;
     auto fresh_install = flatpak_installation_new_user(nullptr, &check_error);
     bool app_already_installed = false;
@@ -1011,7 +1011,7 @@ void FlatpakShim::ApplicationInstall(
       g_object_unref(fresh_install);
     }
 
-    // If app is already installed, skip Phase 2
+    // If the app is already installed, skip Phase 2
     if (app_already_installed) {
       spdlog::info("[FlatpakPlugin] Installation complete after Phase 1");
       asio::post(*strand_ptr, [self, callback, ref_name, transaction_raw,
@@ -1238,7 +1238,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
     std::string found_branch;
     bool app_found = false;
 
-    // Search for exact match first, then partial match
+    // Search for the exact match first, then a partial match
     for (guint i = 0; i < refs->len && !app_found; i++) {
       const auto ref =
           static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
@@ -1249,7 +1249,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
 
       if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
         std::string ref_name_str(ref_name);
-        // Check for exact match
+        // Check for the exact match
         if (ref_name_str == id) {
           found_app_name = ref_name_str;
           found_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
@@ -1260,7 +1260,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
       }
     }
 
-    // If no exact match, try partial match
+    // If no exact match, try a partial match
     if (!app_found) {
       for (guint i = 0; i < refs->len; i++) {
         const auto ref =
@@ -2394,7 +2394,7 @@ std::string FlatpakShim::create_appdata(const Component& component) {
 }
 
 void FlatpakShim::create_sandbox(FlatpakInstalledRef* installed_ref,
-                                 asio::io_context::strand& strand,
+                                 const asio::io_context::strand& strand,
                                  const std::function<void(bool)>& callback,
                                  PortalManager* portal_manager) {
   const std::string metadata = get_metadata_as_string(installed_ref);
@@ -2489,11 +2489,6 @@ FlatpakShim::sandbox FlatpakShim::parse_metadata(const std::string& metadata) {
       extract_metadataSections(metadata, "System Bus Policy");
   auto extra_data = extract_metadataSections(metadata, "Extra Data");
   const auto build = extract_metadataSections(metadata, "Build");
-
-  // TODO: Parse Extensions
-  // TODO: Evaluate conditions like "active-gl-driver", "have-intel-gpu"
-  const auto extensions = extract_metadataSections(metadata, "Extension");
-  // sandbox.extensions.emplace_back(extensions);
 
   sandbox.environment = extract_metadataSections(metadata, "Environment");
 
@@ -2751,8 +2746,31 @@ void FlatpakShim::check_runtime(
   const std::string metadata = get_metadata_as_string(installed_ref);
   const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
   std::string runtime = "runtime/" + sandbox.application.runtime;
-  std::vector<std::string> extensions = sandbox.extensions;
+  std::vector<std::string> extensions{};
 
+  // space for debugging in system extensions
+  const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(installed_ref));
+  auto remote_ref = find_app_in_remotes(installation, ref_name);
+  std::string remote = remote_ref.first;
+  auto ref = remote_ref.second.c_str();
+  auto related_extensions = flatpak_installation_list_remote_related_refs_sync(
+      installation, remote.c_str(), ref, nullptr, &error);
+  for (guint i = 0; i < related_extensions->len; i++) {
+    const auto ext = static_cast<FlatpakRelatedRef*>(
+        g_ptr_array_index(related_extensions, i));
+    const char* related_name = flatpak_ref_get_name(FLATPAK_REF(ext));
+    const char* related_branch = flatpak_ref_get_branch(FLATPAK_REF(ext));
+    const char* related_arch = flatpak_ref_get_arch(FLATPAK_REF(ext));
+    std::string related = "runtime/" + std::string(related_name) + "/" +
+                          std::string(related_arch) + "/" +
+                          std::string(related_branch);
+    if (flatpak_related_ref_should_download(ext)) {
+      extensions.emplace_back(related);
+    }
+  }
+
+  const std::string& extension_remote = remote;
+  const std::string& runtime_remote = remote;
   if (runtime.empty()) {
     spdlog::error("[FlatpakPlugin] No runtime specified for {}",
                   sandbox.application.name);
@@ -2772,9 +2790,9 @@ void FlatpakShim::check_runtime(
                  runtime);
 
     install_runtime(
-        runtime, strand, installation,
-        [callback, strand = &strand, installation,
-         extensions](const ErrorOr<bool>& runtime_result) {
+        runtime, runtime_remote, strand, installation,
+        [callback, strand = &strand, installation, extensions, extension_remote,
+         this](const ErrorOr<bool>& runtime_result) {
           if (!runtime_result.value()) {
             spdlog::error("[FlatpakPlugin] Failed to install runtime");
             asio::post(*strand, [callback, runtime_result]() {
@@ -2787,7 +2805,7 @@ void FlatpakShim::check_runtime(
 
           if (!extensions.empty()) {
             install_extensions(
-                extensions, *strand, installation,
+                extensions, extension_remote, *strand, installation,
                 [callback, installation,
                  strand](const ErrorOr<bool>& ext_result) {
                   asio::post(*strand, [callback, ext_result, installation]() {
@@ -2808,7 +2826,7 @@ void FlatpakShim::check_runtime(
       "[FlatpakPlugin] Runtime already installed, checking extensions");
 
   if (!extensions.empty()) {
-    install_extensions(extensions, strand, installation,
+    install_extensions(extensions, extension_remote, strand, installation,
                        [callback, strand = &strand,
                         installation](const ErrorOr<bool>& ext_result) {
                          asio::post(*strand,
@@ -2860,6 +2878,7 @@ bool FlatpakShim::is_runtime_installed_for_app(
 
 void FlatpakShim::install_runtime(
     const std::string& runtime,
+    const std::string& remote,
     asio::io_context::strand& strand,
     FlatpakInstallation* installation,
     const std::function<void(ErrorOr<bool>)>& complete_callback) {
@@ -2898,7 +2917,7 @@ void FlatpakShim::install_runtime(
                    this);
 
   auto install = flatpak_transaction_add_install(
-      transaction, "flathub", runtime.c_str(), nullptr, &error);
+      transaction, remote.c_str(), runtime.c_str(), nullptr, &error);
   if (error || !install) {
     spdlog::error("[FlatpakPlugin] Error installing runtime : {}",
                   error->message);
@@ -2911,8 +2930,8 @@ void FlatpakShim::install_runtime(
     return;
   }
 
-  // run transaction async, sine it will block thread until it finishes.
-  std::thread([transaction, strand_ptr = &strand, complete_callback, this]() {
+  // run transaction async, since it will block the thread until it finishes.
+  std::thread([transaction, strand_ptr = &strand, complete_callback]() {
     pthread_setname_np(pthread_self(), "flatpak-install");
     GError* error = nullptr;
     auto success = flatpak_transaction_run(transaction, nullptr, &error);
@@ -2922,22 +2941,22 @@ void FlatpakShim::install_runtime(
       error_message = error->message;
       g_clear_error(&error);
     }
-    asio::post(
-        *strand_ptr, [complete_callback, success, this, error_message]() {
-          if (success) {
-            complete_callback(ErrorOr<bool>(true));
-          }
-          if (!success) {
-            complete_callback(
-                ErrorOr<bool>(FlutterError("INSTALL_RUNTIME", error_message)));
-          }
-        });
+    asio::post(*strand_ptr, [complete_callback, success, error_message]() {
+      if (success) {
+        complete_callback(ErrorOr<bool>(true));
+      }
+      if (!success) {
+        complete_callback(
+            ErrorOr<bool>(FlutterError("INSTALL_RUNTIME", error_message)));
+      }
+    });
     g_object_unref(transaction);
   }).detach();
 }
 
 void FlatpakShim::install_extensions(
     const std::vector<std::string>& extensions,
+    const std::string& remote,
     asio::io_context::strand& strand,
     FlatpakInstallation* installation,
     const std::function<void(ErrorOr<bool>)>& complete_callback) {
@@ -2954,7 +2973,7 @@ void FlatpakShim::install_extensions(
   spdlog::info("[FlatpakPlugin] Installing {} extensions", extensions.size());
 
   for (const auto& extension : extensions) {
-    auto ref = flatpak_ref_parse(extension.c_str(), &error);
+    FlatpakRef* ref = flatpak_ref_parse(extension.c_str(), &error);
     if (error) {
       spdlog::error("[FlatpakPlugin] Error parsing extension : {}",
                     error->message);
@@ -3008,11 +3027,20 @@ void FlatpakShim::install_extensions(
   }
 
   flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_reinstall(transaction, FALSE);
 
-  // Add all extensions to transaction
+  // connect all transaction signals
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   this);
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), this);
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   this);
+
+  // Add all extensions to the transaction
   for (const auto& ext : missing_extensions) {
-    gboolean added = flatpak_transaction_add_install(
-        transaction, nullptr, ext.c_str(), nullptr, &error);
+    flatpak_transaction_add_install(transaction, remote.c_str(), ext.c_str(),
+                                    nullptr, &error);
 
     if (error) {
       spdlog::error("[FlatpakPlugin] Failed to add extension '{}': {}", ext,
@@ -3036,7 +3064,7 @@ void FlatpakShim::install_extensions(
       error_message = error->message;
       g_clear_error(&error);
     }
-    // Post result back to the original strand
+    // Post the result back to the original strand
     asio::post(
         *strand_ptr, [complete_callback, success, error_message, count]() {
           if (success) {
@@ -3184,8 +3212,7 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
   handler->SendTransactionEvent(ProgressMap);
 }
 
-void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
-                                 FlatpakTransactionOperation* operation,
+void FlatpakShim::OnNewOperation(FlatpakTransactionOperation* operation,
                                  FlatpakTransactionProgress* progress,
                                  gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
@@ -3228,8 +3255,7 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
   handler->SendTransactionEvent(OperationMap);
 }
 
-void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
-                                      FlatpakTransactionOperation* operation,
+void FlatpakShim::OnOperationComplete(FlatpakTransactionOperation* operation,
                                       const char* commit,
                                       FlatpakTransactionResult result,
                                       gpointer user_data) {
@@ -3240,16 +3266,9 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
 
   std::string type_str =
       (type == FLATPAK_TRANSACTION_OPERATION_INSTALL) ? "install" : "other";
-  std::string kind = "unknown";
 
   if (ref) {
     std::string ref_str(ref);
-    if (ref_str.find("app/") == 0) {
-      kind = "APP";
-    } else if (ref_str.find("runtime/") == 0) {
-      kind = "RUNTIME";
-    }
-
     spdlog::info(
         "[FlatpakPlugin] Operation completed: {} {} (result: {})", type_str,
         ref_str,
@@ -3270,7 +3289,6 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
 }
 
 gboolean FlatpakShim::OnOperationError(
-    FlatpakTransaction* transaction,
     FlatpakTransactionOperation* operation,
     const GError* error,
     FlatpakTransactionErrorDetails error_details,

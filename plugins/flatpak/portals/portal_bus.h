@@ -25,23 +25,24 @@
 #include "portal_interface.h"
 
 /**
- * \brief This class manages the D-Bus connections (system and session) and provides methods to interact with them.
- * All apps share the same connections to session/system bus.
- * D-Bus event signals processing is handled in async mode in (non-blocking) background thread.
+ * \brief This class manages the D-Bus connections (system and session) and
+ * provides methods to interact with them. All apps share the same connections
+ * to session/system bus. D-Bus event signals processing is handled in async
+ * mode in (non-blocking) background thread.
  */
 class PortalBus {
-public:
+ public:
   void init();
 
   sdbus::IConnection& getConnection(BUS_TYPE type);
 
   ~PortalBus() = default;
 
-private:
+ private:
   std::unique_ptr<sdbus::IConnection> session_connection_;
   std::unique_ptr<sdbus::IConnection> system_connection_;
   std::mutex init_mutex_;
   bool initialized_ = false;
 };
 
-#endif //PORTAL_BUS_H
+#endif  // PORTAL_BUS_H

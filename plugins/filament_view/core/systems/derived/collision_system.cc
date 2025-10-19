@@ -177,8 +177,7 @@ void CollisionSystem::onSystemInit() {
   });
 
   registerMessageHandler(
-    ECSMessageType::ToggleDebugCollidableViewsInScene,
-    [this](const ECSMessage& msg) {
+    ECSMessageType::ToggleDebugCollidableViewsInScene, [this](const ECSMessage& msg) {
       spdlog::debug("ToggleDebugCollidableViewsInScene");
 
       const auto value = msg.getData<bool>(ECSMessageType::ToggleDebugCollidableViewsInScene);

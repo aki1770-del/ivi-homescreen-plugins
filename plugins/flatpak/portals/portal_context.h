@@ -25,16 +25,18 @@
 #include <utility>
 #include <vector>
 
-#include "portal_interface.h"
 #include "asio/io_context.hpp"
 #include "asio/io_context_strand.hpp"
+#include "portal_interface.h"
 
 /**
  * \brief This struct track all resources associated to app.
  * Each app gets its own strand to execute apps concurrently.
  */
 struct PortalContext {
-  PortalContext(std::string  id, asio::io_context& io_context) : app_id(std::move(id)), strand(std::make_unique<asio::io_context::strand>(io_context)) {}
+  PortalContext(std::string id, asio::io_context& io_context)
+      : app_id(std::move(id)),
+        strand(std::make_unique<asio::io_context::strand>(io_context)) {}
 
   PortalContext(const PortalContext&) = delete;
 
@@ -43,7 +45,7 @@ struct PortalContext {
   PortalContext(PortalContext&&) = default;
 
   PortalContext& operator=(PortalContext&&) = default;
-  
+
   std::string app_id;
   std::vector<uint64_t> signal_sub_ids;
   std::vector<std::shared_ptr<sdbus::IProxy>> owned_proxies;
@@ -51,6 +53,4 @@ struct PortalContext {
   std::vector<PortalInterface> interfaces;
 };
 
-
-
-#endif //PORTAL_CONTEXT_H
+#endif  // PORTAL_CONTEXT_H

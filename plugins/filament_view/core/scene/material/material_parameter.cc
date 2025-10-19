@@ -115,9 +115,11 @@ std::unique_ptr<MaterialParameter> MaterialParameter::Deserialize(
       );
 
     default:
-      throw std::runtime_error(fmt::format(
-        "[MaterialParameter::Deserialize] Unhandled Parameter {}", getTextForType(type.value())
-      ));
+      throw std::runtime_error(
+        fmt::format(
+          "[MaterialParameter::Deserialize] Unhandled Parameter {}", getTextForType(type.value())
+        )
+      );
   }
 }
 

@@ -17,9 +17,10 @@
 
 #include "portal_proxy.h"
 
-PortalProxy::PortalProxy(PortalBus& bus): bus_(bus) {}
+PortalProxy::PortalProxy(PortalBus& bus) : bus_(bus) {}
 
-std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(const PortalInterface& portal) {
+std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(
+    const PortalInterface& portal) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
   // check if proxy alive is it'd not create one
 
@@ -33,7 +34,8 @@ std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(const PortalInterface& port
   }
 
   auto& bus = bus_.getConnection(portal.bus_type);
-  auto new_proxy = sdbus::createProxy(bus,portal.service_name, portal.object_path);
+  auto new_proxy =
+      sdbus::createProxy(bus, portal.service_name, portal.object_path);
 
   auto proxy = std::shared_ptr<sdbus::IProxy>(new_proxy.release());
   proxy_cache_[portal] = proxy;
@@ -42,10 +44,10 @@ std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(const PortalInterface& port
 
 void PortalProxy::cleanup() {
   std::lock_guard<std::mutex> lock(cache_mutex_);
-  for (auto it = proxy_cache_.begin() ; it != proxy_cache_.end();) {
+  for (auto it = proxy_cache_.begin(); it != proxy_cache_.end();) {
     if (it->second.expired()) {
       it = proxy_cache_.erase(it);
-    }else {
+    } else {
       ++it;
     }
   }

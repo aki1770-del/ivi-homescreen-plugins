@@ -502,7 +502,8 @@ void ViewTarget::SendFrameViewCallback(
     encodableMap[EncodableValue(fst)] = snd;  // NOLINT
   }
 
-  const auto viewTargetSystem = ECSManager::GetInstance()->getSystem<ViewTargetSystem>(__FUNCTION__
+  const auto viewTargetSystem = ECSManager::GetInstance()->getSystem<ViewTargetSystem>(
+    __FUNCTION__
   );
 
   viewTargetSystem->SendDataToEventChannel(encodableMap);

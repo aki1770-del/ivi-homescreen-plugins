@@ -187,8 +187,7 @@ void IndirectLightSystem::onSystemInit() {
   setDefaultIndirectLight();
 
   registerMessageHandler(
-    ECSMessageType::ChangeSceneIndirectLightProperties,
-    [this](const ECSMessage& msg) {
+    ECSMessageType::ChangeSceneIndirectLightProperties, [this](const ECSMessage& msg) {
       spdlog::debug("ChangeSceneIndirectLightProperties");
 
       const auto intensityValue = msg.getData<float>(

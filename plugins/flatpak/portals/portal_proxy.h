@@ -22,16 +22,16 @@
 
 #include <memory>
 
-#include "portal_interface.h"
 #include "portal_bus.h"
-
+#include "portal_interface.h"
 
 /**
  * \brief This class manages the D-Bus proxies.
- * Multiple apps can own the same proxy when the last app stops,Proxy auto deletes.
+ * Multiple apps can own the same proxy when the last app stops,Proxy auto
+ * deletes.
  */
 class PortalProxy {
-public:
+ public:
   explicit PortalProxy(PortalBus& bus);
 
   ~PortalProxy() = default;
@@ -40,10 +40,10 @@ public:
 
   void cleanup();
 
-private:
+ private:
   std::map<PortalInterface, std::weak_ptr<sdbus::IProxy>> proxy_cache_;
   PortalBus& bus_;
   std::mutex cache_mutex_;
 };
 
-#endif //PORTAL_PROXY_H
+#endif  // PORTAL_PROXY_H

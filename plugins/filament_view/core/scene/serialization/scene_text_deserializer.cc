@@ -238,7 +238,8 @@ void SceneTextDeserializer::setUpShapes() {
   const auto collisionSystem = _ecs->getSystem<CollisionSystem>("setUpShapes");
 
   if (shapeSystem == nullptr || collisionSystem == nullptr) {
-    throw std::runtime_error("[SceneTextDeserializer] Error.ShapeSystem or collisionSystem is null"
+    throw std::runtime_error(
+      "[SceneTextDeserializer] Error.ShapeSystem or collisionSystem is null"
     );
   }
 
@@ -379,7 +380,8 @@ void SceneTextDeserializer::setUpLights() {
 //////////////////////////////////////////////////////////////////////////////////////////
 void SceneTextDeserializer::setUpIndirectLight() const {
   // Todo move to a message.
-  auto indirectlightSystem = ECSManager::GetInstance()->getSystem<IndirectLightSystem>(__FUNCTION__
+  auto indirectlightSystem = ECSManager::GetInstance()->getSystem<IndirectLightSystem>(
+    __FUNCTION__
   );
 
   if (!indirect_light_) {

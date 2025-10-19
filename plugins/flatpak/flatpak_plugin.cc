@@ -25,8 +25,8 @@
 #include <asio/post.hpp>
 #include <future>
 
-#include "messages.g.h"
 #include <flutter/plugin_registrar_homescreen.h>
+#include "messages.g.h"
 #include "plugins/common/common.h"
 
 namespace flatpak_plugin {
@@ -42,7 +42,7 @@ void FlatpakPlugin::RegisterWithRegistrar(flutter::PluginRegistrar* registrar) {
 
 FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
     : io_context_(std::make_unique<asio::io_context>(ASIO_CONCURRENCY_HINT_1)),
-    work_(io_context_->get_executor()),
+      work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
       registrar_(registrar) {
   thread_ = std::thread([&] { io_context_->run(); });
@@ -66,16 +66,16 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
   portal_manager_ = std::make_shared<PortalManager>(*io_context_);
   portal_manager_->initialize();
   cache_manager_ = CacheManager::Builder()
-                 .WithDatabasePath("/tmp/flatpak_plugin.db")
-                 .WithCachePolicy(CachePolicy::CACHE_FIRST)
-                 .WithAutoCleanup(true, std::chrono::minutes(5))
-                 .WithDefaultTTL(std::chrono::minutes(10))
-                 .WithCompression(false)
-                 .WithMaxCacheSize(50)
-                 .WithMaxRetries(3)
-                 .WithNetworkTimeout(std::chrono::seconds(5))
-                 .WithMetrics(true)
-                 .Build();
+                       .WithDatabasePath("/tmp/flatpak_plugin.db")
+                       .WithCachePolicy(CachePolicy::CACHE_FIRST)
+                       .WithAutoCleanup(true, std::chrono::minutes(5))
+                       .WithDefaultTTL(std::chrono::minutes(10))
+                       .WithCompression(false)
+                       .WithMaxCacheSize(50)
+                       .WithMaxRetries(3)
+                       .WithNetworkTimeout(std::chrono::seconds(5))
+                       .WithMetrics(true)
+                       .Build();
 }
 
 FlatpakPlugin::~FlatpakPlugin() {
@@ -157,7 +157,6 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
 void FlatpakPlugin::ApplicationInstall(
     const std::string& /*id*/,
     std::function<void(std::optional<FlutterError> reply)> /*result*/) {
-
   // TODO: Implement async installation with progress reporting
   // auto shim = std::make_shared<FlatpakShim>(
   //     this,
@@ -175,7 +174,8 @@ ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),strand_.get());
+  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
+                                            strand_.get());
 
   std::promise<ErrorOr<bool>> promise;
   auto future = promise.get_future();

@@ -136,7 +136,8 @@ std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromHdrUrl(
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
-std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromKTXAsset(const std::string& path
+std::future<Resource<std::string_view>> SkyboxSystem::setSkyboxFromKTXAsset(
+  const std::string& path
 ) {
   SPDLOG_TRACE("++SkyboxManager::setSkyboxFromKTXAsset");
   const auto promise(std::make_shared<std::promise<Resource<std::string_view>>>());
@@ -263,7 +264,8 @@ Resource<std::string_view> SkyboxSystem::loadSkyboxFromHdrFile(
 
       // updates scene light with skybox when loaded with the same hdr file
       if (shouldUpdateLight) {
-        const auto reflections = filamentSystem->getIBLProfiler()->getLightReflection(skyboxTexture
+        const auto reflections = filamentSystem->getIBLProfiler()->getLightReflection(
+          skyboxTexture
         );
         const auto ibl = filament::IndirectLight::Builder()
                            .reflections(reflections)
@@ -314,7 +316,8 @@ Resource<std::string_view> SkyboxSystem::loadSkyboxFromHdrBuffer(
 
       // updates scene light with skybox when loaded with the same hdr file
       if (shouldUpdateLight) {
-        const auto reflections = filamentSystem->getIBLProfiler()->getLightReflection(skyboxTexture
+        const auto reflections = filamentSystem->getIBLProfiler()->getLightReflection(
+          skyboxTexture
         );
         const auto ibl = filament::IndirectLight::Builder()
                            .reflections(reflections)

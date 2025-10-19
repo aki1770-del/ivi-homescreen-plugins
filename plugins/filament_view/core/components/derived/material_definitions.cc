@@ -83,7 +83,8 @@ void MaterialDefinitions::debugPrint(const std::string& tabPrefix) const {
   if (!assetPath_.empty()) {
     spdlog::debug(tabPrefix + "assetPath: [{}]", assetPath_);
 
-    const auto flutterAssetPath = ECSManager::GetInstance()->getConfigValue<std::string>(kAssetPath
+    const auto flutterAssetPath = ECSManager::GetInstance()->getConfigValue<std::string>(
+      kAssetPath
     );
 
     const std::filesystem::path asset_folder(flutterAssetPath);
@@ -159,8 +160,10 @@ void MaterialDefinitions::ApplyMaterialParameterToInstance(
 
       if (foundResource == loadedTextures.end()) {
         // log and continue
-        spdlog::warn("Got to a case where a texture was not loaded before trying to "
-                     "apply to a material.");
+        spdlog::warn(
+          "Got to a case where a texture was not loaded before trying to "
+          "apply to a material."
+        );
         return;
       }
 
@@ -187,9 +190,11 @@ void MaterialDefinitions::ApplyMaterialParameterToInstance(
       }
 
       if (!foundResource->second.getData().has_value()) {
-        spdlog::warn("Got to a case where a texture resource data was not loaded "
-                     "before trying to "
-                     "apply to a material.");
+        spdlog::warn(
+          "Got to a case where a texture resource data was not loaded "
+          "before trying to "
+          "apply to a material."
+        );
         return;
       }
 
@@ -214,9 +219,11 @@ void MaterialDefinitions::setMaterialInstancePropertiesFromMyPropertyMap(
 
   if (const auto actual = materialResult->getParameters(parameters.data(), count);
       count != actual || actual != parameters.size()) {
-    spdlog::warn("Count of parameters from the material instance and loaded material do "
-                 "not match; doesn't technically need to, but not ideal and could leave "
-                 "to undefined results.");
+    spdlog::warn(
+      "Count of parameters from the material instance and loaded material do "
+      "not match; doesn't technically need to, but not ideal and could leave "
+      "to undefined results."
+    );
   }
 
   for (const auto& param : parameters) {

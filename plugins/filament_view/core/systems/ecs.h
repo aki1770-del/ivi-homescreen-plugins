@@ -177,7 +177,8 @@ class ECSManager {
     /// GUID.
     template<typename T>
     [[nodiscard]] inline std::shared_ptr<T> getComponent(const EntityGUID& entityGuid) {
-      return std::dynamic_pointer_cast<T>(getComponent(entityGuid, Component::StaticGetTypeID<T>())
+      return std::dynamic_pointer_cast<T>(
+        getComponent(entityGuid, Component::StaticGetTypeID<T>())
       );
     }
 
@@ -200,7 +201,8 @@ class ECSManager {
       return components;
     }
 
-    [[nodiscard]] std::vector<std::shared_ptr<Component>> getComponentsOfType(TypeID componentTypeId
+    [[nodiscard]] std::vector<std::shared_ptr<Component>> getComponentsOfType(
+      TypeID componentTypeId
     );
 
     /// Returns whether the entity with the given GUID has a component of the

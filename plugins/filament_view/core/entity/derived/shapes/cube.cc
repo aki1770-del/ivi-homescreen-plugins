@@ -126,31 +126,32 @@ void Cube::createDoubleSidedCube(filament::Engine* engine_) {
   };
 
   // UV coordinates for each face (same for inside and outside)
-  static constexpr float uvCoords[] = {// Outside Front face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Outside Back face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Outside Right face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Outside Left face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Outside Top face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Outside Bottom face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+  static constexpr float uvCoords[] = {
+    // Outside Front face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Outside Back face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Outside Right face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Outside Left face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Outside Top face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Outside Bottom face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
 
-                                       // Inside Front face (same UVs as outside)
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Inside Back face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Inside Right face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Inside Left face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Inside Top face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
-                                       // Inside Bottom face
-                                       0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f
+    // Inside Front face (same UVs as outside)
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Inside Back face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Inside Right face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Inside Left face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Inside Top face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f,
+    // Inside Bottom face
+    0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f
   };
 
   // Indices for double-sided cube (showing both inside and outside)
@@ -177,264 +178,312 @@ void Cube::createDoubleSidedCube(filament::Engine* engine_) {
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Outer Back face (Z-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Outer Right face (X+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Outer Left face (X-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Outer Top face (Y+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Outer Bottom face (Y-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Front face (Z-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Back face (Z+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Right face (X-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Left face (X+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Top face (Y-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Inner Bottom face (Y+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     )
   };
 
@@ -551,23 +600,24 @@ void Cube::createSingleSidedCube(filament::Engine* engine_) {
   };
 
   // Indices for 12 triangles (6 faces)
-  static const uint16_t indices[] = {// Front face
-                                     0, 1, 2, 0, 2, 3,
+  static const uint16_t indices[] = {
+    // Front face
+    0, 1, 2, 0, 2, 3,
 
-                                     // Back face (adjusted winding)
-                                     4, 5, 6, 4, 6, 7,
+    // Back face (adjusted winding)
+    4, 5, 6, 4, 6, 7,
 
-                                     // Right face
-                                     8, 9, 10, 8, 10, 11,
+    // Right face
+    8, 9, 10, 8, 10, 11,
 
-                                     // Left face
-                                     12, 13, 14, 12, 14, 15,
+    // Left face
+    12, 13, 14, 12, 14, 15,
 
-                                     // Top face
-                                     16, 17, 18, 16, 18, 19,
+    // Top face
+    16, 17, 18, 16, 18, 19,
 
-                                     // Bottom face (adjusted winding)
-                                     20, 21, 22, 20, 22, 23
+    // Bottom face (adjusted winding)
+    20, 21, 22, 20, 22, 23
   };
 
   const static short4 normals[] = {
@@ -575,132 +625,156 @@ void Cube::createSingleSidedCube(filament::Engine* engine_) {
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Back face (normals pointing along Z-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Right face (normals pointing along X+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Left face (normals pointing along X-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{0.0f, 0.0f, -1.0f}, float3{0.0f, 1.0f, 0.0f}, float3{-1.0f, 0.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Top face (normals pointing along Y+)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}, float3{0.0f, 1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
 
     // Bottom face (normals pointing along Y-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}, float3{0.0f, -1.0f, 0.0f}}
-      ).xyzw
+      )
+        .xyzw
     )
   };
 

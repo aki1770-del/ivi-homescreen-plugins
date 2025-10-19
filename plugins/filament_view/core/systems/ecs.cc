@@ -181,7 +181,8 @@ void ECSManager::checkHasEntity(EntityGUID id) {
 
   spdlog::trace("[{}] Checking if entity with id {} exists", __FUNCTION__, id);
   if (id == kNullGuid || _entities.get(id) == nullptr) {
-    throw std::runtime_error(fmt::format("[{}] Unable to find entity with id {}", __FUNCTION__, id)
+    throw std::runtime_error(
+      fmt::format("[{}] Unable to find entity with id {}", __FUNCTION__, id)
     );
   }
 }

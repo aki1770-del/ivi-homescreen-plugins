@@ -18,27 +18,32 @@
 #ifndef PORTAL_MANAGER_H
 #define PORTAL_MANAGER_H
 
-
+#include "asio/io_context.hpp"
 #include "portal_bus.h"
 #include "portal_context.h"
 #include "portal_proxy.h"
-#include "asio/io_context.hpp"
 
 namespace flatpak_plugin {
 class PortalManager {
-public:
+ public:
   explicit PortalManager(asio::io_context& io_context);
   ~PortalManager() = default;
 
   void initialize();
 
-  void register_application(const std::string& app_id, const std::vector<PortalInterface>& interfaces);
+  void register_application(const std::string& app_id,
+                            const std::vector<PortalInterface>& interfaces);
 
   void unregister_application(const std::string& app_id);
 
   template <typename ResultCallback, typename... Args>
-  void call_method(const std::string& app_id, const PortalInterface& interface,const std::string& method_name, ResultCallback&& callback, Args&&... args);
-private:
+  void call_method(const std::string& app_id,
+                   const PortalInterface& interface,
+                   const std::string& method_name,
+                   ResultCallback&& callback,
+                   Args&&... args);
+
+ private:
   asio::io_context& io_context_;
   PortalBus portal_bus_;
   PortalProxy portal_proxy_;
@@ -47,6 +52,6 @@ private:
 
   PortalContext& get_app_context(const std::string& app_id);
 };
-}
+}  // namespace flatpak_plugin
 
-#endif //PORTAL_MANAGER_H
+#endif  // PORTAL_MANAGER_H

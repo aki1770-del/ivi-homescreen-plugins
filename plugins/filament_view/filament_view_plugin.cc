@@ -279,20 +279,23 @@ void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registra
     registrar->messenger(), readinessEventChannel, &flutter::StandardMethodCodec::GetInstance()
   );
 
-  eventChannel->SetStreamHandler(std::make_unique<flutter::StreamHandlerFunctions<>>(
-    [&](
-      const flutter::EncodableValue* /* arguments */, std::unique_ptr<flutter::EventSink<>>&& events
-    ) -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = std::move(events);
-      sendReadyEvent();  // Proactively send "ready" event
-      return nullptr;
-    },
-    [&](const flutter::EncodableValue* /* arguments */)
-      -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = nullptr;
-      return nullptr;
-    }
-  ));
+  eventChannel->SetStreamHandler(
+    std::make_unique<flutter::StreamHandlerFunctions<>>(
+      [&](
+        const flutter::EncodableValue* /* arguments */,
+        std::unique_ptr<flutter::EventSink<>>&& events
+      ) -> std::unique_ptr<flutter::StreamHandlerError<>> {
+        eventSink_ = std::move(events);
+        sendReadyEvent();  // Proactively send "ready" event
+        return nullptr;
+      },
+      [&](const flutter::EncodableValue* /* arguments */)
+        -> std::unique_ptr<flutter::StreamHandlerError<>> {
+        eventSink_ = nullptr;
+        return nullptr;
+      }
+    )
+  );
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -335,7 +338,8 @@ std::optional<FlutterError> FilamentViewPlugin::ToggleShapesInScene(const bool v
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
-std::optional<FlutterError> FilamentViewPlugin::ToggleDebugCollidableViewsInScene(const bool value
+std::optional<FlutterError> FilamentViewPlugin::ToggleDebugCollidableViewsInScene(
+  const bool value
 ) {
   ECSMessage toggleMessage;
   toggleMessage.addData(ECSMessageType::ToggleDebugCollidableViewsInScene, value);
@@ -670,7 +674,8 @@ std::optional<FlutterError> FilamentViewPlugin::TurnOnVisualForEntity(const int6
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
-std::optional<FlutterError> FilamentViewPlugin::TurnOffCollisionChecksForEntity(const int64_t guid
+std::optional<FlutterError> FilamentViewPlugin::TurnOffCollisionChecksForEntity(
+  const int64_t guid
 ) {
   ECSMessage changeRequest;
   changeRequest.addData(ECSMessageType::ToggleCollisionForEntity, guid);

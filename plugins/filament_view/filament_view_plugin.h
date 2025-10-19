@@ -101,8 +101,10 @@ class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, publi
     std::optional<FlutterError> SetActiveCamera(const int64_t* view_id, int64_t camera_id) override;
     // Set the camera's dolly offset.
     // The dolly offset is the camera's position relative to its target.
-    std::optional<FlutterError> SetCameraDolly(int64_t id, const std::vector<double>& dolly_offset)
-      override;
+    std::optional<FlutterError> SetCameraDolly(
+      int64_t id,
+      const std::vector<double>& dolly_offset
+    ) override;
     std::optional<FlutterError> ChangeLightTransformByGUID(
       const int64_t guid,
       double posx,
@@ -117,8 +119,10 @@ class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, publi
       const std::string& color,
       int64_t intensity
     ) override;
-    std::optional<FlutterError> EnqueueAnimation(const int64_t guid, int64_t animation_index)
-      override;
+    std::optional<FlutterError> EnqueueAnimation(
+      const int64_t guid,
+      int64_t animation_index
+    ) override;
     std::optional<FlutterError> ClearAnimationQueue(const int64_t guid) override;
     std::optional<FlutterError> PlayAnimation(const int64_t guid, int64_t animation_index) override;
     std::optional<FlutterError> ChangeAnimationSpeed(const int64_t guid, double speed) override;

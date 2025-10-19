@@ -38,7 +38,8 @@ void FilamentViewPluginCApiRegisterWithRegistrar(
   void* platform_view_context
 ) {
   plugin_filament_view::FilamentViewPlugin::RegisterWithRegistrar(
-    flutter::PluginRegistrarManager::GetInstance()->GetRegistrar<flutter::PluginRegistrar>(registrar
+    flutter::PluginRegistrarManager::GetInstance()->GetRegistrar<flutter::PluginRegistrar>(
+      registrar
     ),
     id, viewType, direction, top, left, width, height, params, assetDirectory, engine, addListener,
     removeListener, platform_view_context

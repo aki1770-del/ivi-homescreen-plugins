@@ -1,7 +1,7 @@
 #include <asio/steady_timer.hpp>
-#include <thread>
-#include <future>
 #include <fstream>
+#include <future>
+#include <thread>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -14,7 +14,7 @@
 
 using namespace flatpak_plugin;
 class TestBinaryMessenger : public flutter::BinaryMessenger {
-public:
+ public:
   void Send(const std::string& channel,
             const uint8_t* message,
             size_t message_size,
@@ -26,35 +26,30 @@ public:
   }
 
   void SetMessageHandler(const std::string& channel,
-                        flutter::BinaryMessageHandler handler) override {
+                         flutter::BinaryMessageHandler handler) override {
     handlers_[channel] = std::move(handler);
   }
 
-private:
+ private:
   mutable std::map<std::string, flutter::BinaryMessageHandler> handlers_;
 };
 
 class FlatpakPluginTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     // Initialize test messenger
     test_messenger_ = std::make_unique<TestBinaryMessenger>();
   }
 
-  void TearDown() override {
-    test_messenger_.reset();
-  }
+  void TearDown() override { test_messenger_.reset(); }
 
-  flutter::BinaryMessenger* GetTestMessenger() {
-    return test_messenger_.get();
-  }
+  flutter::BinaryMessenger* GetTestMessenger() { return test_messenger_.get(); }
 
-private:
+ private:
   std::unique_ptr<TestBinaryMessenger> test_messenger_;
 };
 
 // Minimal test messenger implementation
-
 
 class ComponentTest : public ::testing::Test {
  protected:
@@ -265,9 +260,7 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
   auto work_guard = asio::make_work_guard(*io_context);
   auto strand = std::make_shared<asio::io_context::strand>(*io_context);
 
-  std::thread io_thread([io_context]() {
-    io_context->run();
-  });
+  std::thread io_thread([io_context]() { io_context->run(); });
 
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -291,18 +284,14 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
 
   auto messenger = GetTestMessenger();
 
-  auto shim = std::make_shared<FlatpakShim>(
-      nullptr,
-      messenger,
-      strand.get()
-  );
+  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "com.valvesoftware.Steam";
+  auto app_id = "net.lutris.Lutris";
 
   shim->ApplicationInstall(app_id,
-      [guard, app_id, shim](const ErrorOr<bool>& result) {
-        guard->set_value(result);
-      });
+                           [guard, app_id, shim](const ErrorOr<bool>& result) {
+                             guard->set_value(result);
+                           });
 
   auto status = future.wait_for(std::chrono::minutes(10));
 
@@ -318,14 +307,13 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
   auto installation = flatpak_installation_new_user(nullptr, &error);
   ASSERT_FALSE(error) << "Failed to get installation";
 
-  auto refs = flatpak_installation_list_installed_refs(
-      installation, nullptr, &error);
+  auto refs =
+      flatpak_installation_list_installed_refs(installation, nullptr, &error);
   ASSERT_FALSE(error) << "Failed to list installed refs";
 
   bool found = false;
   for (guint i = 0; i < refs->len; i++) {
-    auto ref = static_cast<FlatpakInstalledRef*>(
-        g_ptr_array_index(refs, i));
+    auto ref = static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
     const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
     if (ref_name && app_id == std::string(ref_name)) {
       found = true;
@@ -417,7 +405,8 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id = "com.valvesoftware.Steam";
+  auto id = "net.lutris.Lutris";  // net.lutris.Lutris // com.spotify.Client //
+                                  // com.valvesoftware.Steam
 
   auto result = shim->ApplicationStart(id, *strand, portal_manager);
 
@@ -462,11 +451,8 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  std::vector<std::string> apps = {
-      "md.obsidian.Obsidian",
-      "com.spotify.Client",
-      "com.visualstudio.code"
-  };
+  std::vector<std::string> apps = {"md.obsidian.Obsidian", "com.spotify.Client",
+                                   "com.visualstudio.code"};
   auto messenger = GetTestMessenger();
 
   for (const auto& app_id : apps) {
@@ -475,8 +461,8 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
 
     if (result.has_error()) {
       EXPECT_TRUE(result.value())
-          << "App " << app_id << " failed to start: "
-          << result.error().message();
+          << "App " << app_id
+          << " failed to start: " << result.error().message();
     } else {
       EXPECT_TRUE(result.value());
     }

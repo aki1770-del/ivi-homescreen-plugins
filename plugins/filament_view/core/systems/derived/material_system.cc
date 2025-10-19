@@ -79,8 +79,10 @@ Resource<filament::MaterialInstance*> MaterialSystem::getMaterialInstance(
 ) {
   SPDLOG_TRACE("++MaterialManager::getMaterialInstance");
   if (!materialDefinitions) {
-    spdlog::error("--Bad MaterialDefinitions Result "
-                  "MaterialManager::getMaterialInstance");
+    spdlog::error(
+      "--Bad MaterialDefinitions Result "
+      "MaterialManager::getMaterialInstance"
+    );
     return Resource<filament::MaterialInstance*>::Error("Material not found");
   }
 

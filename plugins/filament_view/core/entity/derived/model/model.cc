@@ -183,8 +183,10 @@ void Model::ChangeMaterialInstanceProperty(
   const TextureMap& loadedTextures
 ) {
   if (m_poMaterialInstance.getStatus() != Status::Success) {
-    spdlog::error("No material definition set for model, set one first that's not the "
-                  "uber shader.");
+    spdlog::error(
+      "No material definition set for model, set one first that's not the "
+      "uber shader."
+    );
     return;
   }
 
