@@ -155,18 +155,54 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
 }
 
 void FlatpakPlugin::ApplicationInstall(
-    const std::string& /*id*/,
-    std::function<void(std::optional<FlutterError> reply)> /*result*/) {
-  // TODO: Implement async installation with progress reporting
-  // auto shim = std::make_shared<FlatpakShim>(
-  //     this,
-  //     registrar_->messenger(),
-  //     strand_.get());
-  //
-  // asio::dispatch(*strand_, [this, id, result, shim]() {
-  //   shim->SetupTransactionEventChannel(registrar_->messenger());
-  //   shim->ApplicationInstall(id, result);
-  // });
+    const std::string& id,
+    std::function<void(ErrorOr<bool> reply)> result) {
+  auto shim = std::make_shared<FlatpakShim>(
+      this,
+      registrar_->messenger(),
+      strand_.get());
+
+  struct PromiseGuard {
+    std::function<void(ErrorOr<bool> )> callback;
+    std::once_flag flag;
+
+    void call(ErrorOr<bool>  error) {
+      std::call_once(flag, [this, error = std::move(error)]() mutable {
+        try {
+          callback(std::move(error));
+        } catch (const std::exception& e) {
+          spdlog::error("Exception in ApplicationInstall callback: {}", e.what());
+        } catch (...) {
+          spdlog::error("Unknown exception in ApplicationInstall callback");
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->callback = std::move(result);
+
+  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
+    shim->SetupTransactionEventChannel(registrar_->messenger());
+
+    shim->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
+      if (install_result.has_error()) {
+        FlutterError error(
+            "INSTALL_FAILED",
+            install_result.error().message(),
+            flutter::EncodableValue());
+        guard->call(ErrorOr<bool>(false));
+      } else if (install_result.value()) {
+        guard->call(ErrorOr<bool>(true));
+      } else {
+        FlutterError error(
+            "INSTALL_FAILED",
+            "Installation returned false without error",
+            flutter::EncodableValue());
+        guard->call(ErrorOr<bool>(false));
+      }
+    });
+  });
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {

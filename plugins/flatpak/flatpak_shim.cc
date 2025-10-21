@@ -2905,16 +2905,15 @@ void FlatpakShim::install_runtime(
     return;
   }
 
+  auto self = shared_from_this();
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_reinstall(transaction, FALSE);
 
   // connect all transaction signals
-  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
-                   this);
-  g_signal_connect(transaction, "operation-done",
-                   G_CALLBACK(OnOperationComplete), this);
-  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
-                   this);
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation), self.get());
+  g_signal_connect(transaction, "operation-done", G_CALLBACK(OnOperationComplete), self.get());
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError), self.get());
+  g_signal_connect(transaction, "ready", G_CALLBACK(OnTransactionReady), self.get());
 
   auto install = flatpak_transaction_add_install(
       transaction, remote.c_str(), runtime.c_str(), nullptr, &error);
@@ -2931,26 +2930,35 @@ void FlatpakShim::install_runtime(
   }
 
   // run transaction async, since it will block the thread until it finishes.
-  std::thread([transaction, strand_ptr = &strand, complete_callback]() {
-    pthread_setname_np(pthread_self(), "flatpak-install");
+  std::thread([transaction, strand_ptr = &strand, complete_callback, self, runtime]() {
+    pthread_setname_np(pthread_self(), "flatpak-runtime");
+
+    spdlog::info("[FlatpakPlugin] Starting runtime installation for: {}", runtime);
+
     GError* error = nullptr;
     auto success = flatpak_transaction_run(transaction, nullptr, &error);
 
     std::string error_message;
     if (error) {
       error_message = error->message;
+      spdlog::error("[FlatpakPlugin] Runtime installation error: {}", error_message);
       g_clear_error(&error);
     }
-    asio::post(*strand_ptr, [complete_callback, success, error_message]() {
+
+    asio::post(*strand_ptr, [complete_callback, success, error_message, runtime]() {
       if (success) {
+        spdlog::info("[FlatpakPlugin] Runtime '{}' installed successfully", runtime);
         complete_callback(ErrorOr<bool>(true));
-      }
-      if (!success) {
+      } else {
+        spdlog::error("[FlatpakPlugin] Runtime '{}' installation failed: {}",
+                      runtime, error_message);
         complete_callback(
             ErrorOr<bool>(FlutterError("INSTALL_RUNTIME", error_message)));
       }
     });
+
     g_object_unref(transaction);
+    spdlog::debug("[FlatpakPlugin] Runtime installation thread exiting");
   }).detach();
 }
 
@@ -3026,16 +3034,15 @@ void FlatpakShim::install_extensions(
     return;
   }
 
+  auto self = shared_from_this();
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_reinstall(transaction, FALSE);
 
   // connect all transaction signals
-  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
-                   this);
-  g_signal_connect(transaction, "operation-done",
-                   G_CALLBACK(OnOperationComplete), this);
-  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
-                   this);
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation), self.get());
+  g_signal_connect(transaction, "operation-done", G_CALLBACK(OnOperationComplete), self.get());
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError), self.get());
+  g_signal_connect(transaction, "ready", G_CALLBACK(OnTransactionReady), self.get());
 
   // Add all extensions to the transaction
   for (const auto& ext : missing_extensions) {
@@ -3052,32 +3059,32 @@ void FlatpakShim::install_extensions(
 
   // Run transaction in separate thread
   std::thread([transaction, strand_ptr = &strand, complete_callback,
-               count = missing_extensions.size()]() {
+               count = missing_extensions.size(), self]() {
     pthread_setname_np(pthread_self(), "flatpak-ext");
 
-    spdlog::debug("[FlatpakPlugin] Extension installation thread started");
+    spdlog::info("[FlatpakPlugin] Extension installation thread started for {} extensions", count);
+
     GError* error = nullptr;
     gboolean success = flatpak_transaction_run(transaction, nullptr, &error);
 
     std::string error_message;
     if (error) {
       error_message = error->message;
+      spdlog::error("[FlatpakPlugin] Extension installation error: {}", error_message);
       g_clear_error(&error);
     }
+
     // Post the result back to the original strand
-    asio::post(
-        *strand_ptr, [complete_callback, success, error_message, count]() {
-          if (success) {
-            spdlog::info("[FlatpakPlugin] Successfully installed {} extensions",
-                         count);
-            complete_callback(ErrorOr<bool>(true));
-          } else {
-            spdlog::error("[FlatpakPlugin] Extension installation failed: {}",
-                          error_message);
-            complete_callback(ErrorOr<bool>(
-                FlutterError("EXTENSION_INSTALL_FAILED", error_message)));
-          }
-        });
+    asio::post(*strand_ptr, [complete_callback, success, error_message, count]() {
+      if (success) {
+        spdlog::info("[FlatpakPlugin] Successfully installed {} extensions", count);
+        complete_callback(ErrorOr<bool>(true));
+      } else {
+        spdlog::error("[FlatpakPlugin] Extension installation failed: {}", error_message);
+        complete_callback(ErrorOr<bool>(
+            FlutterError("EXTENSION_INSTALL_FAILED", error_message)));
+      }
+    });
 
     g_object_unref(transaction);
     spdlog::debug("[FlatpakPlugin] Extension installation thread exiting");
@@ -3181,43 +3188,48 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
   }
 
   // stream data to flutter
-  flutter::EncodableMap ProgressMap;
-  ProgressMap[flutter::EncodableValue("type")] =
-      flutter::EncodableValue("progress");
-  ProgressMap[flutter::EncodableValue("progress")] =
-      flutter::CustomEncodableValue(percentage);
-  ProgressMap[flutter::EncodableValue("is_estimating")] =
-      flutter::CustomEncodableValue(static_cast<bool>(is_estimating));
-  ProgressMap[flutter::EncodableValue("status")] =
-      flutter::CustomEncodableValue(status);
-  ProgressMap[flutter::EncodableValue("bytes")] =
-      flutter::CustomEncodableValue(static_cast<int64_t>(bytes_transfered));
-  ProgressMap[flutter::EncodableValue("start_time")] =
-      flutter::CustomEncodableValue(static_cast<int64_t>(start_time));
+  try {
+    flutter::EncodableMap ProgressMap;
+    ProgressMap[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("progress");
+    ProgressMap[flutter::EncodableValue("progress")] =
+        flutter::EncodableValue(static_cast<int32_t>(percentage));
+    ProgressMap[flutter::EncodableValue("is_estimating")] =
+        flutter::EncodableValue(static_cast<bool>(is_estimating));
+    ProgressMap[flutter::EncodableValue("status")] =
+        flutter::EncodableValue(status ? std::string(status) : "");
+    ProgressMap[flutter::EncodableValue("bytes")] =
+        flutter::EncodableValue(static_cast<int64_t>(bytes_transfered));
+    ProgressMap[flutter::EncodableValue("start_time")] =
+        flutter::EncodableValue(static_cast<int64_t>(start_time));
 
-  // calc speed
-  if (start_time > 0 && bytes_transfered > 0) {
-    auto current_time = g_get_monotonic_time();
-    auto elapsed_time = current_time - start_time;
-    if (elapsed_time > 0) {
-      // Speed in bytes per second
-      auto speed = (static_cast<double>(bytes_transfered) /
-                    static_cast<double>(elapsed_time)) *
-                   1000000.0;
-      ProgressMap[flutter::EncodableValue("speed_bps")] =
-          flutter::CustomEncodableValue(speed);
+    // Calculate speed
+    if (start_time > 0 && bytes_transfered > 0) {
+      auto current_time = g_get_monotonic_time();
+      auto elapsed_time = current_time - start_time;
+      if (elapsed_time > 0) {
+        auto speed = (static_cast<double>(bytes_transfered) /
+                      static_cast<double>(elapsed_time)) *
+                     1000000.0;
+        ProgressMap[flutter::EncodableValue("speed_bps")] =
+            flutter::EncodableValue(speed);
+      }
     }
-  }
 
-  handler->SendTransactionEvent(ProgressMap);
+    handler->SendTransactionEvent(ProgressMap);
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Error sending progress event: {}", e.what());
+  }
 }
 
-void FlatpakShim::OnNewOperation(FlatpakTransactionOperation* operation,
+void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
                                  FlatpakTransactionProgress* progress,
                                  gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
 
-  g_signal_connect(progress, "changed", G_CALLBACK(OnProgressChanged), handler);
+  if (progress) {
+    g_signal_connect(progress, "changed", G_CALLBACK(OnProgressChanged), handler);
+  }
 
   auto operation_ref = flatpak_transaction_operation_get_ref(operation);
   auto operation_type =
@@ -3255,7 +3267,7 @@ void FlatpakShim::OnNewOperation(FlatpakTransactionOperation* operation,
   handler->SendTransactionEvent(OperationMap);
 }
 
-void FlatpakShim::OnOperationComplete(FlatpakTransactionOperation* operation,
+void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
                                       const char* commit,
                                       FlatpakTransactionResult result,
                                       gpointer user_data) {
@@ -3288,7 +3300,7 @@ void FlatpakShim::OnOperationComplete(FlatpakTransactionOperation* operation,
   handler->SendTransactionEvent(OperationCompleteMap);
 }
 
-gboolean FlatpakShim::OnOperationError(
+gboolean FlatpakShim::OnOperationError(FlatpakTransaction* transaction,
     FlatpakTransactionOperation* operation,
     const GError* error,
     FlatpakTransactionErrorDetails error_details,
@@ -3297,20 +3309,22 @@ gboolean FlatpakShim::OnOperationError(
 
   auto operation_ref = flatpak_transaction_operation_get_ref(operation);
 
-  flutter::EncodableMap OperationErrorMap;
-  OperationErrorMap[flutter::EncodableValue("type")] =
-      flutter::EncodableValue("operation_error");
-  OperationErrorMap[flutter::EncodableValue("operation_ref")] =
-      flutter::CustomEncodableValue(operation_ref ? std::string(operation_ref)
-                                                  : std::string());
-  OperationErrorMap[flutter::EncodableValue("error_message")] =
-      flutter::CustomEncodableValue(error ? std::string(error->message)
-                                          : std::string());
-  OperationErrorMap[flutter::EncodableValue("fatal")] =
-      flutter::CustomEncodableValue(
-          !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
+  try {
+    flutter::EncodableMap OperationErrorMap;
+    OperationErrorMap[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("operation_error");
+    OperationErrorMap[flutter::EncodableValue("operation_ref")] =
+        flutter::EncodableValue(operation_ref ? std::string(operation_ref) : "");
+    OperationErrorMap[flutter::EncodableValue("error_message")] =
+        flutter::EncodableValue(error ? std::string(error->message) : "");
+    OperationErrorMap[flutter::EncodableValue("fatal")] =
+        flutter::EncodableValue(
+            !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
 
-  handler->SendTransactionEvent(OperationErrorMap);
+    handler->SendTransactionEvent(OperationErrorMap);
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Error sending operation error event: {}", e.what());
+  }
   return TRUE;
 }
 

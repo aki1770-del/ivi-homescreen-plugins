@@ -69,8 +69,8 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
 
   // Install application of given id.
   void ApplicationInstall(
-      const std::string& id,
-      std::function<void(std::optional<FlutterError> reply)> result) override;
+    const std::string& id,
+    std::function<void(ErrorOr<bool> reply)> result) override;
 
   // Uninstall application with specified id.
   ErrorOr<bool> ApplicationUninstall(const std::string& id) override;

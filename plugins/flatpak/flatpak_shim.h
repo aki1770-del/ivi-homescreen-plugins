@@ -482,18 +482,19 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
                                 gpointer user_data);
 
   // callback when there is a new operation in transaction
-  static void OnNewOperation(FlatpakTransactionOperation* operation,
+  static void OnNewOperation(FlatpakTransaction* transaction,
+    FlatpakTransactionOperation* operation,
                              FlatpakTransactionProgress* progress,
                              gpointer user_data);
 
   // callback when transaction operation completed
-  static void OnOperationComplete(FlatpakTransactionOperation* operation,
+  static void OnOperationComplete(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
                                   const char* commit,
                                   FlatpakTransactionResult result,
                                   gpointer user_data);
 
   // callback when transaction operation reports an error
-  static gboolean OnOperationError(FlatpakTransactionOperation* operation,
+  static gboolean OnOperationError(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
                                    const GError* error,
                                    FlatpakTransactionErrorDetails error_details,
                                    gpointer user_data);
