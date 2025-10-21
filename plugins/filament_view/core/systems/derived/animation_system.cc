@@ -147,8 +147,8 @@ void AnimationSystem::NotifyOfAnimationEvent(
 ) const {
   const auto event = flutter::EncodableMap(
     {{flutter::EncodableValue("event"), flutter::EncodableValue(kAnimationEvent)},
-     {flutter::EncodableValue(kAnimationEventType),
-      flutter::EncodableValue(static_cast<int>(eType))},
+     {flutter::EncodableValue(kAnimationEventType), flutter::EncodableValue(static_cast<int>(eType))
+     },
      {flutter::EncodableValue(kGuid), flutter::EncodableValue(entityGuid)},
      {flutter::EncodableValue(kAnimationEventData), flutter::EncodableValue(eventData)}}
   );

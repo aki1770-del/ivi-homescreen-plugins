@@ -132,10 +132,8 @@ void Animation::EnqueueAnimation(const int32_t index) {
   }
 
   if (static_cast<size_t>(index) >= m_mapAnimationNamesToIndex.size()) {
-    spdlog::warn(
-      "Attempting to vEnqueueAnimation that is greater than total count of "
-      "animations."
-    );
+    spdlog::warn("Attempting to vEnqueueAnimation that is greater than total count of "
+                 "animations.");
     return;
   }
 

@@ -88,16 +88,12 @@ class PigeonInternalCodecSerializer : public flutter::StandardCodecSerializer {
       return sInstance;
     }
 
-    void WriteValue(
-      const flutter::EncodableValue& value,
-      flutter::ByteStreamWriter* stream
-    ) const override;
+    void WriteValue(const flutter::EncodableValue& value, flutter::ByteStreamWriter* stream)
+      const override;
 
   protected:
-    flutter::EncodableValue ReadValueOfType(
-      uint8_t type,
-      flutter::ByteStreamReader* stream
-    ) const override;
+    flutter::EncodableValue ReadValueOfType(uint8_t type, flutter::ByteStreamReader* stream)
+      const override;
 };
 
 // Generated interface from Pigeon that represents a handler of messages from Flutter.

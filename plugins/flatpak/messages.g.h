@@ -389,16 +389,16 @@ class FlatpakApi {
       const std::string& id) = 0;
   // Install application of given id.
   virtual void ApplicationInstall(
-    const std::string& id,
-    std::function<void(ErrorOr<bool> reply)> result) = 0;
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
   // Uninstall application with specified id.
   virtual void ApplicationUninstall(
-    const std::string& id,
-    std::function<void(ErrorOr<bool> reply)> result) = 0;
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
   // Update application with specified id.
   virtual void ApplicationUpdate(
-    const std::string& id,
-    std::function<void(ErrorOr<bool> reply)> result) = 0;
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
   // Start application using specified configuration.
   virtual ErrorOr<bool> ApplicationStart(const std::string& id) = 0;
   // Stop application with given id.

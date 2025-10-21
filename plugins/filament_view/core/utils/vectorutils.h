@@ -135,8 +135,7 @@ class VectorUtils {
     );
 
     /// Returns the translation component of a transformation matrix.
-    static inline filament::math::float3 translationFromMatrix(
-      const filament::math::mat4f& matrix
+    static inline filament::math::float3 translationFromMatrix(const filament::math::mat4f& matrix
     ) {
       return filament::math::float3(matrix[3].x, matrix[3].y, matrix[3].z);
     }

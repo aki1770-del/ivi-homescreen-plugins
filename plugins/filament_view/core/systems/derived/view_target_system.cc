@@ -71,7 +71,8 @@ void ViewTargetSystem::onSystemInit() {
   });
 
   registerMessageHandler(
-    ECSMessageType::ViewTargetStartRenderingLoops, [this](const ECSMessage& /*msg*/) {
+    ECSMessageType::ViewTargetStartRenderingLoops,
+    [this](const ECSMessage& /*msg*/) {
       spdlog::trace("ViewTargetStartRenderingLoops");
       KickOffFrameRenderingLoops();
       spdlog::trace("ViewTargetStartRenderingLoops Complete");

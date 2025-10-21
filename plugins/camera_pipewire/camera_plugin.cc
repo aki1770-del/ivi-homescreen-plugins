@@ -163,8 +163,8 @@ void save_image_to_jpeg(const std::string& filename,
                         int height,
                         int channels,
                         int quality) {
-  struct jpeg_compress_struct cinfo{};
-  struct jpeg_error_mgr jerr{};
+  struct jpeg_compress_struct cinfo {};
+  struct jpeg_error_mgr jerr {};
 
   // Setup error handling
   cinfo.err = jpeg_std_error(&jerr);

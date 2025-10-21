@@ -43,7 +43,9 @@ class FlatpakPluginTest : public ::testing::Test {
 
   void TearDown() override { test_messenger_.reset(); }
 
-  [[nodiscard]] flutter::BinaryMessenger* GetTestMessenger() const { return test_messenger_.get(); }
+  [[nodiscard]] flutter::BinaryMessenger* GetTestMessenger() const {
+    return test_messenger_.get();
+  }
 
  private:
   std::unique_ptr<TestBinaryMessenger> test_messenger_;
@@ -288,10 +290,9 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
 
   auto app_id = "com.stremio.Stremio";
 
-  shim->ApplicationInstall(app_id,
-                           [guard](const ErrorOr<bool>& result) {
-                             guard->set_value(result);
-                           });
+  shim->ApplicationInstall(app_id, [guard](const ErrorOr<bool>& result) {
+    guard->set_value(result);
+  });
 
   auto status = future.wait_for(std::chrono::minutes(10));
 
@@ -369,10 +370,9 @@ TEST_F(FlatpakPluginTest, ApplicationUninstallTest) {
 
   auto app_id = "com.stremio.Stremio";
 
-  shim->ApplicationUninstall(app_id,
-                           [guard](const ErrorOr<bool>& result) {
-                             guard->set_value(result);
-                           });
+  shim->ApplicationUninstall(app_id, [guard](const ErrorOr<bool>& result) {
+    guard->set_value(result);
+  });
 
   auto status = future.wait_for(std::chrono::minutes(10));
 
@@ -451,10 +451,9 @@ TEST_F(FlatpakPluginTest, ApplicationUninstallInvalidTest) {
 
   auto app_id = "invalid.app.test";
 
-  shim->ApplicationUninstall(app_id,
-                           [guard](const ErrorOr<bool>& result) {
-                             guard->set_value(result);
-                           });
+  shim->ApplicationUninstall(app_id, [guard](const ErrorOr<bool>& result) {
+    guard->set_value(result);
+  });
 
   auto status = future.wait_for(std::chrono::minutes(10));
 
@@ -558,7 +557,8 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id = "com.valvesoftware.Steam";  // net.lutris.Lutris // com.spotify.Client //
+  auto id =
+      "com.valvesoftware.Steam";  // net.lutris.Lutris // com.spotify.Client //
                                   // com.valvesoftware.Steam
 
   auto result = shim->ApplicationStart(id, *strand, portal_manager);
@@ -648,14 +648,14 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
   }
 }
 
-TEST_F(FlatpakPluginTest,GetUpdatesTest){
+TEST_F(FlatpakPluginTest, GetUpdatesTest) {
   const auto apps = FlatpakShim::GetApplicationsUpdate();
 
   EXPECT_GT(apps.value().size(), 0);
 }
 
 // Tested with Applications/runtimes.
-TEST_F(FlatpakPluginTest,ApplicationUpdateTest) {
+TEST_F(FlatpakPluginTest, ApplicationUpdateTest) {
   auto io_context = std::make_shared<asio::io_context>();
   auto work_guard = asio::make_work_guard(*io_context);
   auto strand = std::make_shared<asio::io_context::strand>(*io_context);
@@ -688,10 +688,9 @@ TEST_F(FlatpakPluginTest,ApplicationUpdateTest) {
 
   auto app_id = "us.zoom.Zoom";
 
-  shim->ApplicationUpdate(app_id,
-                           [guard](const ErrorOr<bool>& result) {
-                             guard->set_value(result);
-                           });
+  shim->ApplicationUpdate(app_id, [guard](const ErrorOr<bool>& result) {
+    guard->set_value(result);
+  });
 
   auto status = future.wait_for(std::chrono::minutes(10));
 
@@ -700,23 +699,22 @@ TEST_F(FlatpakPluginTest,ApplicationUpdateTest) {
 
   auto result = future.get();
 
-  ASSERT_TRUE(result.value())
-      << "Update failed: " << result.error().message();
+  ASSERT_TRUE(result.value()) << "Update failed: " << result.error().message();
 
   auto apps = FlatpakShim::GetApplicationsUpdate();
 
   bool found = false;
   for (const auto& app : apps.value()) {
-        if (std::holds_alternative<flutter::CustomEncodableValue>(app)) {
-          auto app_map = std::get<flutter::CustomEncodableValue>(app);
-          if (app_map.type() == typeid(Application)) {
-            const Application& application = std::any_cast<Application>(app_map);
-                if (application.name() == "Zoom") {
-                  found = true;
-                  break;
-                }
-          }
+    if (std::holds_alternative<flutter::CustomEncodableValue>(app)) {
+      auto app_map = std::get<flutter::CustomEncodableValue>(app);
+      if (app_map.type() == typeid(Application)) {
+        const Application& application = std::any_cast<Application>(app_map);
+        if (application.name() == "Zoom") {
+          found = true;
+          break;
         }
+      }
+    }
   }
   EXPECT_FALSE(found) << "App " << app_id << " not found in updates list";
   std::this_thread::sleep_for(std::chrono::seconds(2));

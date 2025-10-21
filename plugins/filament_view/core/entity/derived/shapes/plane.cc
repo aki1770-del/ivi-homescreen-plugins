@@ -82,11 +82,10 @@ void Plane::createDoubleSidedPlane(filament::Engine* engine_) {
   };
 
   // Indices for 2 triangles per side (12 indices in total)
-  static constexpr uint16_t indices[] = {
-    // Front face
-    0, 1, 2, 0, 2, 3,
-    // Back face (inverted winding)
-    4, 6, 5, 4, 7, 6
+  static constexpr uint16_t indices[] = {// Front face
+                                         0, 1, 2, 0, 2, 3,
+                                         // Back face (inverted winding)
+                                         4, 6, 5, 4, 7, 6
   };
 
   const static short4 normals[] = {
@@ -94,52 +93,44 @@ void Plane::createDoubleSidedPlane(filament::Engine* engine_) {
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
 
     // Back face normals (Z-)
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, -1.0f}}
-      )
-        .xyzw
+      ).xyzw
     )
   };
 
@@ -204,26 +195,22 @@ void Plane::createSingleSidedPlane(filament::Engine* engine_) {
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     ),
     packSnorm16(
       mat3f::packTangentFrame(
         mat3f{float3{1.0f, 0.0f, 0.0f}, float3{0.0f, 1.0f, 0.0f}, float3{0.0f, 0.0f, 1.0f}}
-      )
-        .xyzw
+      ).xyzw
     )
   };
 

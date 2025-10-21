@@ -297,8 +297,7 @@ void BaseShape::ChangeMaterialInstanceProperty(
 ) {
   const auto data = m_poMaterialInstance.getData().value();
 
-  const auto matDefs = dynamic_cast<MaterialDefinitions*>(
-    getComponent<MaterialDefinitions>().get()
+  const auto matDefs = dynamic_cast<MaterialDefinitions*>(getComponent<MaterialDefinitions>().get()
   );
   if (matDefs == nullptr) {
     return;

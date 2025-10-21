@@ -210,9 +210,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \param callback Callback invoked when installation completes or fails.
    * \return An ErrorOr object containing the EncodableList or an error.
    */
-  void ApplicationUninstall(
-    const std::string& id,
-    const std::function<void(ErrorOr<bool>)>& callback);
+  void ApplicationUninstall(const std::string& id,
+                            const std::function<void(ErrorOr<bool>)>& callback);
 
   /**
    * \brief Update flatpak application async.
@@ -220,7 +219,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \param callback Callback invoked when installation completes or fails.
    */
   void ApplicationUpdate(const std::string& id,
-                          const std::function<void(ErrorOr<bool>)>& callback);
+                         const std::function<void(ErrorOr<bool>)>& callback);
 
   /**
    * \brief Start flatpak application.
@@ -500,18 +499,20 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   // callback when there is a new operation in transaction
   static void OnNewOperation(FlatpakTransaction* transaction,
-    FlatpakTransactionOperation* operation,
+                             FlatpakTransactionOperation* operation,
                              FlatpakTransactionProgress* progress,
                              gpointer user_data);
 
   // callback when transaction operation completed
-  static void OnOperationComplete(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
+  static void OnOperationComplete(FlatpakTransaction* transaction,
+                                  FlatpakTransactionOperation* operation,
                                   const char* commit,
                                   FlatpakTransactionResult result,
                                   gpointer user_data);
 
   // callback when transaction operation reports an error
-  static gboolean OnOperationError(FlatpakTransaction* transaction,FlatpakTransactionOperation* operation,
+  static gboolean OnOperationError(FlatpakTransaction* transaction,
+                                   FlatpakTransactionOperation* operation,
                                    const GError* error,
                                    FlatpakTransactionErrorDetails error_details,
                                    gpointer user_data);
