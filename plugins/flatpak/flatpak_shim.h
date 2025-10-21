@@ -168,6 +168,12 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   static ErrorOr<flutter::EncodableList> GetApplicationsInstalled();
 
   /**
+   * \brief Retrieves the list of applications that need to update.
+   * \return An ErrorOr object containing the EncodableList or an error.
+   */
+  static ErrorOr<flutter::EncodableList> GetApplicationsUpdate();
+
+  /**
    * \brief Retrieves the list of applications in a remote.
    * \param id ID of the remote.
    * \return EncodableList of all applications in that remote.
@@ -201,9 +207,20 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   /**
    * \brief Uninstall flatpak application.
    * \param id id of the application wanted to uninstall.
+   * \param callback Callback invoked when installation completes or fails.
    * \return An ErrorOr object containing the EncodableList or an error.
    */
-  static ErrorOr<bool> ApplicationUninstall(const std::string& id);
+  void ApplicationUninstall(
+    const std::string& id,
+    const std::function<void(ErrorOr<bool>)>& callback);
+
+  /**
+   * \brief Update flatpak application async.
+   * \param id id of the application wanted to install.
+   * \param callback Callback invoked when installation completes or fails.
+   */
+  void ApplicationUpdate(const std::string& id,
+                          const std::function<void(ErrorOr<bool>)>& callback);
 
   /**
    * \brief Start flatpak application.

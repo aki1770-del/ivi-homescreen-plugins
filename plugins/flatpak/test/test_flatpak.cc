@@ -43,7 +43,7 @@ class FlatpakPluginTest : public ::testing::Test {
 
   void TearDown() override { test_messenger_.reset(); }
 
-  flutter::BinaryMessenger* GetTestMessenger() { return test_messenger_.get(); }
+  [[nodiscard]] flutter::BinaryMessenger* GetTestMessenger() const { return test_messenger_.get(); }
 
  private:
   std::unique_ptr<TestBinaryMessenger> test_messenger_;
@@ -254,7 +254,7 @@ TEST_F(FlatpakPluginTest, AddEmptyRemoteTest) {
 }
 
 // Install a real application and uninstall it in another test to clean
-// environment.
+// the environment.
 TEST_F(FlatpakPluginTest, InstallAppTest) {
   auto io_context = std::make_shared<asio::io_context>();
   auto work_guard = asio::make_work_guard(*io_context);
@@ -286,10 +286,10 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
 
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "net.lutris.Lutris";
+  auto app_id = "com.stremio.Stremio";
 
   shim->ApplicationInstall(app_id,
-                           [guard, app_id, shim](const ErrorOr<bool>& result) {
+                           [guard](const ErrorOr<bool>& result) {
                              guard->set_value(result);
                            });
 
@@ -337,13 +337,166 @@ TEST_F(FlatpakPluginTest, InstallAppTest) {
 }
 
 TEST_F(FlatpakPluginTest, ApplicationUninstallTest) {
-  const auto result = FlatpakShim::ApplicationUninstall("org.gnome.Calculator");
-  EXPECT_TRUE(result.value());
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
+
+  std::thread io_thread([io_context]() { io_context->run(); });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
+
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, value = std::move(value)]() mutable {
+        try {
+          promise->set_value(std::move(value));
+        } catch (...) {
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+  auto future = guard->promise->get_future();
+
+  auto messenger = GetTestMessenger();
+
+  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+
+  auto app_id = "com.stremio.Stremio";
+
+  shim->ApplicationUninstall(app_id,
+                           [guard](const ErrorOr<bool>& result) {
+                             guard->set_value(result);
+                           });
+
+  auto status = future.wait_for(std::chrono::minutes(10));
+
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Uninstallation timed out after 10 minutes";
+
+  auto result = future.get();
+
+  ASSERT_TRUE(result.value())
+      << "Uninstallation failed: " << result.error().message();
+
+  GError* error = nullptr;
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to get installation";
+
+  auto refs =
+      flatpak_installation_list_installed_refs(installation, nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to list installed refs";
+
+  bool found = false;
+  for (guint i = 0; i < refs->len; i++) {
+    auto ref = static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+    const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
+    if (ref_name && app_id == std::string(ref_name)) {
+      found = true;
+      break;
+    }
+  }
+
+  g_ptr_array_unref(refs);
+  g_object_unref(installation);
+
+  // should expect false
+  EXPECT_FALSE(found) << "App " << app_id << " not found in installed refs";
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  work_guard.reset();
+  io_context->stop();
+
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
 }
 
 TEST_F(FlatpakPluginTest, ApplicationUninstallInvalidTest) {
-  const auto result = FlatpakShim::ApplicationUninstall("invalid.app.test");
-  EXPECT_TRUE(result.has_error());
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
+
+  std::thread io_thread([io_context]() { io_context->run(); });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
+
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, value = std::move(value)]() mutable {
+        try {
+          promise->set_value(std::move(value));
+        } catch (...) {
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+  auto future = guard->promise->get_future();
+
+  auto messenger = GetTestMessenger();
+
+  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+
+  auto app_id = "invalid.app.test";
+
+  shim->ApplicationUninstall(app_id,
+                           [guard](const ErrorOr<bool>& result) {
+                             guard->set_value(result);
+                           });
+
+  auto status = future.wait_for(std::chrono::minutes(10));
+
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Uninstallation timed out after 10 minutes";
+
+  auto result = future.get();
+
+  ASSERT_TRUE(result.has_error())
+      << "Uninstallation failed: " << result.error().message();
+
+  GError* error = nullptr;
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to get installation";
+
+  auto refs =
+      flatpak_installation_list_installed_refs(installation, nullptr, &error);
+  ASSERT_FALSE(error) << "Failed to list installed refs";
+
+  bool found = false;
+  for (guint i = 0; i < refs->len; i++) {
+    auto ref = static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+    const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
+    if (ref_name && app_id == std::string(ref_name)) {
+      found = true;
+      break;
+    }
+  }
+
+  g_ptr_array_unref(refs);
+  g_object_unref(installation);
+
+  EXPECT_TRUE(found) << "App " << app_id << " not found in installed refs";
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  work_guard.reset();
+  io_context->stop();
+
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
 }
 
 TEST_F(FlatpakPluginTest, GetRemoteAppsTest) {
@@ -490,6 +643,87 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
 
   work_guard.reset();
   io_context->stop();
+  if (io_thread.joinable()) {
+    io_thread.join();
+  }
+}
+
+TEST_F(FlatpakPluginTest,GetUpdatesTest){
+  const auto apps = FlatpakShim::GetApplicationsUpdate();
+
+  EXPECT_GT(apps.value().size(), 0);
+}
+
+// Tested with Applications/runtimes.
+TEST_F(FlatpakPluginTest,ApplicationUpdateTest) {
+  auto io_context = std::make_shared<asio::io_context>();
+  auto work_guard = asio::make_work_guard(*io_context);
+  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
+
+  std::thread io_thread([io_context]() { io_context->run(); });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
+
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, value = std::move(value)]() mutable {
+        try {
+          promise->set_value(std::move(value));
+        } catch (...) {
+        }
+      });
+    }
+  };
+
+  auto guard = std::make_shared<PromiseGuard>();
+  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+  auto future = guard->promise->get_future();
+
+  auto messenger = GetTestMessenger();
+
+  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+
+  auto app_id = "us.zoom.Zoom";
+
+  shim->ApplicationUpdate(app_id,
+                           [guard](const ErrorOr<bool>& result) {
+                             guard->set_value(result);
+                           });
+
+  auto status = future.wait_for(std::chrono::minutes(10));
+
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Update timed out after 10 minutes";
+
+  auto result = future.get();
+
+  ASSERT_TRUE(result.value())
+      << "Update failed: " << result.error().message();
+
+  auto apps = FlatpakShim::GetApplicationsUpdate();
+
+  bool found = false;
+  for (const auto& app : apps.value()) {
+        if (std::holds_alternative<flutter::CustomEncodableValue>(app)) {
+          auto app_map = std::get<flutter::CustomEncodableValue>(app);
+          if (app_map.type() == typeid(Application)) {
+            const Application& application = std::any_cast<Application>(app_map);
+                if (application.name() == "Zoom") {
+                  found = true;
+                  break;
+                }
+          }
+        }
+  }
+  EXPECT_FALSE(found) << "App " << app_id << " not found in updates list";
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  work_guard.reset();
+  io_context->stop();
+
   if (io_thread.joinable()) {
     io_thread.join();
   }

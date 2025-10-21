@@ -206,7 +206,7 @@ void FlatpakPlugin::ApplicationInstall(
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationUninstall(const std::string& id) {
-  return FlatpakShim::ApplicationUninstall(id);
+  // return FlatpakShim::ApplicationUninstall(id);
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {

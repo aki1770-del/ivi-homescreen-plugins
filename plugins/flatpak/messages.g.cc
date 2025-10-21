@@ -913,6 +913,27 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.getApplicationsUpdate" + prepended_suffix, &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          ErrorOr<EncodableList> output = api->GetApplicationsUpdate();
+          if (output.has_error()) {
+            reply(WrapError(output.error()));
+            return;
+          }
+          EncodableList wrapped;
+          wrapped.emplace_back(std::move(output).TakeValue());
+          reply(EncodableValue(std::move(wrapped)));
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
     BasicMessageChannel<> channel(
         binary_messenger,
         "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.getApplicationsRemote" +
@@ -983,35 +1004,59 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
     }
   }
   {
-    BasicMessageChannel<> channel(
-        binary_messenger,
-        "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.applicationUninstall" +
-            prepended_suffix,
-        &GetCodec());
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.applicationUninstall" + prepended_suffix, &GetCodec());
     if (api != nullptr) {
-      channel.SetMessageHandler(
-          [api](const EncodableValue& message,
-                const flutter::MessageReply<EncodableValue>& reply) {
-            try {
-              const auto& args = std::get<EncodableList>(message);
-              const auto& encodable_id_arg = args.at(0);
-              if (encodable_id_arg.IsNull()) {
-                reply(WrapError("id_arg unexpectedly null."));
-                return;
-              }
-              const auto& id_arg = std::get<std::string>(encodable_id_arg);
-              ErrorOr<bool> output = api->ApplicationUninstall(id_arg);
-              if (output.has_error()) {
-                reply(WrapError(output.error()));
-                return;
-              }
-              EncodableList wrapped;
-              wrapped.emplace_back(std::move(output).TakeValue());
-              reply(EncodableValue(std::move(wrapped)));
-            } catch (const std::exception& exception) {
-              reply(WrapError(exception.what()));
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          const auto& args = std::get<EncodableList>(message);
+          const auto& encodable_id_arg = args.at(0);
+          if (encodable_id_arg.IsNull()) {
+            reply(WrapError("id_arg unexpectedly null."));
+            return;
+          }
+          const auto& id_arg = std::get<std::string>(encodable_id_arg);
+          api->ApplicationUninstall(id_arg, [reply](ErrorOr<bool>&& output) {
+            if (output.has_error()) {
+              reply(WrapError(output.error()));
+              return;
             }
+            EncodableList wrapped;
+            wrapped.emplace_back(std::move(output).TakeValue());
+            reply(EncodableValue(std::move(wrapped)));
           });
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
+    BasicMessageChannel<> channel(binary_messenger, "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.applicationUpdate" + prepended_suffix, &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler([api](const EncodableValue& message, const flutter::MessageReply<EncodableValue>& reply) {
+        try {
+          const auto& args = std::get<EncodableList>(message);
+          const auto& encodable_id_arg = args.at(0);
+          if (encodable_id_arg.IsNull()) {
+            reply(WrapError("id_arg unexpectedly null."));
+            return;
+          }
+          const auto& id_arg = std::get<std::string>(encodable_id_arg);
+          api->ApplicationUpdate(id_arg, [reply](ErrorOr<bool>&& output) {
+            if (output.has_error()) {
+              reply(WrapError(output.error()));
+              return;
+            }
+            EncodableList wrapped;
+            wrapped.emplace_back(std::move(output).TakeValue());
+            reply(EncodableValue(std::move(wrapped)));
+          });
+        } catch (const std::exception& exception) {
+          reply(WrapError(exception.what()));
+        }
+      });
     } else {
       channel.SetMessageHandler(nullptr);
     }
