@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Toyota Connected North America
+ * Copyright 2020-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef FLUTTER_PLUGIN_COMMON_COMMON_H_
-#define FLUTTER_PLUGIN_COMMON_COMMON_H_
+#include "sdbus.h"
 
-#include "json/json_utils.h"
-#include "logging.h"
-#include "sdbus/sdbus.h"
-#include "shared_library/shared_library.h"
-#include "string/string_tools.h"
-#include "time/time_tools.h"
-#include "tools/command.h"
-#include "tools/encodable.h"
-#include "tools/hexdump.h"
-#include "uuid/uuidxx.h"
+namespace plugin_common_sdbus {
 
-#endif  // FLUTTER_PLUGIN_COMMON_COMMON_H_
+SDBus& SDBus::Instance() {
+  static SDBus instance;
+  return instance;
+}
+
+SDBus::SDBus() {
+  conn_ = sdbus::createSystemBusConnection();
+  conn_->enterEventLoopAsync();
+}
+
+SDBus::~SDBus() {
+  conn_->leaveEventLoop();
+}
+
+sdbus::IConnection& SDBus::GetSystemBus() {
+  return *conn_;
+}
+}  // namespace plugin_common_sdbus

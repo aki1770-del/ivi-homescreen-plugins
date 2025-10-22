@@ -7,6 +7,8 @@ add_library(plugin_common STATIC
         tools/command.cc
         uuid/uuidxx.cc
 )
+add_subdirectory(sdbus)
+
 target_include_directories(plugin_common PUBLIC . ${PROJECT_BINARY_DIR})
 target_compile_definitions(plugin_common PUBLIC EGL_NO_X11)
 target_link_libraries(plugin_common PUBLIC flutter toolchain::toolchain)
