@@ -114,11 +114,6 @@
 #include "webrtc/include/webrtc/webrtc_plugin_c_api.h"
 #endif
 
-#cmakedefine01 ENABLE_PLUGIN_FILAMENT_VIEW
-#if ENABLE_PLUGIN_FILAMENT_VIEW
-#include "filament_view/include/filament_view/filament_view_plugin_c_api.h"
-#endif
-
 #cmakedefine01 ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
 #if ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
 #include "layer_playground_view/include/layer_playground_view/layer_playground_view_plugin_c_api.h"

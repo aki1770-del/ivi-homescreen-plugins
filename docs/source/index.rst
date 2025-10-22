@@ -11,7 +11,6 @@ Welcome to ivi-homescreen-plugin's documentation!
    camera
    cloud_firestore
    desktop_window_linux
-   filament_view
    file_selector
    firebase_auth
    firebase_core
