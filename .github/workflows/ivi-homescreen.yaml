@@ -44,6 +44,8 @@ jobs:
             mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev libosmesa6-dev \
             mesa-utils \
             \
+            libsystemd-dev \
+            \
             libcurl4-openssl-dev \
             libevent-dev \
             libglfw3-dev \
