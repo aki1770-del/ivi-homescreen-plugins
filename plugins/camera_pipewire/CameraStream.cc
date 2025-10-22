@@ -32,7 +32,6 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
-#include "CameraManager.h"
 #include "tools/command.h"
 static constexpr char kPictureCaptureExtension[] = "jpeg";
 
@@ -224,7 +223,8 @@ CameraStream::~CameraStream() {
 //------------------------------------------------------------------------------
 bool CameraStream::Start(const std::string& camera_id) {
   // 1) Ensure the manager is running
-  auto& mgr = CameraManager::instance();
+  //auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] fail to initialize CameraManager.");
     return false;
@@ -344,7 +344,7 @@ void CameraStream::Stop() {
     return;  // already stopped
   }
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   auto* loop = mgr.threadLoop();
 
   // Lock while destroying
@@ -508,7 +508,7 @@ void CameraStream::PauseStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] failed to initialize CameraManager.");
     return;
@@ -529,7 +529,7 @@ void CameraStream::ResumeStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] failed to initialize CameraManager.");
     return;

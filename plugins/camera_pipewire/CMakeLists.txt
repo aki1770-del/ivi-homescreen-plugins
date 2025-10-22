@@ -24,8 +24,6 @@ add_library(plugin_camera_pipewire STATIC
         messages.g.cc
         CameraStream.cc
         CameraStream.h
-        CameraManager.cc
-        CameraManager.h
         PipewireGraph.cc
         PipewireGraph.h
 )

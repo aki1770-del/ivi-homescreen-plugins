@@ -7,6 +7,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <map>
 
 struct NodeInfo {
   uint32_t id;
@@ -41,6 +42,11 @@ public:
                   pw_core* core,
                   pw_registry* registry);
   ~PipewireGraph();
+  PipewireGraph();
+  static PipewireGraph& instance();
+  const std::map<uint32_t, std::string>& getAvailableCameras() const;
+  pw_thread_loop* threadLoop() const { return pw_thread_loop_; }
+  pw_core* core() const { return pw_core_; }
 
   // Initialize and start object discovery
   bool initialize();
@@ -107,6 +113,23 @@ private:
   static void printNodeInfo(const NodeInfo& node);
   static void printPortInfo(const PortInfo& port);
   static void printLinkInfo(const LinkInfo& link);
+
+  static void on_global(void* data,
+                      uint32_t id,
+                      uint32_t permissions,
+                      const char* type,
+                      uint32_t version,
+                      const struct spa_dict* props);
+
+  static void on_global_remove(void* data, uint32_t id);
+
+  pw_thread_loop* pw_thread_loop_ = nullptr;
+  pw_context* pw_context_ = nullptr;
+  pw_core* pw_core_ = nullptr;
+  pw_registry* pw_registry_ = nullptr;
+  mutable std::mutex mutex_;
+  std::map<uint32_t, std::string> camera_nodes_map_;
+
 };
 
 #endif // PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H

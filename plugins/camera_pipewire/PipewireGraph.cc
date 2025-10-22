@@ -3,6 +3,90 @@
 
 #include <spdlog/spdlog.h>
 
+#include <iostream>
+
+PipewireGraph& PipewireGraph::instance() {
+  static PipewireGraph s_instance;
+  return s_instance;
+}
+
+PipewireGraph::PipewireGraph() = default;
+
+PipewireGraph::~PipewireGraph() {
+  // Ensure shutdown is called in case user forgot
+  if (initialized_) {
+    shutdown();
+  }
+}
+
+const std::map<uint32_t, std::string>& PipewireGraph::getAvailableCameras()
+    const {
+  return camera_nodes_map_;
+}
+
+// Callback function for detecting cameras
+void PipewireGraph::on_global(void* data,
+                              const uint32_t id,
+                              uint32_t /*permissions*/,
+                              const char* type,
+                              uint32_t version,
+                              const struct spa_dict* props) {
+  if (!data) {
+    std::cerr << "[Error] on_global received null data\n";
+    return;
+  }
+
+  if (!props)
+    return;
+
+  auto* self = static_cast<PipewireGraph*>(data);
+
+  if (strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
+    self->handleNodeInfo(id, version, props);
+  } else if (strcmp(type, PW_TYPE_INTERFACE_Port) == 0) {
+    self->handlePortInfo(id, version, props);
+  } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
+    self->handleLinkInfo(id, version, props);
+  }
+
+  if (isCamera(props)) {
+    const char* node_name = spa_dict_lookup(props, "node.description");
+    const std::string name = node_name ? node_name : "Unknown";
+    self->camera_nodes_map_[id] = name;
+    spdlog::debug("[+] camera added: {} (camera_id: {})", name, id);
+  }
+}
+void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
+  if (!data) {
+    spdlog::error("[error] on_global_remove received null data");
+    return;
+  }
+  auto* self = static_cast<PipewireGraph*>(data);
+  self->nodes_.erase(id);
+  self->node_ports_.erase(id);
+  self->links_.erase(id);
+
+  // Rebuild filtered views efficiently
+  self->camera_nodes_.erase(
+    std::remove_if(self->camera_nodes_.begin(), self->camera_nodes_.end(),
+                   [id](const NodeInfo& node) { return node.id == id; }),
+    self->camera_nodes_.end());
+
+  self->audio_nodes_.erase(
+    std::remove_if(self->audio_nodes_.begin(), self->audio_nodes_.end(),
+                   [id](const NodeInfo& node) { return node.id == id; }),
+    self->audio_nodes_.end());
+
+  self->all_nodes_.erase(
+    std::remove_if(self->all_nodes_.begin(), self->all_nodes_.end(),
+                   [id](const NodeInfo& node) { return node.id == id; }),
+    self->all_nodes_.end());
+
+  if (auto it = self->camera_nodes_map_.find(id); it != self->camera_nodes_map_.end()) {
+    spdlog::debug("[-] camera removed: {} (camera_id: {})", it->second, id);
+    self->camera_nodes_map_.erase(it);
+  }
+}
 const pw_registry_events PipewireGraph::registry_events_ = {
   .version = PW_VERSION_REGISTRY_EVENTS,
   .global = onGlobal,
@@ -24,29 +108,110 @@ PipewireGraph::PipewireGraph(pw_thread_loop* thread_loop,
   all_nodes_.reserve(64);
 }
 
-PipewireGraph::~PipewireGraph() {
-  shutdown();
-}
-
 bool PipewireGraph::initialize() {
-  if (initialized_ || !registry_) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (initialized_) {
+    // Already initialized
+    return true;
+  }
+
+  // 1) Initialize PipeWire library (safe to call once)
+  pw_init(nullptr, nullptr);
+
+  // 2) Create main loop, context, and core
+  pw_thread_loop_ = pw_thread_loop_new("camera-loop", nullptr);
+  if (!pw_thread_loop_) {
+    spdlog::error("[CameraManager] failed to create pw_main_loop.");
     return false;
   }
 
-  pw_thread_loop_lock(thread_loop_);
+  // 3) Start the loop in its own thread
+  if (int ret = pw_thread_loop_start(pw_thread_loop_); ret != 0) {
+    spdlog::error("[CameraManager] failed to start pw_thread_loop (err={})",
+                  ret);
+    pw_thread_loop_destroy(pw_thread_loop_);
+    pw_thread_loop_ = nullptr;
+    return false;
+  }
 
-  // Add registry listener
-  pw_registry_add_listener(registry_, &registry_listener_,
-                          &registry_events_, this);
+  // 4) Lock the loop for context/core creation
+  pw_thread_loop_lock(pw_thread_loop_);
+  {
+    // We get the underlying spa_loop from the thread loop
+    if (auto* loop = pw_thread_loop_get_loop(pw_thread_loop_); !loop) {
+      spdlog::error("[CameraManager] could not get loop from threadLoop.");
+    } else {
+      // Create PipeWire context
+      pw_context_ = pw_context_new(loop, nullptr, 0);
+      if (!pw_context_) {
+        spdlog::error("[CameraManager] failed to create pw_context.");
+      } else {
+        // Connect to PipeWire core
+        pw_core_ = pw_context_connect(pw_context_, nullptr, 0);
+        if (!pw_core_) {
+          spdlog::error("[CameraManager] could not connect to PipeWire core.");
+        }
+        pw_registry_ = pw_core_get_registry(pw_core_, PW_VERSION_REGISTRY, 0);
+        static pw_registry_events registry_events = {
+            .version = PW_VERSION_REGISTRY_EVENTS,
+            .global = on_global,
+            .global_remove = on_global_remove,
+        };
+        pw_registry_add_listener(pw_registry_, new spa_hook{}, &registry_events,
+                                 this);
+      }
+    }
+  }
+  pw_thread_loop_unlock(pw_thread_loop_);
 
-  pw_thread_loop_unlock(thread_loop_);
+  // Check we have context & core
+  if (!pw_context_ || !pw_core_) {
+    // Something failed
+    pw_thread_loop_stop(pw_thread_loop_);
+    pw_thread_loop_destroy(pw_thread_loop_);
+    pw_thread_loop_ = nullptr;
+    pw_deinit();
+    return false;
+  }
 
   initialized_ = true;
-  spdlog::info("[PipewireGraph] Initialized successfully");
   return true;
 }
 
 void PipewireGraph::shutdown() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (!initialized_) {
+    return;
+  }
+
+  // 1) Stop the background thread loop
+  pw_thread_loop_stop(pw_thread_loop_);
+
+  // 2) Lock while destroying
+  pw_thread_loop_lock(pw_thread_loop_);
+  {
+    if (pw_core_) {
+      pw_core_disconnect(pw_core_);
+      pw_core_ = nullptr;
+    }
+    if (pw_context_) {
+      pw_context_destroy(pw_context_);
+      pw_context_ = nullptr;
+    }
+  }
+  pw_thread_loop_unlock(pw_thread_loop_);
+
+  // 3) Destroy the thread loop
+  pw_thread_loop_destroy(pw_thread_loop_);
+  pw_thread_loop_ = nullptr;
+
+  // 4) De-init PipeWire
+  pw_deinit();
+  initialized_ = false;
+
+  /*
   if (!initialized_) {
     return;
   }
@@ -65,6 +230,7 @@ void PipewireGraph::shutdown() {
   active_links_.clear();
 
   initialized_ = false;
+  */
   spdlog::info("[PipewireGraph] Shutdown completed");
 }
 

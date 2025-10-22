@@ -21,8 +21,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "CameraManager.h"
+//#include "_CameraManager.h"
 #include "plugins/common/common.h"
+#include "PipewireGraph.h"
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -70,19 +71,20 @@ void CameraPlugin::RegisterWithRegistrar(
 CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* /*messenger*/)
   : mPreview(), registrar_(plugin_registrar) {
-  if (!CameraManager::instance().initialize()) {
+  if (!PipewireGraph::instance().initialize()) {
     spdlog::error("failed to initialize PipeWire manager!");
   }
 }
 
 CameraPlugin::~CameraPlugin() {
-  CameraManager::instance().shutdown();
+  PipewireGraph::instance().shutdown();
 }
 
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
   flutter::EncodableList list;
-  const auto& mgr = CameraManager::instance();
+  const auto& mgr = PipewireGraph::instance();
   auto cameras = mgr.getAvailableCameras();
+  //mgr.getAllNodes();
   for (const auto& [id, name] : cameras) {
     spdlog::debug("[camera_plugin] detected camera:  {} (camera_id: {})", name,
                   id);
