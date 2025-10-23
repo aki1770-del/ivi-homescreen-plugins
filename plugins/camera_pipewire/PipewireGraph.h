@@ -3,7 +3,6 @@
 
 #include <pipewire/core.h>
 #include <pipewire/pipewire.h>
-#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_map>

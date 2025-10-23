@@ -223,10 +223,9 @@ CameraStream::~CameraStream() {
 //------------------------------------------------------------------------------
 bool CameraStream::Start(const std::string& camera_id) {
   // 1) Ensure the manager is running
-  //auto& mgr = CameraManager::instance();
   auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] fail to initialize CameraManager.");
+    spdlog::error("[CameraStream] fail to initialize PipewireGraph.");
     return false;
   }
 
@@ -362,8 +361,8 @@ void save_image_to_jpeg(const std::string& filename,
                         int height,
                         int channels,
                         int quality) {
-  struct jpeg_compress_struct cinfo {};
-  struct jpeg_error_mgr jerr {};
+  struct jpeg_compress_struct cinfo{};
+  struct jpeg_error_mgr jerr{};
 
   // Setup error handling
   cinfo.err = jpeg_std_error(&jerr);
@@ -510,7 +509,7 @@ void CameraStream::PauseStream() const {
 
   auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize CameraManager.");
+    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
@@ -521,7 +520,9 @@ void CameraStream::PauseStream() const {
   }
 
   pw_thread_loop_lock(loop);
-  { pw_stream_set_active(pw_stream_, false); }
+  {
+    pw_stream_set_active(pw_stream_, false);
+  }
   pw_thread_loop_unlock(loop);
 }
 
@@ -531,7 +532,7 @@ void CameraStream::ResumeStream() const {
 
   auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize CameraManager.");
+    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
@@ -542,7 +543,9 @@ void CameraStream::ResumeStream() const {
   }
 
   pw_thread_loop_lock(loop);
-  { pw_stream_set_active(pw_stream_, true); }
+  {
+    pw_stream_set_active(pw_stream_, true);
+  }
   pw_thread_loop_unlock(loop);
 }
 std::optional<std::string> CameraStream::GetFilePathForPicture() {
