@@ -83,6 +83,13 @@ CameraPlugin::~CameraPlugin() {
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
   flutter::EncodableList list;
   const auto& mgr = PipewireGraph::instance();
+
+  auto cameras = mgr.getCameraNodes();
+  for (auto camera : cameras ) {
+    spdlog::debug("[camera_plugin] detected camera:  (camera_id: {})",camera.id);
+    list.emplace_back(std::to_string(camera.id));
+  }
+  /*
   auto cameras = mgr.getAvailableCameras();
   //mgr.getAllNodes();
   for (const auto& [id, name] : cameras) {
@@ -90,6 +97,7 @@ ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
                   id);
     list.emplace_back(std::to_string(id));
   }
+  */
   return ErrorOr<flutter::EncodableList>(std::move(list));
 }
 

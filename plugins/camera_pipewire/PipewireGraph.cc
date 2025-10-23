@@ -19,11 +19,6 @@ PipewireGraph::~PipewireGraph() {
   }
 }
 
-const std::map<uint32_t, std::string>& PipewireGraph::getAvailableCameras()
-    const {
-  return camera_nodes_map_;
-}
-
 // Callback function for detecting cameras
 void PipewireGraph::on_global(void* data,
                               const uint32_t id,
@@ -47,13 +42,6 @@ void PipewireGraph::on_global(void* data,
     self->handlePortInfo(id, version, props);
   } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
     self->handleLinkInfo(id, version, props);
-  }
-
-  if (isCamera(props)) {
-    const char* node_name = spa_dict_lookup(props, "node.description");
-    const std::string name = node_name ? node_name : "Unknown";
-    self->camera_nodes_map_[id] = name;
-    spdlog::debug("[+] camera added: {} (camera_id: {})", name, id);
   }
 }
 void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
@@ -82,30 +70,6 @@ void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
                    [id](const NodeInfo& node) { return node.id == id; }),
     self->all_nodes_.end());
 
-  if (auto it = self->camera_nodes_map_.find(id); it != self->camera_nodes_map_.end()) {
-    spdlog::debug("[-] camera removed: {} (camera_id: {})", it->second, id);
-    self->camera_nodes_map_.erase(it);
-  }
-}
-const pw_registry_events PipewireGraph::registry_events_ = {
-  .version = PW_VERSION_REGISTRY_EVENTS,
-  .global = onGlobal,
-  .global_remove = onGlobalRemove,
-};
-
-PipewireGraph::PipewireGraph(pw_thread_loop* thread_loop,
-                                 pw_context* context,
-                                 pw_core* core,
-                                 pw_registry* registry)
-  : thread_loop_(thread_loop)
-    , context_(context)
-    , core_(core)
-    , registry_(registry), registry_listener_() {
-  // Pre-allocate containers for better performance
-  nodes_.reserve(64);
-  camera_nodes_.reserve(8);
-  audio_nodes_.reserve(16);
-  all_nodes_.reserve(64);
 }
 
 bool PipewireGraph::initialize() {
@@ -158,8 +122,7 @@ bool PipewireGraph::initialize() {
             .global = on_global,
             .global_remove = on_global_remove,
         };
-        pw_registry_add_listener(pw_registry_, new spa_hook{}, &registry_events,
-                                 this);
+        pw_registry_add_listener(pw_registry_, &registry_listener_, &registry_events, this);
       }
     }
   }
@@ -200,6 +163,8 @@ void PipewireGraph::shutdown() {
       pw_context_destroy(pw_context_);
       pw_context_ = nullptr;
     }
+    spa_hook_remove(&registry_listener_);
+
   }
   pw_thread_loop_unlock(pw_thread_loop_);
 
@@ -210,68 +175,7 @@ void PipewireGraph::shutdown() {
   // 4) De-init PipeWire
   pw_deinit();
   initialized_ = false;
-
-  /*
-  if (!initialized_) {
-    return;
-  }
-
-  pw_thread_loop_lock(thread_loop_);
-  spa_hook_remove(&registry_listener_);
-  pw_thread_loop_unlock(thread_loop_);
-
-  std::lock_guard lock(data_mutex_);
-  nodes_.clear();
-  node_ports_.clear();
-  links_.clear();
-  camera_nodes_.clear();
-  audio_nodes_.clear();
-  all_nodes_.clear();
-  active_links_.clear();
-
-  initialized_ = false;
-  */
   spdlog::info("[PipewireGraph] Shutdown completed");
-}
-
-void PipewireGraph::onGlobal(void* data, const uint32_t id, uint32_t /* permissions */,
-                               const char* type, const uint32_t version,
-                               const spa_dict* props) {
-  auto* manager = static_cast<PipewireGraph*>(data);
-
-  if (strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
-    manager->handleNodeInfo(id, version, props);
-  } else if (strcmp(type, PW_TYPE_INTERFACE_Port) == 0) {
-    manager->handlePortInfo(id, version, props);
-  } else if (strcmp(type, PW_TYPE_INTERFACE_Link) == 0) {
-    manager->handleLinkInfo(id, version, props);
-  }
-}
-
-void PipewireGraph::onGlobalRemove(void* data, uint32_t id) {
-  auto* manager = static_cast<PipewireGraph*>(data);
-  std::lock_guard lock(manager->data_mutex_);
-
-  // Remove from all containers
-  manager->nodes_.erase(id);
-  manager->node_ports_.erase(id);
-  manager->links_.erase(id);
-
-  // Rebuild filtered views efficiently
-  manager->camera_nodes_.erase(
-    std::remove_if(manager->camera_nodes_.begin(), manager->camera_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    manager->camera_nodes_.end());
-
-  manager->audio_nodes_.erase(
-    std::remove_if(manager->audio_nodes_.begin(), manager->audio_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    manager->audio_nodes_.end());
-
-  manager->all_nodes_.erase(
-    std::remove_if(manager->all_nodes_.begin(), manager->all_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    manager->all_nodes_.end());
 }
 
 void PipewireGraph::handleNodeInfo(const uint32_t id, const uint32_t version,

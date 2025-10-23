@@ -37,14 +37,9 @@ struct LinkInfo {
 
 class PipewireGraph {
 public:
-  PipewireGraph(pw_thread_loop* thread_loop,
-                  pw_context* context,
-                  pw_core* core,
-                  pw_registry* registry);
   ~PipewireGraph();
   PipewireGraph();
   static PipewireGraph& instance();
-  const std::map<uint32_t, std::string>& getAvailableCameras() const;
   pw_thread_loop* threadLoop() const { return pw_thread_loop_; }
   pw_core* core() const { return pw_core_; }
 
@@ -84,13 +79,13 @@ private:
   static std::string getStringProperty(const spa_dict* props, const char* key);
 
   // PipeWire objects (not owned)
-  pw_thread_loop* thread_loop_;
-  pw_context* context_;
-  pw_core* core_;
-  pw_registry* registry_;
+  pw_thread_loop* thread_loop_{};
+  pw_context* context_{};
+  pw_core* core_{};
+  //pw_registry* registry_{};
 
   // Registry listener
-  spa_hook registry_listener_;
+  spa_hook registry_listener_{};
   static const pw_registry_events registry_events_;
 
   // Optimized storage - separate containers for fast filtered access
@@ -128,8 +123,6 @@ private:
   pw_core* pw_core_ = nullptr;
   pw_registry* pw_registry_ = nullptr;
   mutable std::mutex mutex_;
-  std::map<uint32_t, std::string> camera_nodes_map_;
-
 };
 
 #endif // PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H
