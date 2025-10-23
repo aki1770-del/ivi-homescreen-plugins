@@ -282,13 +282,7 @@ bool CameraStream::Start(const std::string& camera_id) {
 
     const spa_pod* params[1];
 
-    std::string format_env;
-    if (const char* env = std::getenv("CAMERA_OUTPUT_FORMAT")) {
-      format_env = env;
-    } else {
-      format_env = "";
-    }
-
+    std::string format_env = std::getenv("CAMERA_OUTPUT_FORMAT");
     if (format_env == "MJPEG") {
       camera_output_format = "MJPEG";
     } else if (format_env == "YUV2") {
