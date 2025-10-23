@@ -32,7 +32,6 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
-#include "CameraManager.h"
 #include "tools/command.h"
 static constexpr char kPictureCaptureExtension[] = "jpeg";
 
@@ -224,9 +223,9 @@ CameraStream::~CameraStream() {
 //------------------------------------------------------------------------------
 bool CameraStream::Start(const std::string& camera_id) {
   // 1) Ensure the manager is running
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] fail to initialize CameraManager.");
+    spdlog::error("[CameraStream] fail to initialize PipewireGraph.");
     return false;
   }
 
@@ -283,13 +282,7 @@ bool CameraStream::Start(const std::string& camera_id) {
 
     const spa_pod* params[1];
 
-    std::string format_env;
-    if (const char* env = std::getenv("CAMERA_OUTPUT_FORMAT")) {
-      format_env = env;
-    } else {
-      format_env = "";
-    }
-
+    std::string format_env = std::getenv("CAMERA_OUTPUT_FORMAT");
     if (format_env == "MJPEG") {
       camera_output_format = "MJPEG";
     } else if (format_env == "YUV2") {
@@ -350,7 +343,7 @@ void CameraStream::Stop() {
     return;  // already stopped
   }
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   auto* loop = mgr.threadLoop();
 
   // Lock while destroying
@@ -514,9 +507,9 @@ void CameraStream::PauseStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize CameraManager.");
+    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
@@ -535,9 +528,9 @@ void CameraStream::ResumeStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = CameraManager::instance();
+  auto& mgr = PipewireGraph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize CameraManager.");
+    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
