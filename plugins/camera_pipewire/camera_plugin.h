@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Toyota Connected North America
+ * Copyright 2020-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,18 @@
  * limitations under the License.
  */
 
-#ifndef FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
-#define FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
+#ifndef PLUGINS_CAMERA_PIPEWIRE_CAMERA_PLUGIN_H
+#define PLUGINS_CAMERA_PIPEWIRE_CAMERA_PLUGIN_H
+
+#include <optional>
 
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
 #include <flutter/plugin_registrar_homescreen.h>
-#include <spa/param/video/format-utils.h>
+
 #include "CameraStream.h"
 #include "event_channel.h"
 #include "messages.g.h"
-#include "plugins/common/common.h"
 
 namespace camera_plugin {
 
@@ -37,19 +38,19 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 
   ~CameraPlugin() override;
 
-  // Returns the names of all of the available capture devices.
+  // Returns the names of all the available capture devices.
   ErrorOr<flutter::EncodableList> GetAvailableCameras() override;
   // Creates a camera instance for the given device name and settings.
   void Create(const std::string& camera_id,
               const PlatformMediaSettings& settings,
               std::function<void(ErrorOr<int64_t> reply)> result) override;
-  // Initializes a camera, and returns the size of its preview.
+  // Initializes a camera and returns the size of its preview.
   void Initialize(
       int64_t texture_id,
       std::function<void(ErrorOr<PlatformSize> reply)> result) override;
   // Disposes a camera that is no longer in use.
   virtual std::optional<FlutterError> Dispose(int64_t texture_id) override;
-  // Takes a picture with the given camera, and returns the path to the
+  // Takes a picture with the given camera and returns the path to the
   // resulting file.
   void TakePicture(
       int64_t texture_id,
@@ -113,4 +114,4 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
 };
 }  // namespace camera_plugin
 
-#endif  // FLUTTER_PLUGIN_CAMERA_PLUGIN_H_
+#endif  // PLUGINS_CAMERA_PIPEWIRE_CAMERA_PLUGIN_H

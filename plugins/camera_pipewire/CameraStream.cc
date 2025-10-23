@@ -15,6 +15,13 @@
  */
 
 #include "CameraStream.h"
+
+#include <cstdio>
+#include <filesystem>
+#include <future>
+#include <sstream>
+#include <utility>
+
 #include <GLES2/gl2.h>
 #include <jpeglib.h>
 #include <spa/param/format-utils.h>
@@ -22,17 +29,10 @@
 #include <spa/param/video/raw-utils.h>
 #include <spa/param/video/raw.h>
 #include <spa/pod/builder.h>
-#include <spdlog/spdlog.h>
-#include <string/string_tools.h>
-#include <time/time_tools.h>
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <future>
-#include <iostream>
-#include <sstream>
-#include <utility>
-#include "tools/command.h"
+
+#include "PipewireGraph.h"
+#include "plugins/common/common.h"
+
 static constexpr char kPictureCaptureExtension[] = "jpeg";
 
 //------------------------------------------------------------------------------
@@ -81,10 +81,10 @@ static int decode_mjpeg(const uint8_t* input,
 static int decode_yuy2(const uint8_t* input,
                        size_t input_size,
                        uint8_t* output,
-                       int width,
-                       int height) {
-  const size_t expected_size = width * height * 2;  // 2 bytes per pixel
-  if (input_size < expected_size) {
+                       const int width,
+                       const int height) {
+  if (const size_t expected_size = width * height * 2;
+      input_size < expected_size) {
     spdlog::error("[decode_yuy2] input size too small: {} < {}", input_size,
                   expected_size);
     return -1;
@@ -96,19 +96,19 @@ static int decode_yuy2(const uint8_t* input,
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; x += 2) {
       // Read 4 bytes: Y0 U Y1 V
-      uint8_t y0 = *in++;
-      uint8_t u = *in++;
-      uint8_t y1 = *in++;
-      uint8_t v = *in++;
+      const uint8_t y0 = *in++;
+      const uint8_t u = *in++;
+      const uint8_t y1 = *in++;
+      const uint8_t v = *in++;
 
       auto yuv_to_rgb = [](uint8_t y, uint8_t u, uint8_t v, uint8_t* rgb) {
-        int c = y - 16;
-        int d = u - 128;
-        int e = v - 128;
+        const int c = y - 16;
+        const int d = u - 128;
+        const int e = v - 128;
 
-        int r = (298 * c + 409 * e + 128) >> 8;
-        int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        int b = (298 * c + 516 * d + 128) >> 8;
+        const int r = (298 * c + 409 * e + 128) >> 8;
+        const int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
+        const int b = (298 * c + 516 * d + 128) >> 8;
 
         rgb[0] = std::clamp(r, 0, 255);
         rgb[1] = std::clamp(g, 0, 255);
@@ -132,8 +132,8 @@ static int decode_yuy2(const uint8_t* input,
 //------------------------------------------------------------------------------
 CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
                            std::string camera_id,
-                           int width,
-                           int height)
+                           const int width,
+                           const int height)
     : registrar_(plugin_registrar),
       width_(width),
       height_(height),
@@ -148,7 +148,7 @@ CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
              size_t /*height*/) -> const FlutterDesktopPixelBuffer* {
         static FlutterDesktopPixelBuffer pixel_buffer = {};
         static std::mutex s_mutex;
-        std::lock_guard<std::mutex> lock(s_mutex);
+        std::lock_guard lock(s_mutex);
 
         pixel_buffer.width = width_;
         pixel_buffer.height = height_;
@@ -270,7 +270,7 @@ bool CameraStream::Start(const std::string& camera_id) {
 
     // Build the SPA format param
     std::vector<uint8_t> pod_buffer(1024);
-    spa_pod_builder builder = ((struct spa_pod_builder){
+    auto builder = ((struct spa_pod_builder){
         (pod_buffer.data()),
         (static_cast<unsigned int>(pod_buffer.size())),
         0,
@@ -282,8 +282,9 @@ bool CameraStream::Start(const std::string& camera_id) {
 
     const spa_pod* params[1];
 
-    std::string format_env = std::getenv("CAMERA_OUTPUT_FORMAT");
-    if (format_env == "MJPEG") {
+    const char* env_value = std::getenv("CAMERA_OUTPUT_FORMAT");
+    if (std::string format_env = env_value ? env_value : "";
+        format_env == "MJPEG") {
       camera_output_format = "MJPEG";
     } else if (format_env == "YUV2") {
       camera_output_format = "YUV2";
@@ -357,18 +358,18 @@ void CameraStream::Stop() {
 
 void save_image_to_jpeg(const std::string& filename,
                         const unsigned char* image_data,
-                        int width,
-                        int height,
-                        int channels,
-                        int quality) {
-  struct jpeg_compress_struct cinfo {};
-  struct jpeg_error_mgr jerr {};
+                        const int width,
+                        const int height,
+                        const int channels,
+                        const int quality) {
+  jpeg_compress_struct cinfo{};
+  jpeg_error_mgr jerr{};
 
   // Setup error handling
   cinfo.err = jpeg_std_error(&jerr);
   jpeg_create_compress(&cinfo);
 
-  // Open file for writing
+  // Open a file for writing
   FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
     spdlog::error("error: unable to open {} for writing", filename);
@@ -389,10 +390,11 @@ void save_image_to_jpeg(const std::string& filename,
   // Start compression
   jpeg_start_compress(&cinfo, TRUE);
 
-  // Write scanlines
+  // Write scan lines
   JSAMPROW row_pointer;
   while (cinfo.next_scanline < cinfo.image_height) {
-    row_pointer = (JSAMPROW)&image_data[cinfo.next_scanline * width * channels];
+    row_pointer = const_cast<JSAMPROW>(
+        &image_data[cinfo.next_scanline * width * channels]);
     jpeg_write_scanlines(&cinfo, &row_pointer, 1);
   }
 
@@ -437,7 +439,7 @@ void CameraStream::HandleProcess() {
 
   if (ret == 0) {
     {
-      std::lock_guard<std::mutex> lock(frame_mutex_);
+      std::lock_guard lock(frame_mutex_);
       new_frame_available_ = true;
       registrar_->texture_registrar()->TextureMakeCurrent();
       glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
@@ -472,7 +474,7 @@ void CameraStream::HandleProcess() {
 //------------------------------------------------------------------------------
 // Static callback proxies
 //------------------------------------------------------------------------------
-const char* StreamStateToString(enum pw_stream_state state) {
+const char* StreamStateToString(const pw_stream_state state) {
   switch (state) {
     case PW_STREAM_STATE_ERROR:
       return "PW_STREAM_STATE_ERROR";
@@ -490,15 +492,15 @@ const char* StreamStateToString(enum pw_stream_state state) {
 }
 
 void CameraStream::OnStreamStateChanged(void* /*data*/,
-                                        pw_stream_state old_state,
-                                        pw_stream_state new_state,
+                                        const pw_stream_state old_state,
+                                        const pw_stream_state new_state,
                                         const char* /*error*/) {
   spdlog::debug("[CameraStream] stream state changed from {} to {}",
                 StreamStateToString(old_state), StreamStateToString(new_state));
 }
 
 void CameraStream::OnStreamProcess(void* data) {
-  auto* self = reinterpret_cast<CameraStream*>(data);
+  auto* self = static_cast<CameraStream*>(data);
   (void)self;
   self->HandleProcess();
 }

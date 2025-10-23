@@ -15,18 +15,19 @@
  */
 
 #include "camera_plugin.h"
-#include <flutter/plugin_registrar_homescreen.h>
-#include <jpeglib.h>
+
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
-#include "PipewireGraph.h"
-#include "plugins/common/common.h"
 
+#include <jpeglib.h>
 extern "C" {
 #include <pipewire/pipewire.h>
 }
+
+#include <flutter/plugin_registrar_homescreen.h>
+#include "PipewireGraph.h"
+#include "plugins/common/common.h"
 
 struct CameraInfo {
   uint32_t id;
@@ -81,16 +82,16 @@ CameraPlugin::~CameraPlugin() {
 
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
   flutter::EncodableList list;
-  const auto& mgr = PipewireGraph::instance();
+  const PipewireGraph& mgr = PipewireGraph::instance();
 
-  auto cameras = mgr.getCameraNodes();
+  const auto cameras = mgr.getCameraNodes();
   for (auto camera : cameras) {
     spdlog::debug("[camera_plugin] detected camera:  (camera_id: {})",
                   camera.id);
     list.emplace_back(std::in_place_type<std::string>,
                       std::to_string(camera.id));
   }
-  return ErrorOr<flutter::EncodableList>(std::move(list));
+  return ErrorOr<flutter::EncodableList>(list);
 }
 
 void CameraPlugin::Create(
@@ -193,7 +194,7 @@ void save_image_to_jpeg(const std::string& filename,
   // Start compression
   jpeg_start_compress(&cinfo, TRUE);
 
-  // Write scanlines
+  // Write scan lines
   JSAMPROW row_pointer;
   while (cinfo.next_scanline < cinfo.image_height) {
     row_pointer = const_cast<JSAMPROW>(

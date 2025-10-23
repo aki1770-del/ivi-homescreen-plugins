@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Toyota Connected North America
+ * Copyright 2020-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,21 @@
  * limitations under the License.
  */
 
-#ifndef CAMERASTREAM_H
-#define CAMERASTREAM_H
+#ifndef PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H
+#define PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
 
 #include <GLES2/gl2.h>
 
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/texture_registrar.h>
 #include <pipewire/pipewire.h>
-#include <atomic>
-#include <memory>
-#include <mutex>
-#include <string>
-#include "PipewireGraph.h"
+
 /**
  * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter
  * texture.
@@ -105,17 +107,14 @@ class CameraStream {
   void HandleProcess();
 
   // Camera name
-  std::string camera_id_ = "";
+  std::string camera_id_;
   std::string camera_output_format = "YUV2";
   // PipeWire callbacks (static => dispatch to instance)
   static void OnStreamStateChanged(void* data,
                                    pw_stream_state old_state,
                                    pw_stream_state new_state,
                                    const char* error);
-  static void OnStreamParamChanged(void* data,
-                                   uint32_t id,
-                                   const spa_pod* param);
   static void OnStreamProcess(void* data);
 };
 
-#endif  // CAMERASTREAM_H
+#endif  // PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H_
