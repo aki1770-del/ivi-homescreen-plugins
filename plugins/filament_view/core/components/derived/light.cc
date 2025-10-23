@@ -9,6 +9,7 @@ namespace plugin_filament_view {
 ////////////////////////////////////////////////////////////////////////////
 Light::Light(const flutter::EncodableMap& params)
   : Component(std::string(__FUNCTION__)),
+    color(1.0f, 1.0f, 1.0f),
     m_Type(filament::LightManager::Type::DIRECTIONAL),
     m_fColorTemperature(6500.0f),
     m_fIntensity(100000.0f),
@@ -28,8 +29,8 @@ Light::Light(const flutter::EncodableMap& params)
     }
   }
 
-  Deserialize::DecodeParameterWithDefault(kColor, &m_szColor, params, std::string(""));
-  Deserialize::DecodeParameterWithDefault(kColorTemperature, &m_fColorTemperature, params, 6500.0f);
+  Deserialize::DecodeColor3WithDefault(kColor, &color, params, filament::math::float3(1, 1, 1));
+  Deserialize::DecodeParameterWithDefault(kColorTemperature, &m_fColorTemperature, params, 0.0f);
   Deserialize::DecodeParameterWithDefault(kIntensity, &m_fIntensity, params, 100000.0f);
   Deserialize::DecodeParameterWithDefault(
     kPosition, &m_f3Position, params, filament::math::float3(0, 0, 0)
@@ -54,7 +55,7 @@ Light::Light(const flutter::EncodableMap& params)
 ////////////////////////////////////////////////////////////////////////////
 void Light::debugPrint(const std::string& tabPrefix) const {
   spdlog::debug(tabPrefix + "Type: {}", static_cast<int>(m_Type));
-  spdlog::debug(tabPrefix + "Color: {}", m_szColor);
+  spdlog::debug(tabPrefix + "Color: r={}, g={}, b={}", color.r, color.g, color.b);
   spdlog::debug(tabPrefix + "Color Temperature: {}", m_fColorTemperature);
   spdlog::debug(tabPrefix + "Intensity: {}", m_fIntensity);
   spdlog::debug(

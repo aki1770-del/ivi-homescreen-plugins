@@ -46,6 +46,7 @@ Texture* HDRLoader::createTextureFromImage(Engine* engine, LinearImage* image) {
                        .levels(0xff)
                        .format(Texture::InternalFormat::R11F_G11F_B10F)
                        .sampler(Texture::Sampler::SAMPLER_2D)
+                       .usage(Texture::Usage::DEFAULT | Texture::Usage::GEN_MIPMAPPABLE)
                        .build(*engine);
 
   if (!texture) {

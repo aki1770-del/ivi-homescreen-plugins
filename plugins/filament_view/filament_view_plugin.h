@@ -31,6 +31,16 @@ namespace plugin_filament_view {
 
 class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, public PlatformView {
   public:
+    static std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> eventBus;
+    static std::map<int64_t, std::shared_ptr<std::promise<void>>> _eventCallbacks;
+
+    static int64_t _eventIdCounter;
+
+    static std::future<void> CallEvent(
+      const std::string& eventName,
+      std::initializer_list<std::pair<const char*, flutter::EncodableValue>> data
+    );
+
     static void RegisterWithRegistrar(
       flutter::PluginRegistrar* registrar,
       int32_t id,
@@ -114,8 +124,8 @@ class FilamentViewPlugin : public flutter::Plugin, public FilamentViewApi, publi
     ) override;
     std::optional<FlutterError> ChangeLightColorByGUID(
       const int64_t guid,
-      const std::string& color,
-      int64_t intensity
+      const std::vector<double>& color,
+      double intensity
     ) override;
     std::optional<FlutterError> EnqueueAnimation(const int64_t guid, int64_t animation_index)
       override;

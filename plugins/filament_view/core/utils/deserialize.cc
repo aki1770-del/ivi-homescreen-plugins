@@ -85,10 +85,38 @@ bool Deserialize::DecodeParameterWithDefault(
       it != params.end() && std::holds_alternative<flutter::EncodableMap>(it->second)) {
     *out_value = Format3(std::get<flutter::EncodableMap>(it->second));
     return true;
-  } else {
-    *out_value = default_value;
-    return false;
   }
+  *out_value = default_value;
+  return false;
+}
+
+bool Deserialize::DecodeColor3WithDefault(
+  const char* key,
+  filament::math::float3* out_value,
+  const flutter::EncodableMap& params,
+  const filament::math::float3& default_value
+) {
+  if (const auto it = params.find(flutter::EncodableValue(key));
+      it != params.end() && std::holds_alternative<std::vector<double>>(it->second)) {
+
+    const auto& colorList = std::get<std::vector<double>>(it->second);
+    if (colorList.size() >= 3) {
+      *out_value = {
+        static_cast<float>(colorList[0]),  //
+        static_cast<float>(colorList[1]),  //
+        static_cast<float>(colorList[2])   //
+      };
+      return true;
+    } else {
+      spdlog::warn(
+        "Color list for key '{}' does not have enough elements, it has {}", key, colorList.size()
+      );
+    }
+  } else {
+    spdlog::debug("Key '{}' not found or wrong type for color3", key);
+  }
+  *out_value = default_value;
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -155,17 +183,14 @@ void Deserialize::DecodeParameterWithDefaultInt64(
   const flutter::EncodableMap& params,
   const int64_t& default_value
 ) {
-  const auto it = params.find(flutter::EncodableValue(key));
-
-  if (it == params.end()) {
+  if (const auto it = params.find(flutter::EncodableValue(key));
+      it == params.end() || std::holds_alternative<std::monostate>(it->second)) {
     *out_value = default_value;
   } else if (std::holds_alternative<int64_t>(it->second)) {
     *out_value = std::get<int64_t>(it->second);
   } else if (std::holds_alternative<int32_t>(it->second)) {
     *out_value = std::get<int32_t>(it->second);
   } else {
-    // get type as string
-    // auto type = std::string(it->second.type().name());
     spdlog::debug("Unhandled type for key: {}", key);
     *out_value = default_value;
   }

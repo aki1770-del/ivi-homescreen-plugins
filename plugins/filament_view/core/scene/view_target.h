@@ -39,6 +39,8 @@ class ViewTarget {
     static constexpr size_t kNullViewId = -1;
     const size_t id;
 
+    std::shared_ptr<std::promise<void>> framePromise;
+
     ViewTarget(size_t id, int32_t top, int32_t left, FlutterDesktopEngineState* state);
 
     ~ViewTarget();
@@ -50,9 +52,13 @@ class ViewTarget {
     ViewTarget& operator=(const ViewTarget&) = delete;
 
     void setInitialized() {
+      spdlog::debug(
+        "ViewTarget::setInitialized (previously {})", initialized_ ? "already true" : "false"
+      );
       if (initialized_) return;
 
       initialized_ = true;
+      spdlog::debug("ViewTarget::setInitialized calling OnFrame for the first time!");
       OnFrame(this, nullptr, 0);
     }
 
@@ -160,6 +166,7 @@ class ViewTarget {
     } native_window_{};
 
     ::filament::SwapChain* fswapChain_{};
+    std::mutex frameLock_;
     ::filament::View* fview_{};
 
     // todo to be moved?
@@ -173,6 +180,9 @@ class ViewTarget {
     static void OnFrame(void* data, wl_callback* callback, uint32_t time);
 
     static const wl_callback_listener frame_listener;
+    int _prev_fps_counter = 0;
+    int _fps_counter = 0;
+    uint32_t _last_fps_reset_time = 0;
 
     void DrawFrame(uint32_t time);
 

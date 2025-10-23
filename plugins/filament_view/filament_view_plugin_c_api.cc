@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
+#include <filament_view_plugin.h>
 #include <include/filament_view/filament_view_plugin_c_api.h>
 
+#include <core/systems/derived/view_target_system.h>
+#include <core/systems/ecs.h>
+
+#include <asio/post.hpp>
 #include <flutter/plugin_registrar.h>
 
-#include <core/systems/ecs.h>
-#include <filament_view_plugin.h>
+#include <future>
 
 void FilamentViewPluginCApiRegisterWithRegistrar(
   FlutterDesktopPluginRegistrarRef registrar,
@@ -63,7 +67,25 @@ void FilamentViewPluginCApiRegisterWithRegistrar(
   if (const auto ecs = plugin_filament_view::ECSManager::GetInstance();
       ecs->getRunState() == plugin_filament_view::ECSManager::RunState::Initialized) {
     ecs->debugPrint();
-    ecs->update(0.16f);
     // ecs->StartMainLoop();
+
+    /*
+     *  Indirectly kicks off the rendering loop by processing ViewTarget init requests
+     *  This has to be done on the rendering thread, so we post a task
+     */
+    // TODO: take care of this as part of https://github.com/toyota-connected/fluorite/issues/10
+    auto viewTargetSystem = ecs->getSystem<plugin_filament_view::ViewTargetSystem>(
+      "FilamentViewPluginCApiRegisterWithRegistrar"
+    );
+    std::promise<void> startupPromise;
+    auto startupFuture = startupPromise.get_future();
+    post(*ecs->getStrand(), [&viewTargetSystem, &startupPromise] {
+      spdlog::debug("== Starting ViewTargetSystem frame rendering loops ==");
+
+      viewTargetSystem->ProcessMessages();
+      startupPromise.set_value();
+    });
+
+    startupFuture.wait();
   }
 }

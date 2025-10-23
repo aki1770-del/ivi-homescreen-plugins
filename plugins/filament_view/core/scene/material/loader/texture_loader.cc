@@ -55,13 +55,15 @@ filament::Texture* TextureLoader::createTextureFromImage(
   );
   const auto engine = filamentSystem->getFilamentEngine();
 
-  filament::Texture* texture = filament::Texture::Builder()
-                                 .width(static_cast<uint32_t>(w))
-                                 .height(static_cast<uint32_t>(h))
-                                 .levels(1)  // TODO should be param, backlogged
-                                 .format(internalFormat(type))
-                                 .sampler(filament::Texture::Sampler::SAMPLER_2D)
-                                 .build(*engine);
+  filament::Texture* texture =
+    filament::Texture::Builder()
+      .width(static_cast<uint32_t>(w))
+      .height(static_cast<uint32_t>(h))
+      .levels(1)  // TODO should be param, backlogged
+      .format(internalFormat(type))
+      .sampler(filament::Texture::Sampler::SAMPLER_2D)
+      .usage(filament::Texture::Usage::DEFAULT | filament::Texture::Usage::GEN_MIPMAPPABLE)
+      .build(*engine);
 
   if (!texture) {
     spdlog::error("Unable to create Filament Texture from image.");

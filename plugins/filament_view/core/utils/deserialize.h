@@ -135,6 +135,13 @@ class Deserialize {
       const filament::math::float3& default_value
     );
 
+    static bool DecodeColor3WithDefault(
+      const char* key,
+      filament::math::float3* out_value,
+      const flutter::EncodableMap& params,
+      const filament::math::float3& default_value
+    );
+
     static void DecodeParameterWithDefault(
       const char* key,
       filament::math::quatf* out_value,

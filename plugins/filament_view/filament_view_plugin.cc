@@ -35,6 +35,7 @@
 #include <event_sink.h>
 #include <event_stream_handler_functions.h>
 #include <messages.g.h>
+#include <method_result_functions.h>
 #include <plugins/common/common.h>
 
 class FlutterView;
@@ -51,6 +52,7 @@ bool m_bHasSetupRegistrar = false;
 void RunOnceCheckAndInitializeECSystems() {
   const auto ecs = ECSManager::GetInstance();
 
+  // Make sure we only initialize once
   if (ecs->getRunState() != ECSManager::RunState::NotInitialized) {
     return;
   }
@@ -136,6 +138,71 @@ void DeserializeDataAndSetupMessageChannels(
   animationSystem->setupMessageChannels(registrar, "plugin.filament_view.animation_info");
 }
 
+std::future<void> FilamentViewPlugin::CallEvent(
+  const std::string& eventName,
+  std::initializer_list<std::pair<const char*, flutter::EncodableValue>> data
+) {
+  int64_t eventId = _eventIdCounter++;
+
+  flutter::EncodableMap encodableMap;
+  encodableMap.insert(
+    {flutter::EncodableValue("_internal_eventId"), flutter::EncodableValue(eventId)}
+  );
+  for (const auto& [fst, snd] : data) {
+    encodableMap[flutter::EncodableValue(fst)] = snd;  // NOLINT
+  }
+
+  // Post and await promise
+  auto promise = std::make_shared<std::promise<void>>();
+  auto future = promise->get_future();
+
+  FilamentViewPlugin::_eventCallbacks[eventId] = std::move(promise);
+
+  spdlog::trace("InvokeMethod: calling event {}", eventName);
+  auto retval = std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(  //
+    [&, eventId](const auto* /*result*/) {
+      spdlog::trace("[EventBus] Event completed successfully");
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    },
+    [&, eventId](const auto& error_code, const auto& error_message, const auto* /*result*/) {
+      spdlog::error("[EventBus] Event failed with error code {}: {}", error_code, error_message);
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    },
+    [&, eventId]() {
+      spdlog::warn("[EventBus] Event was not implemented");
+      auto it = FilamentViewPlugin::_eventCallbacks.find(eventId);
+      if (it != FilamentViewPlugin::_eventCallbacks.end()) {
+        it->second->set_value();
+        FilamentViewPlugin::_eventCallbacks.erase(it);
+      }
+    }
+  );
+
+  FilamentViewPlugin::eventBus->InvokeMethod(
+    "call_" + eventName,
+    // wrap map in unique_ptr EncodableValue
+    std::make_unique<flutter::EncodableValue>(encodableMap), std::move(retval)
+  );
+  spdlog::trace("InvokeMethod done! Returning future");
+
+  return future;
+}
+
+std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> FilamentViewPlugin::eventBus =
+  nullptr;
+int64_t FilamentViewPlugin::_eventIdCounter = 0;
+std::map<int64_t, std::shared_ptr<std::promise<void>>> FilamentViewPlugin::_eventCallbacks;
+
+bool _hasLoadedOnce = false;
+
 //////////////////////////////////////////////////////////////////////////////////////////
 void FilamentViewPlugin::RegisterWithRegistrar(
   flutter::PluginRegistrar* registrar,
@@ -153,6 +220,14 @@ void FilamentViewPlugin::RegisterWithRegistrar(
   PlatformViewRemoveListener removeListener,
   void* platform_view_context
 ) {
+  // Make sure we only initialize once
+  if (_hasLoadedOnce) {
+    spdlog::warn("FilamentViewPlugin::RegisterWithRegistrar called more than once!");
+    return;
+  }
+
+  _hasLoadedOnce = true;
+
   pthread_setname_np(pthread_self(), "HomeScreenFilamentViewPlugin");
 
   const auto ecs = ECSManager::GetInstance();
@@ -252,7 +327,45 @@ FilamentViewPlugin::~FilamentViewPlugin() {
 
 //////////////////////////////////////////////////////////////////////////////////////////
 std::unique_ptr<flutter::EventSink<>> eventSink_;
-void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registrar) {
+void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registrar
+) {                                    // Set up event bus
+  FilamentViewPlugin::eventBus = std::make_unique<flutter::MethodChannel<>>(
+    registrar->messenger(),            //
+    "plugin.filament_view.event_bus",  //
+    &flutter::StandardMethodCodec::GetInstance()
+  );
+
+  FilamentViewPlugin::eventBus->SetMethodCallHandler(
+    [&](const auto& call, std::unique_ptr<flutter::MethodResult<>> result) {
+      const std::string& method = call.method_name();
+      spdlog::debug("[EventBus] Received method call: {}", method);
+
+      // Handle callbacks
+      if (method.rfind("ret_") == 0) {
+        const std::string eventName = method.substr(4);
+        spdlog::debug("[EventBus] Handling event: {}", eventName);
+
+        // Get event ID (EncodableValue<int64_t>)
+        const flutter::EncodableValue* callArg = call.arguments();
+        int64_t eventId = std::get<int64_t>(*callArg);
+        spdlog::debug("[EventBus] Event ID: {}", eventId);
+        // Fetch promise and set value
+        if (FilamentViewPlugin::_eventCallbacks.find(eventId)
+            != FilamentViewPlugin::_eventCallbacks.end()) {
+          FilamentViewPlugin::_eventCallbacks[eventId]->set_value();
+          FilamentViewPlugin::_eventCallbacks.erase(eventId);
+          result->Success();
+        } else {
+          spdlog::warn("[EventBus] Unhandled event ID: {}", eventId);
+          result->Error("Unhandled event ID");
+        }
+      } else {
+        spdlog::warn("[EventBus] Unhandled method call: {}", method);
+        result->Error("Unhandled method call");
+      }
+    }
+  );
+
   // Setup MethodChannel for readiness check
   const std::string readinessMethodChannel = "plugin.filament_view.readiness_checker";
 
@@ -264,35 +377,14 @@ void FilamentViewPlugin::setupMessageChannels(flutter::PluginRegistrar* registra
     [&](const flutter::MethodCall<>& call, const std::unique_ptr<flutter::MethodResult<>>& result) {
       if (call.method_name() == "isReady") {
         // Check readiness and respond
-        bool isReady = true;  // Replace with your actual readiness check
+        bool isReady = ECSManager::GetRunState() == ECSManager::RunState::Running;
+        spdlog::debug("Readiness check: {}", static_cast<int>(ECSManager::GetRunState()));
         result->Success(flutter::EncodableValue(isReady));
       } else {
         result->NotImplemented();
       }
     }
   );
-
-  // Setup EventChannel for readiness events
-  const std::string readinessEventChannel = "plugin.filament_view.readiness";
-
-  const auto eventChannel = std::make_unique<flutter::EventChannel<>>(
-    registrar->messenger(), readinessEventChannel, &flutter::StandardMethodCodec::GetInstance()
-  );
-
-  eventChannel->SetStreamHandler(std::make_unique<flutter::StreamHandlerFunctions<>>(
-    [&](
-      const flutter::EncodableValue* /* arguments */, std::unique_ptr<flutter::EventSink<>>&& events
-    ) -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = std::move(events);
-      sendReadyEvent();  // Proactively send "ready" event
-      return nullptr;
-    },
-    [&](const flutter::EncodableValue* /* arguments */)
-      -> std::unique_ptr<flutter::StreamHandlerError<>> {
-      eventSink_ = nullptr;
-      return nullptr;
-    }
-  ));
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -380,12 +472,16 @@ std::optional<FlutterError> FilamentViewPlugin::SetCameraOrbit(
   // Get camera component
   const auto camera = ecs->getComponent<Camera>(id);
 
+  const auto oldTarget = camera->orbitOriginEntity;
   camera->orbitOriginEntity = origin_entity_id;
   camera->orbitRotation = filament::math::quatf(
     orbit_rotation[3], orbit_rotation[0], orbit_rotation[1], orbit_rotation[2]
   );
 
-  spdlog::debug("Camera target set to entity: {}", origin_entity_id);
+  if (oldTarget != origin_entity_id) {
+    spdlog::debug("Camera target set to entity: {}", origin_entity_id);
+  }
+
   return std::nullopt;
 }
 
@@ -472,12 +568,12 @@ std::optional<FlutterError> FilamentViewPlugin::ChangeLightTransformByGUID(
 //////////////////////////////////////////////////////////////////////////////////////////
 std::optional<FlutterError> FilamentViewPlugin::ChangeLightColorByGUID(
   const int64_t guid,
-  const std::string& color,
-  const int64_t intensity
+  const std::vector<double>& color,
+  const double intensity
 ) {
   ECSMessage lightData;
   lightData.addData(ECSMessageType::ChangeSceneLightProperties, guid);
-  lightData.addData(ECSMessageType::ChangeSceneLightPropertiesColorValue, color);
+  lightData.addData(ECSMessageType::floatVec4, color);
   lightData.addData(
     ECSMessageType::ChangeSceneLightPropertiesIntensity, static_cast<float>(intensity)
   );

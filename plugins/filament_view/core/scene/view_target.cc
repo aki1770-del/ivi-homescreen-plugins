@@ -24,6 +24,8 @@
 #include <core/systems/ecs.h>
 #include <core/utils/vectorutils.h>
 
+#include <filament_view_plugin.h>
+
 #include <filament/Renderer.h>
 #include <filament/SwapChain.h>
 #include <filament/View.h>
@@ -50,9 +52,9 @@ using flutter::MethodResult;
 
 class Display;
 class FlutterView;
-class FilamentViewPlugin;
 
 namespace plugin_filament_view {
+
 ////////////////////////////////////////////////////////////////////////////
 ViewTarget::ViewTarget(
   const size_t id,
@@ -209,14 +211,13 @@ void ViewTarget::setupView(uint32_t width, uint32_t height) {
   // fview_->setAntiAliasing(filament::View::AntiAliasing::FXAA);
   // fview_->setAntiAliasing(filament::View::AntiAliasing::NONE);
 
-  // ambient occlusion is the cheapest effect that adds a lot of quality
-  fview_->setAmbientOcclusionOptions({.enabled = true, .ssct = {}});
-  // fview_->setAmbientOcclusion(filament::View::AmbientOcclusion::NONE);
-
   // fview_->setShadowingEnabled(false);
   // fview_->setScreenSpaceRefractionEnabled(false);
-  // fview_->setStencilBufferEnabled(false);
   // fview_->setDynamicLightingOptions(0.01, 1000.0f);
+
+  // NOTE: IMPORTANT! Filament doesn't allow stencil buffers on Metal/Vulkan
+  //       with Post-Processing enabled
+  fview_->setStencilBufferEnabled(false);
 
   ChangeQualitySettings(ViewTarget::ePredefinedQualitySettings::Ultra);
 
@@ -257,7 +258,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 100.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::LOW};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(false);
       break;
 
@@ -272,7 +272,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 250.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -290,7 +289,6 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 500.0f;
       settings.shadowType = filament::View::ShadowType::PCF;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
-      fview_->setStencilBufferEnabled(true);
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
 
@@ -300,7 +298,11 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.msaa.sampleCount = 4;
       settings.dsr = {.enabled = false};
       settings.screenSpaceReflections = {
-        .thickness = 0.05f, .bias = 0.5f, .maxDistance = 4.0f, .stride = 2.0f, .enabled = true
+        .thickness = 0.1f,     //
+        .bias = 0.5f,          //
+        .maxDistance = 12.0f,  //
+        .stride = 1.0f,        //
+        .enabled = true        //
       };
       settings.bloom = {.strength = 0.4f, .enabled = true};
       settings.postProcessingEnabled = true;
@@ -308,7 +310,20 @@ void ViewTarget::ChangeQualitySettings(const ePredefinedQualitySettings qualityS
       settings.dynamicLighting.zLightFar = 1000.0f;
       settings.renderQuality = {.hdrColorBuffer = filament::View::QualityLevel::HIGH};
       settings.shadowType = filament::View::ShadowType::PCF;
-      fview_->setStencilBufferEnabled(true);
+      settings.ssao = {};
+      settings.ssao.radius = 1.0f;
+      settings.ssao.power = 0.7f;
+      settings.ssao.bias = 0.01f;
+      settings.ssao.resolution = 1.0f;
+      settings.ssao.intensity = 2.0f;
+      settings.ssao.bilateralThreshold = 0.05f;
+      settings.ssao.quality = filament::View::QualityLevel::HIGH;
+      settings.ssao.lowPassFilter = filament::View::QualityLevel::HIGH;
+      settings.ssao.upsampling = filament::View::QualityLevel::HIGH;
+      settings.ssao.enabled = true;
+      settings.ssao.bentNormals = true;
+      settings.ssao.minHorizonAngleRad = 0.523599f;  // 30 degrees
+      settings.ssao.ssct = {.enabled = false};
       fview_->setScreenSpaceRefractionEnabled(true);
       break;
   }
@@ -532,7 +547,24 @@ void ViewTarget::DrawFrame(const uint32_t time) {
   if (deltaTime == 0.0) {
     deltaTime += 1.0;
   }
-  float fps = 1.0f / static_cast<float>(deltaTime);  // calculate FPS
+
+  float fps;
+  if (_last_fps_reset_time == 0) {
+    _last_fps_reset_time = time;
+    // calculate from delta time and round to int
+    _prev_fps_counter = static_cast<int>(1.0f / deltaTime);
+  }
+
+  _fps_counter++;
+
+  // Second overflown, reset counter
+  if (time - _last_fps_reset_time >= 1000) {
+    _last_fps_reset_time = time;
+    _prev_fps_counter = _fps_counter;
+    _fps_counter = 0;
+  }
+
+  fps = static_cast<float>(_prev_fps_counter);
 
   // spdlog::debug("[{}] deltaTime: {:.2f}ms", __FUNCTION__, deltaTime * 1000.0f);
 
@@ -552,7 +584,10 @@ void ViewTarget::DrawFrame(const uint32_t time) {
   // ECS Update
   const auto cpuUpdateStart = std::chrono::steady_clock::now();
   ecs->update(deltaTime);
-  const auto cpuUpdateDuration = std::chrono::steady_clock::now() - cpuUpdateStart;
+  double cpuFrametime = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - cpuUpdateStart
+  )
+                          .count();
   // spdlog::debug(
   //   "[{}] CPU frametime: {:.2f}ms", __FUNCTION__,
   //   std::chrono::duration<double, std::milli>(cpuUpdateDuration).count()
@@ -562,34 +597,44 @@ void ViewTarget::DrawFrame(const uint32_t time) {
 
   // Render the scene, unless the renderer wants to skip the frame.
   const auto gpuDrawStart = std::chrono::steady_clock::now();
+  // spdlog::debug("=== BEGIN FRAME ===");
   if (renderer->beginFrame(fswapChain_, time)) {
-
+    // Frame is being rendered
     // TODO(kerberjg): send kPreRenderFrame event, async with wait
-
-    filamentSystem->getFilamentRenderer()->render(fview_);
-
-    filamentSystem->getFilamentRenderer()->endFrame();
-
+    // spdlog::debug("=== RENDER FRAME ===");
+    renderer->render(fview_);
+    // spdlog::debug("=== END FRAME ===");
+    renderer->endFrame();
     // TODO(kerberjg): send kPostRenderFrame event, async with wait
+  } else {
+    // beginFrame failed, the renderer couldn't render this frame
+    // spdlog::error("[{}] BEGINFRAME FAILED!", __FUNCTION__);
   }
 
-  const auto gpuDrawDuration = std::chrono::steady_clock::now() - gpuDrawStart;
+  double gpuFrametime = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - gpuDrawStart
+  )
+                          .count();
 
-  SendFrameViewCallback(
+  // const auto scriptStart = std::chrono::steady_clock::now();
+
+  // spdlog::debug("[{}] Calling Script event: preRenderFrame", __FUNCTION__);
+  const auto scriptFuture = FilamentViewPlugin::CallEvent(
     kPreRenderFrame,
     {//
      std::make_pair(kParam_DeltaTime, EncodableValue(deltaTime)),
      std::make_pair(kParam_FPS, EncodableValue(fps)),
-     std::make_pair(
-       kParam_cpuFrametime,
-       EncodableValue(std::chrono::duration<double, std::milli>(cpuUpdateDuration).count())
-     ),
-     std::make_pair(
-       kParam_gpuFrametime,
-       EncodableValue(std::chrono::duration<double, std::milli>(gpuDrawDuration).count())
-     )
+     std::make_pair(kParam_cpuFrametime, EncodableValue(cpuFrametime)),
+     std::make_pair(kParam_gpuFrametime, EncodableValue(gpuFrametime))
     }
   );
+
+  scriptFuture.wait();
+  // const auto scriptDuration = std::chrono::steady_clock::now() - scriptStart;
+  // spdlog::debug(
+  //   "[{}] Script frametime: {:.2f}ms", __FUNCTION__,
+  //   std::chrono::duration<double, std::milli>(scriptDuration).count()
+  // );
 
   // spdlog::debug(
   //   "[{}] GPU frametime: {:.2f}ms", __FUNCTION__,
@@ -601,26 +646,55 @@ void ViewTarget::DrawFrame(const uint32_t time) {
 
 ////////////////////////////////////////////////////////////////////////////
 void ViewTarget::OnFrame(void* data, wl_callback* callback, const uint32_t time) {
-  post(*ECSManager::GetInstance()->getStrand(), [data, callback, time] {
-    const auto obj = static_cast<ViewTarget*>(data);
+  // lock surface
+  const auto obj = static_cast<ViewTarget*>(data);
+  std::lock_guard<std::mutex> lock(obj->frameLock_);
+
+  // Wait for previous frame to complete
+  // NOTE: this HAS to be done here, because the CallEvent above needs to complete on this thread
+  //       so we need to give the event loop a chance to process it
+  if (!!obj->framePromise) {
+    // spdlog::debug("[OnFrame], waiting for previous frame to finish...", __FUNCTION__);
+    obj->framePromise->get_future().wait();
+  } else {
+    // spdlog::debug("[OnFrame], first frame!", __FUNCTION__);
+  }
+
+  // Post and await promise
+  const auto promise = std::make_shared<std::promise<void>>();
+  obj->framePromise = promise;
+
+  // TODO: there's a 0.05ms lag when posting the task - SHOULDN'T HAPPEN!
+  // NOTE: let's use separate strands for work and rendering?
+  post(*ECSManager::GetInstance()->getStrand(), [data, obj, callback, time, promise] {
+    // spdlog::debug("[OnFrame] === (wl) callback start ===");
     obj->callback_ = nullptr;
 
+    // std::lock_guard<std::mutex> lock(obj->frameLock_);
     if (callback) {
       wl_callback_destroy(callback);
     }
 
-    obj->DrawFrame(time);
-
+    // spdlog::debug("=== (wl) surface frame ===");
     obj->callback_ = wl_surface_frame(obj->surface_);
     wl_callback_add_listener(obj->callback_, &ViewTarget::frame_listener, data);
+
+    obj->DrawFrame(time);
 
     // Z-Order
     // These do not need <seem> to need to be called every frame.
     // wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
-    wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
+    // spdlog::debug("=== (wl) subsurface position ===");
+    // wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
 
-    wl_surface_commit(obj->surface_);
+    // spdlog::debug("=== (wl) surface commit ===");
+    // NOTE: DO NOT CALL wl_surface_commit, it already happens elsewhere
+
+    // spdlog::debug("[OnFrame] === (wl) callback end ===");
+    promise->set_value();
   });
+
+  // DON'T wait for the future here (see above in this method)
 }
 
 ////////////////////////////////////////////////////////////////////////////

@@ -21,17 +21,17 @@
 namespace plugin_filament_view {
 
 ////////////////////////////////////////////////////////////////////////////
-Skybox::Skybox(std::string assetPath, std::string url, std::string color)
+Skybox::Skybox(std::string assetPath, std::string url, filament::math::float4 color)
   : assetPath_(std::move(assetPath)),
     url_(std::move(url)),
-    color_(std::move(color)) {}
+    color_(color) {}
 
 ////////////////////////////////////////////////////////////////////////////
 std::unique_ptr<Skybox> Skybox::Deserialize(const flutter::EncodableMap& params) {
   SPDLOG_TRACE("++Skybox::Skybox");
   std::optional<std::string> assetPath;
   std::optional<std::string> url;
-  std::optional<std::string> color;
+  std::optional<filament::math::float4> color;
   std::optional<bool> showSun;
   std::optional<int32_t> skyboxType;
 
@@ -43,8 +43,14 @@ std::unique_ptr<Skybox> Skybox::Deserialize(const flutter::EncodableMap& params)
       assetPath = std::get<std::string>(snd);
     } else if (key == "url" && std::holds_alternative<std::string>(snd)) {
       url = std::get<std::string>(snd);
-    } else if (key == "color" && std::holds_alternative<std::string>(snd)) {
-      color = std::get<std::string>(snd);
+    } else if (key == "color" && std::holds_alternative<std::vector<double>>(snd)) {
+      const auto& colorList = std::get<std::vector<double>>(snd);
+      color = filament::math::float4(
+        static_cast<float>(colorList[0]),  //
+        static_cast<float>(colorList[1]),  //
+        static_cast<float>(colorList[2]),  //
+        static_cast<float>(colorList[3])   //
+      );
     } else if (key == "showSun" && std::holds_alternative<bool>(snd)) {
       showSun = std::get<bool>(snd);
     } else if (key == "skyboxType" && std::holds_alternative<int32_t>(snd)) {
