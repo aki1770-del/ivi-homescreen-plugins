@@ -21,9 +21,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-//#include "_CameraManager.h"
-#include "plugins/common/common.h"
 #include "PipewireGraph.h"
+#include "plugins/common/common.h"
 
 extern "C" {
 #include <pipewire/pipewire.h>
@@ -70,7 +69,7 @@ void CameraPlugin::RegisterWithRegistrar(
 
 CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* /*messenger*/)
-  : mPreview(), registrar_(plugin_registrar) {
+    : mPreview(), registrar_(plugin_registrar) {
   if (!PipewireGraph::instance().initialize()) {
     spdlog::error("failed to initialize PipeWire manager!");
   }
@@ -85,19 +84,12 @@ ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
   const auto& mgr = PipewireGraph::instance();
 
   auto cameras = mgr.getCameraNodes();
-  for (auto camera : cameras ) {
-    spdlog::debug("[camera_plugin] detected camera:  (camera_id: {})",camera.id);
-    list.emplace_back(std::to_string(camera.id));
+  for (auto camera : cameras) {
+    spdlog::debug("[camera_plugin] detected camera:  (camera_id: {})",
+                  camera.id);
+    list.emplace_back(std::in_place_type<std::string>,
+                      std::to_string(camera.id));
   }
-  /*
-  auto cameras = mgr.getAvailableCameras();
-  //mgr.getAllNodes();
-  for (const auto& [id, name] : cameras) {
-    spdlog::debug("[camera_plugin] detected camera:  {} (camera_id: {})", name,
-                  id);
-    list.emplace_back(std::to_string(id));
-  }
-  */
   return ErrorOr<flutter::EncodableList>(std::move(list));
 }
 
@@ -173,8 +165,8 @@ void save_image_to_jpeg(const std::string& filename,
                         const int height,
                         const int channels,
                         const int quality) {
-  jpeg_compress_struct cinfo {};
-  jpeg_error_mgr jerr {};
+  jpeg_compress_struct cinfo{};
+  jpeg_error_mgr jerr{};
 
   // Setup error handling
   cinfo.err = jpeg_std_error(&jerr);
@@ -204,7 +196,8 @@ void save_image_to_jpeg(const std::string& filename,
   // Write scanlines
   JSAMPROW row_pointer;
   while (cinfo.next_scanline < cinfo.image_height) {
-    row_pointer = const_cast<JSAMPROW>(&image_data[cinfo.next_scanline * width * channels]);
+    row_pointer = const_cast<JSAMPROW>(
+        &image_data[cinfo.next_scanline * width * channels]);
     jpeg_write_scanlines(&cinfo, &row_pointer, 1);
   }
 
@@ -224,7 +217,7 @@ void CameraPlugin::Initialize(
   const auto camera_stream = TextureId_CameraStream[texture_id];
 
   result(ErrorOr(PlatformSize(camera_stream->camera_width(),
-                                            camera_stream->camera_height())));
+                              camera_stream->camera_height())));
   spdlog::debug("[camera_plugin] start the stream for camera_id: {}",
                 camera_stream->camera_id());
   camera_stream->Start(camera_stream->camera_id());

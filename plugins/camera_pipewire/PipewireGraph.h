@@ -3,11 +3,11 @@
 
 #include <pipewire/core.h>
 #include <pipewire/pipewire.h>
+#include <map>
+#include <mutex>
+#include <string>
 #include <unordered_map>
 #include <vector>
-#include <string>
-#include <mutex>
-#include <map>
 
 struct NodeInfo {
   uint32_t id;
@@ -23,7 +23,7 @@ struct PortInfo {
   uint32_t id;
   uint32_t node_id;
   std::string name;
-  std::string direction; // "Input" or "Output"
+  std::string direction;  // "Input" or "Output"
   std::string format;
 };
 
@@ -36,7 +36,7 @@ struct LinkInfo {
 };
 
 class PipewireGraph {
-public:
+ public:
   ~PipewireGraph();
   PipewireGraph();
   static PipewireGraph& instance();
@@ -61,13 +61,16 @@ public:
   size_t getCameraCount() const { return camera_nodes_.size(); }
   size_t getAudioCount() const { return audio_nodes_.size(); }
 
-private:
+ private:
   // Registry event handlers
-  static void onGlobal(void* data, uint32_t id, uint32_t permissions,
-                       const char* type, uint32_t version,
-                       const spa_dict* props);
-  static void onGlobalRemove(void* data, uint32_t id);
+  static void on_global(void* data,
+                        uint32_t id,
+                        uint32_t permissions,
+                        const char* type,
+                        uint32_t version,
+                        const struct spa_dict* props);
 
+  static void on_global_remove(void* data, uint32_t id);
   // Object-specific handlers
   void handleNodeInfo(uint32_t id, uint32_t version, const spa_dict* props);
   void handlePortInfo(uint32_t id, uint32_t version, const spa_dict* props);
@@ -79,10 +82,10 @@ private:
   static std::string getStringProperty(const spa_dict* props, const char* key);
 
   // PipeWire objects (not owned)
-  pw_thread_loop* thread_loop_{};
-  pw_context* context_{};
-  pw_core* core_{};
-  //pw_registry* registry_{};
+  pw_thread_loop* pw_thread_loop_ = nullptr;
+  pw_context* pw_context_ = nullptr;
+  pw_core* pw_core_ = nullptr;
+  pw_registry* pw_registry_ = nullptr;
 
   // Registry listener
   spa_hook registry_listener_{};
@@ -90,6 +93,7 @@ private:
 
   // Optimized storage - separate containers for fast filtered access
   mutable std::mutex data_mutex_;
+  mutable std::mutex mutex_;
 
   // Primary storage - indexed by ID for O(1) lookup
   std::unordered_map<uint32_t, NodeInfo> nodes_;
@@ -108,21 +112,6 @@ private:
   static void printNodeInfo(const NodeInfo& node);
   static void printPortInfo(const PortInfo& port);
   static void printLinkInfo(const LinkInfo& link);
-
-  static void on_global(void* data,
-                      uint32_t id,
-                      uint32_t permissions,
-                      const char* type,
-                      uint32_t version,
-                      const struct spa_dict* props);
-
-  static void on_global_remove(void* data, uint32_t id);
-
-  pw_thread_loop* pw_thread_loop_ = nullptr;
-  pw_context* pw_context_ = nullptr;
-  pw_core* pw_core_ = nullptr;
-  pw_registry* pw_registry_ = nullptr;
-  mutable std::mutex mutex_;
 };
 
-#endif // PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H
+#endif  // PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H

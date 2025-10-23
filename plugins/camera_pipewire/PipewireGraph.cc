@@ -56,20 +56,19 @@ void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
 
   // Rebuild filtered views efficiently
   self->camera_nodes_.erase(
-    std::remove_if(self->camera_nodes_.begin(), self->camera_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    self->camera_nodes_.end());
+      std::remove_if(self->camera_nodes_.begin(), self->camera_nodes_.end(),
+                     [id](const NodeInfo& node) { return node.id == id; }),
+      self->camera_nodes_.end());
 
   self->audio_nodes_.erase(
-    std::remove_if(self->audio_nodes_.begin(), self->audio_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    self->audio_nodes_.end());
+      std::remove_if(self->audio_nodes_.begin(), self->audio_nodes_.end(),
+                     [id](const NodeInfo& node) { return node.id == id; }),
+      self->audio_nodes_.end());
 
   self->all_nodes_.erase(
-    std::remove_if(self->all_nodes_.begin(), self->all_nodes_.end(),
-                   [id](const NodeInfo& node) { return node.id == id; }),
-    self->all_nodes_.end());
-
+      std::remove_if(self->all_nodes_.begin(), self->all_nodes_.end(),
+                     [id](const NodeInfo& node) { return node.id == id; }),
+      self->all_nodes_.end());
 }
 
 bool PipewireGraph::initialize() {
@@ -122,7 +121,8 @@ bool PipewireGraph::initialize() {
             .global = on_global,
             .global_remove = on_global_remove,
         };
-        pw_registry_add_listener(pw_registry_, &registry_listener_, &registry_events, this);
+        pw_registry_add_listener(pw_registry_, &registry_listener_,
+                                 &registry_events, this);
       }
     }
   }
@@ -164,7 +164,6 @@ void PipewireGraph::shutdown() {
       pw_context_ = nullptr;
     }
     spa_hook_remove(&registry_listener_);
-
   }
   pw_thread_loop_unlock(pw_thread_loop_);
 
@@ -178,8 +177,9 @@ void PipewireGraph::shutdown() {
   spdlog::info("[PipewireGraph] Shutdown completed");
 }
 
-void PipewireGraph::handleNodeInfo(const uint32_t id, const uint32_t version,
-                                     const spa_dict* props) {
+void PipewireGraph::handleNodeInfo(const uint32_t id,
+                                   const uint32_t version,
+                                   const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   NodeInfo node{};
@@ -204,8 +204,9 @@ void PipewireGraph::handleNodeInfo(const uint32_t id, const uint32_t version,
   printNodeInfo(node);
 }
 
-void PipewireGraph::handlePortInfo(const uint32_t id, uint32_t /* version */,
-                                     const spa_dict* props) {
+void PipewireGraph::handlePortInfo(const uint32_t id,
+                                   uint32_t /* version */,
+                                   const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   PortInfo port{};
@@ -222,8 +223,9 @@ void PipewireGraph::handlePortInfo(const uint32_t id, uint32_t /* version */,
   printPortInfo(port);
 }
 
-void PipewireGraph::handleLinkInfo(const uint32_t id, uint32_t /* version */,
-                                     const spa_dict* props) {
+void PipewireGraph::handleLinkInfo(const uint32_t id,
+                                   uint32_t /* version */,
+                                   const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   LinkInfo link{};
@@ -234,10 +236,14 @@ void PipewireGraph::handleLinkInfo(const uint32_t id, uint32_t /* version */,
   const char* output_port = spa_dict_lookup(props, PW_KEY_LINK_OUTPUT_PORT);
   const char* input_port = spa_dict_lookup(props, PW_KEY_LINK_INPUT_PORT);
 
-  if (output_node) link.output_node_id = std::stoul(output_node);
-  if (input_node) link.input_node_id = std::stoul(input_node);
-  if (output_port) link.output_port_id = std::stoul(output_port);
-  if (input_port) link.input_port_id = std::stoul(input_port);
+  if (output_node)
+    link.output_node_id = std::stoul(output_node);
+  if (input_node)
+    link.input_node_id = std::stoul(input_node);
+  if (output_port)
+    link.output_port_id = std::stoul(output_port);
+  if (input_port)
+    link.input_port_id = std::stoul(input_port);
 
   links_[id] = link;
   active_links_.push_back(link);
@@ -247,18 +253,18 @@ void PipewireGraph::handleLinkInfo(const uint32_t id, uint32_t /* version */,
 
 bool PipewireGraph::isCamera(const spa_dict* props) {
   const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
-  return media_class && (strstr(media_class, "Video/Source") ||
-                        strstr(media_class, "Camera"));
+  return media_class &&
+         (strstr(media_class, "Video/Source") || strstr(media_class, "Camera"));
 }
 
 bool PipewireGraph::isAudio(const spa_dict* props) {
   const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
   return media_class && (strstr(media_class, "Audio/Source") ||
-                        strstr(media_class, "Audio/Sink"));
+                         strstr(media_class, "Audio/Sink"));
 }
 
 std::string PipewireGraph::getStringProperty(const spa_dict* props,
-                                              const char* key) {
+                                             const char* key) {
   const char* value = spa_dict_lookup(props, key);
   return value ? std::string(value) : std::string();
 }
@@ -284,7 +290,8 @@ const NodeInfo* PipewireGraph::getNodeById(const uint32_t id) const {
   return (it != nodes_.end()) ? &it->second : nullptr;
 }
 
-const std::vector<PortInfo>& PipewireGraph::getPortsForNode(const uint32_t node_id) const {
+const std::vector<PortInfo>& PipewireGraph::getPortsForNode(
+    const uint32_t node_id) const {
   std::lock_guard lock(data_mutex_);
   const auto it = node_ports_.find(node_id);
   static const std::vector<PortInfo> empty_vector;
@@ -297,16 +304,24 @@ const std::vector<LinkInfo>& PipewireGraph::getActiveLinks() const {
 }
 
 void PipewireGraph::printNodeInfo(const NodeInfo& node) {
-  spdlog::info("[PipewireGraph] Node ID: {} | Name: {} | Media Class: {} | Factory: {} | Version: {} | Camera: {} | Audio: {}",
-               node.id, node.name, node.media_class, node.factory_name, node.version, node.is_camera, node.is_audio);
+  spdlog::info(
+      "[PipewireGraph] Node ID: {} | Name: {} | Media Class: {} | Factory: {} "
+      "| Version: {} | Camera: {} | Audio: {}",
+      node.id, node.name, node.media_class, node.factory_name, node.version,
+      node.is_camera, node.is_audio);
 }
 
 void PipewireGraph::printPortInfo(const PortInfo& port) {
-  spdlog::info("[PipewireGraph] Port ID: {} | Node ID: {} | Name: {} | Direction: {} | Format: {}",
-               port.id, port.node_id, port.name, port.direction, port.format);
+  spdlog::info(
+      "[PipewireGraph] Port ID: {} | Node ID: {} | Name: {} | Direction: {} | "
+      "Format: {}",
+      port.id, port.node_id, port.name, port.direction, port.format);
 }
 
 void PipewireGraph::printLinkInfo(const LinkInfo& link) {
-  spdlog::info("[PipewireGraph] Link ID: {} | Output Node: {} | Input Node: {} | Output Port: {} | Input Port: {}",
-               link.id, link.output_node_id, link.input_node_id, link.output_port_id, link.input_port_id);
+  spdlog::info(
+      "[PipewireGraph] Link ID: {} | Output Node: {} | Input Node: {} | Output "
+      "Port: {} | Input Port: {}",
+      link.id, link.output_node_id, link.input_node_id, link.output_port_id,
+      link.input_port_id);
 }
