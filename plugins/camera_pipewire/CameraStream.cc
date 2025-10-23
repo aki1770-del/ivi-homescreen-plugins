@@ -361,8 +361,8 @@ void save_image_to_jpeg(const std::string& filename,
                         int height,
                         int channels,
                         int quality) {
-  struct jpeg_compress_struct cinfo{};
-  struct jpeg_error_mgr jerr{};
+  struct jpeg_compress_struct cinfo {};
+  struct jpeg_error_mgr jerr {};
 
   // Setup error handling
   cinfo.err = jpeg_std_error(&jerr);
@@ -520,9 +520,7 @@ void CameraStream::PauseStream() const {
   }
 
   pw_thread_loop_lock(loop);
-  {
-    pw_stream_set_active(pw_stream_, false);
-  }
+  { pw_stream_set_active(pw_stream_, false); }
   pw_thread_loop_unlock(loop);
 }
 
@@ -543,9 +541,7 @@ void CameraStream::ResumeStream() const {
   }
 
   pw_thread_loop_lock(loop);
-  {
-    pw_stream_set_active(pw_stream_, true);
-  }
+  { pw_stream_set_active(pw_stream_, true); }
   pw_thread_loop_unlock(loop);
 }
 std::optional<std::string> CameraStream::GetFilePathForPicture() {
