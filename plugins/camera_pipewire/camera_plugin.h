@@ -20,8 +20,6 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar.h>
 #include <flutter/plugin_registrar_homescreen.h>
-#include <pipewire/core.h>
-#include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
 #include "CameraStream.h"
 #include "event_channel.h"

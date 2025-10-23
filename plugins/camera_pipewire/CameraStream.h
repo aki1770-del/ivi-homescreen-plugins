@@ -26,7 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
-
+#include "PipewireGraph.h"
 /**
  * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter
  * texture.
