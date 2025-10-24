@@ -19,17 +19,16 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <sstream>
 
-#include <spdlog/spdlog.h>
+#include "plugins/common/logging.h"
 
 namespace plugin_common_sdbus {
 
 void Utils::append_property(const sdbus::Variant& value,
                             std::ostringstream& os) {
   const std::string_view type = value.peekValueType();
-  os << "[";
-  os << std::string(type);
-  os << "] ";
+  os << "[" << std::string(type) << "] ";
   if (const auto it = type_map_.find(type); it != type_map_.end()) {
     it->second(value, os);
   } else {
@@ -41,9 +40,7 @@ void Utils::append_properties(
     const std::map<sdbus::MemberName, sdbus::Variant>& props,
     std::ostringstream& os) {
   for (auto& [key, value] : props) {
-    os << "  ";
-    os << key;
-    os << ": ";
+    os << "  " << key << ": ";
     append_property(value, os);
   }
 }
@@ -52,9 +49,7 @@ void Utils::append_properties(
     const std::map<std::string, sdbus::Variant>& props,
     std::ostringstream& os) {
   for (auto& [key, value] : props) {
-    os << "  ";
-    os << key;
-    os << ": ";
+    os << "  " << key << ": ";
     append_property(value, os);
   }
 }
