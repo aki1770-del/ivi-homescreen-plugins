@@ -64,7 +64,6 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
   }
 
   portal_manager_ = std::make_shared<PortalManager>(*io_context_);
-  portal_manager_->initialize();
   cache_manager_ = CacheManager::Builder()
                        .WithDatabasePath("/tmp/flatpak_plugin.db")
                        .WithCachePolicy(CachePolicy::CACHE_FIRST)

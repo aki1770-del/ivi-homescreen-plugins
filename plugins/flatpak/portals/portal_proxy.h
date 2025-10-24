@@ -18,11 +18,9 @@
 #ifndef PORTAL_PROXY_H
 #define PORTAL_PROXY_H
 
-#include <sdbus-c++/sdbus-c++.h>
-
 #include <memory>
 
-#include "portal_bus.h"
+#include "plugins/common/sdbus/sdbus.h"
 #include "portal_interface.h"
 
 /**
@@ -32,7 +30,7 @@
  */
 class PortalProxy {
  public:
-  explicit PortalProxy(PortalBus& bus);
+  explicit PortalProxy();
 
   ~PortalProxy() = default;
 
@@ -42,7 +40,8 @@ class PortalProxy {
 
  private:
   std::map<PortalInterface, std::weak_ptr<sdbus::IProxy>> proxy_cache_;
-  PortalBus& bus_;
+  plugin_common_sdbus::SessionDBus& session_bus_;
+  plugin_common_sdbus::SystemDBus& system_bus_;
   std::mutex cache_mutex_;
 };
 

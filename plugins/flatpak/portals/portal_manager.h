@@ -19,7 +19,7 @@
 #define PORTAL_MANAGER_H
 
 #include "asio/io_context.hpp"
-#include "portal_bus.h"
+#include "plugins/common/sdbus/sdbus.h"
 #include "portal_context.h"
 #include "portal_proxy.h"
 
@@ -28,8 +28,6 @@ class PortalManager {
  public:
   explicit PortalManager(asio::io_context& io_context);
   ~PortalManager() = default;
-
-  void initialize();
 
   void register_application(const std::string& app_id,
                             const std::vector<PortalInterface>& interfaces);
@@ -45,11 +43,11 @@ class PortalManager {
 
  private:
   asio::io_context& io_context_;
-  PortalBus portal_bus_;
-  PortalProxy portal_proxy_;
+  std::unique_ptr<PortalProxy> portal_proxy_;
   std::map<std::string, PortalContext> app_context_;
   std::mutex app_mutex_;
 
+  PortalProxy& GetPortalProxy();
   PortalContext& get_app_context(const std::string& app_id);
 };
 }  // namespace flatpak_plugin

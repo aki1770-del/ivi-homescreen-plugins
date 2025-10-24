@@ -23,10 +23,13 @@
 namespace flatpak_plugin {
 
 PortalManager::PortalManager(asio::io_context& io_context)
-    : io_context_(io_context), portal_proxy_(portal_bus_) {}
+    : io_context_(io_context), portal_proxy_(std::make_unique<PortalProxy>()) {}
 
-void PortalManager::initialize() {
-  portal_bus_.init();
+PortalProxy& PortalManager::GetPortalProxy() {
+  if (!portal_proxy_) {
+    portal_proxy_ = std::make_unique<PortalProxy>();
+  }
+  return *portal_proxy_;
 }
 
 void PortalManager::register_application(
@@ -39,7 +42,7 @@ void PortalManager::register_application(
 
   // create proxies for all interfaces
   for (auto& interface : interfaces) {
-    auto proxy = portal_proxy_.GetProxy(interface);
+    auto proxy = GetPortalProxy().GetProxy(interface);
     Context.owned_proxies.emplace_back(proxy);
   }
   app_context_.emplace(app_id, std::move(Context));
@@ -64,8 +67,8 @@ void PortalManager::call_method(const std::string& app_id,
                                 Args&&... args) {
   auto& Context = get_app_context(app_id);
 
-  asio::post(*Context.strand, [=, this]() {
-    auto proxy = portal_proxy_.GetProxy(interface);
+  asio::post(*Context.strand, [=]() {
+    auto proxy = GetPortalProxy().GetProxy(interface);
     proxy->callMethodAsync(method_name)
         .onInterface(interface.interface_name)
         .withArguments(std::forward<Args>(args)...)

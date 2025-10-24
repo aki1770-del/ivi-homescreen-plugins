@@ -27,7 +27,7 @@
 enum class BUS_TYPE { SESSION, SYSTEM };
 
 /**
- * \brief This struct represents portal interface description.
+ * \brief This struct represents the portal interface description.
  */
 struct PortalInterface {
   std::string interface_name;

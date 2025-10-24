@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-pkg_check_modules(FLATPAK_DEPS IMPORTED_TARGET REQUIRED flatpak libxml-2.0 zlib sdbus-c++)
+pkg_check_modules(FLATPAK_DEPS IMPORTED_TARGET REQUIRED flatpak libxml-2.0 zlib)
 
 add_subdirectory(cache)
 
@@ -29,7 +29,6 @@ add_library(plugin_flatpak STATIC
         release.cc
         screenshot.cc
         portals/portal_manager.cc
-        portals/portal_bus.cc
         portals/portal_proxy.cc
 )
 target_include_directories(plugin_flatpak PRIVATE include)

@@ -17,12 +17,16 @@
 
 #include "portal_proxy.h"
 
-PortalProxy::PortalProxy(PortalBus& bus) : bus_(bus) {}
+#include "spdlog/spdlog.h"
+
+PortalProxy::PortalProxy()
+    : session_bus_(plugin_common_sdbus::SessionDBus::Instance()),
+      system_bus_(plugin_common_sdbus::SystemDBus::Instance()) {}
 
 std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(
     const PortalInterface& portal) {
   std::lock_guard<std::mutex> lock(cache_mutex_);
-  // check if proxy alive is it'd not create one
+  // check if proxy alive, if it is, it'd not create one
 
   auto it = proxy_cache_.find(portal);
   if (it != proxy_cache_.end()) {
@@ -32,14 +36,35 @@ std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(
     // clean cache if it's died
     proxy_cache_.erase(it);
   }
+  try {
+    sdbus::IConnection* bus = nullptr;
+    if (portal.bus_type == BUS_TYPE::SYSTEM) {
+      bus = &system_bus_.GetConnection();
+    } else if (portal.bus_type == BUS_TYPE::SESSION) {
+      bus = &session_bus_.GetConnection();
+    }
 
-  auto& bus = bus_.getConnection(portal.bus_type);
-  auto new_proxy =
-      sdbus::createProxy(bus, portal.service_name, portal.object_path);
+    if (!bus) {
+      throw std::runtime_error("Invalid bus type");
+    }
 
-  auto proxy = std::shared_ptr<sdbus::IProxy>(new_proxy.release());
-  proxy_cache_[portal] = proxy;
-  return proxy;
+    auto new_proxy =
+        sdbus::createProxy(*bus, sdbus::ServiceName{portal.service_name},
+                           sdbus::ObjectPath{portal.object_path});
+
+    auto proxy = std::shared_ptr<sdbus::IProxy>(std::move(new_proxy));
+    proxy_cache_[portal] = proxy;
+    return proxy;
+  } catch (const sdbus::Error& e) {
+    spdlog::error(
+        "[FlatpakPlugin] sdbus::Error Failed to create proxy for {}: {}",
+        portal.service_name, e.what());
+    throw;
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Failed to create proxy for {}: {}",
+                  portal.service_name, e.what());
+    throw;
+  }
 }
 
 void PortalProxy::cleanup() {

@@ -18,8 +18,6 @@
 #ifndef PORTAL_CONTEXT_H
 #define PORTAL_CONTEXT_H
 
-#include <sdbus-c++/AdaptorInterfaces.h>
-
 #include <memory>
 #include <string>
 #include <utility>

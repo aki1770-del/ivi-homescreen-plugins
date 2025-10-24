@@ -550,9 +550,7 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto guard = std::make_shared<PromiseGuard>();
   guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
   auto future = guard->promise->get_future();
-
   auto portal_manager = std::make_shared<PortalManager>(*io_context);
-  portal_manager->initialize();
 
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
@@ -595,7 +593,6 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
   auto work_guard = asio::make_work_guard(*io_context);
   auto strand = std::make_shared<asio::io_context::strand>(*io_context);
   auto portal_manager = std::make_shared<PortalManager>(*io_context);
-  portal_manager->initialize();
 
   std::thread io_thread([io_context]() {
     pthread_setname_np(pthread_self(), "asio_worker");
