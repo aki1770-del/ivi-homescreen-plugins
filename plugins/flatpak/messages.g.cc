@@ -25,6 +25,7 @@
 #include <flutter/standard_message_codec.h>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -914,6 +915,33 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
   {
     BasicMessageChannel<> channel(
         binary_messenger,
+        "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.getApplicationsUpdate" +
+            prepended_suffix,
+        &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler(
+          [api](const EncodableValue& message,
+                const flutter::MessageReply<EncodableValue>& reply) {
+            try {
+              ErrorOr<EncodableList> output = api->GetApplicationsUpdate();
+              if (output.has_error()) {
+                reply(WrapError(output.error()));
+                return;
+              }
+              EncodableList wrapped;
+              wrapped.emplace_back(std::move(output).TakeValue());
+              reply(EncodableValue(std::move(wrapped)));
+            } catch (const std::exception& exception) {
+              reply(WrapError(exception.what()));
+            }
+          });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
+    BasicMessageChannel<> channel(
+        binary_messenger,
         "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.getApplicationsRemote" +
             prepended_suffix,
         &GetCodec());
@@ -964,14 +992,15 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 return;
               }
               const auto& id_arg = std::get<std::string>(encodable_id_arg);
-              ErrorOr<bool> output = api->ApplicationInstall(id_arg);
-              if (output.has_error()) {
-                reply(WrapError(output.error()));
-                return;
-              }
-              EncodableList wrapped;
-              wrapped.emplace_back(std::move(output).TakeValue());
-              reply(EncodableValue(std::move(wrapped)));
+              api->ApplicationInstall(id_arg, [reply](ErrorOr<bool>&& output) {
+                if (output.has_error()) {
+                  reply(WrapError(output.error()));
+                  return;
+                }
+                EncodableList wrapped;
+                wrapped.emplace_back(std::move(output).TakeValue());
+                reply(EncodableValue(std::move(wrapped)));
+              });
             } catch (const std::exception& exception) {
               reply(WrapError(exception.what()));
             }
@@ -998,14 +1027,51 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 return;
               }
               const auto& id_arg = std::get<std::string>(encodable_id_arg);
-              ErrorOr<bool> output = api->ApplicationUninstall(id_arg);
-              if (output.has_error()) {
-                reply(WrapError(output.error()));
+              api->ApplicationUninstall(
+                  id_arg, [reply](ErrorOr<bool>&& output) {
+                    if (output.has_error()) {
+                      reply(WrapError(output.error()));
+                      return;
+                    }
+                    EncodableList wrapped;
+                    wrapped.emplace_back(std::move(output).TakeValue());
+                    reply(EncodableValue(std::move(wrapped)));
+                  });
+            } catch (const std::exception& exception) {
+              reply(WrapError(exception.what()));
+            }
+          });
+    } else {
+      channel.SetMessageHandler(nullptr);
+    }
+  }
+  {
+    BasicMessageChannel<> channel(
+        binary_messenger,
+        "dev.flutter.pigeon.flatpak_flutter.FlatpakApi.applicationUpdate" +
+            prepended_suffix,
+        &GetCodec());
+    if (api != nullptr) {
+      channel.SetMessageHandler(
+          [api](const EncodableValue& message,
+                const flutter::MessageReply<EncodableValue>& reply) {
+            try {
+              const auto& args = std::get<EncodableList>(message);
+              const auto& encodable_id_arg = args.at(0);
+              if (encodable_id_arg.IsNull()) {
+                reply(WrapError("id_arg unexpectedly null."));
                 return;
               }
-              EncodableList wrapped;
-              wrapped.emplace_back(std::move(output).TakeValue());
-              reply(EncodableValue(std::move(wrapped)));
+              const auto& id_arg = std::get<std::string>(encodable_id_arg);
+              api->ApplicationUpdate(id_arg, [reply](ErrorOr<bool>&& output) {
+                if (output.has_error()) {
+                  reply(WrapError(output.error()));
+                  return;
+                }
+                EncodableList wrapped;
+                wrapped.emplace_back(std::move(output).TakeValue());
+                reply(EncodableValue(std::move(wrapped)));
+              });
             } catch (const std::exception& exception) {
               reply(WrapError(exception.what()));
             }
@@ -1032,11 +1098,7 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 return;
               }
               const auto& id_arg = std::get<std::string>(encodable_id_arg);
-              const auto& encodable_configuration_arg = args.at(1);
-              const auto* configuration_arg =
-                  std::get_if<EncodableMap>(&encodable_configuration_arg);
-              ErrorOr<bool> output =
-                  api->ApplicationStart(id_arg, configuration_arg);
+              ErrorOr<bool> output = api->ApplicationStart(id_arg);
               if (output.has_error()) {
                 reply(WrapError(output.error()));
                 return;

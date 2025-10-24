@@ -28,6 +28,8 @@ add_library(plugin_flatpak STATIC
         icon.cc
         release.cc
         screenshot.cc
+        portals/portal_manager.cc
+        portals/portal_proxy.cc
 )
 target_include_directories(plugin_flatpak PRIVATE include)
 target_compile_options(plugin_flatpak PRIVATE

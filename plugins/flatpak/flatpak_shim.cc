@@ -24,18 +24,33 @@
 #include <rapidjson/prettywriter.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+#include <sys/wait.h>
 #include <zlib.h>
 
 #include <fstream>
 
 #include "plugins/common/common.h"
 
+#include <flutter/event_channel.h>
+#include <flutter/event_stream_handler.h>
+#include <flutter/event_stream_handler_functions.h>
+#include <flutter/standard_method_codec.h>
 #include "appstream_catalog.h"
+#include "asio/bind_executor.hpp"
+#include "asio/post.hpp"
 #include "component.h"
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
+#include "plugins/flatpak/flatpak_plugin.h"
+#include "portals/portal_manager.h"
+#include "screenshot.h"
 
 namespace flatpak_plugin {
+
+std::mutex FlatpakShim::monitor_mutex_;
+std::map<std::string, std::shared_ptr<FlatpakShim::MonitorSession>>
+    FlatpakShim::active_sessions_;
+
 std::optional<std::string> FlatpakShim::getOptionalAttribute(
     const xmlNode* node,
     const char* attrName) {
@@ -530,6 +545,91 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsInstalled() {
   return ErrorOr<flutter::EncodableList>(std::move(application_list));
 }
 
+ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsUpdate() {
+  flutter::EncodableList application_list;
+  GError* error = nullptr;
+  auto system_installation = flatpak_installation_new_system(nullptr, &error);
+  auto user_installation = flatpak_installation_new_user(nullptr, &error);
+  const auto refs = flatpak_installation_list_installed_refs_for_update(
+      system_installation, nullptr, &error);
+  if (error) {
+    spdlog::error(
+        "[FlatpakPlugin] Error listing system installed refs for update: {}",
+        error->message);
+    g_clear_error(&error);
+    return ErrorOr<flutter::EncodableList>(FlutterError(
+        "INSTALLATION_ERROR", "Failed to get system installed refs"));
+  }
+  const auto user_refs = flatpak_installation_list_installed_refs_for_update(
+      user_installation, nullptr, &error);
+
+  if (error) {
+    spdlog::error(
+        "[FlatpakPlugin] Error listing user installed refs for update: {}",
+        error->message);
+    g_clear_error(&error);
+    return ErrorOr<flutter::EncodableList>(FlutterError(
+        "INSTALLATION_ERROR", "Failed to get user installed refs"));
+  }
+  g_ptr_array_extend_and_steal(refs, user_refs);
+
+  for (guint i = 0; i < refs->len; i++) {
+    const auto ref =
+        static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+
+    // All refs will be added to list including runtimes
+    const auto appdata_name = flatpak_installed_ref_get_appdata_name(ref);
+    const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
+    const auto appdata_summary = flatpak_installed_ref_get_appdata_summary(ref);
+    const auto appdata_version = flatpak_installed_ref_get_appdata_version(ref);
+    const auto appdata_origin = flatpak_installed_ref_get_origin(ref);
+    const auto appdata_license = flatpak_installed_ref_get_appdata_license(ref);
+    const auto deploy_dir = flatpak_installed_ref_get_deploy_dir(ref);
+    const auto content_rating_type =
+        flatpak_installed_ref_get_appdata_content_rating_type(ref);
+    const auto latest_commit = flatpak_installed_ref_get_latest_commit(ref);
+    const auto eol = flatpak_installed_ref_get_eol(ref);
+    const auto eol_rebase = flatpak_installed_ref_get_eol_rebase(ref);
+
+    // Build full application ID
+    const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+    const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
+    std::string full_app_id = "app/";
+    full_app_id += (ref_name ? ref_name : "");
+    full_app_id += "/";
+    full_app_id += (ref_arch ? ref_arch : "");
+    full_app_id += "/";
+    full_app_id += (ref_branch ? ref_branch : "");
+
+    flutter::EncodableList subpath_list;
+    if (const auto subpaths = flatpak_installed_ref_get_subpaths(ref);
+        subpaths != nullptr) {
+      for (auto sub_path = subpaths; *sub_path != nullptr; ++sub_path) {
+        subpath_list.emplace_back(static_cast<const char*>(*sub_path));
+      }
+    }
+
+    application_list.emplace_back(flutter::CustomEncodableValue(Application(
+        appdata_name ? std::string(appdata_name)
+                     : (ref_name ? std::string(ref_name) : ""),
+        full_app_id, appdata_summary ? std::string(appdata_summary) : "",
+        appdata_version ? std::string(appdata_version) : "",
+        appdata_origin ? std::string(appdata_origin) : "",
+        appdata_license ? std::string(appdata_license) : "",
+        static_cast<int64_t>(flatpak_installed_ref_get_installed_size(ref)),
+        deploy_dir ? std::string(deploy_dir) : "",
+        flatpak_installed_ref_get_is_current(ref),
+        content_rating_type ? std::string(content_rating_type) : "",
+        get_content_rating_map(ref),
+        latest_commit ? std::string(latest_commit) : "",
+        eol ? std::string(eol) : "", eol_rebase ? std::string(eol_rebase) : "",
+        subpath_list, get_metadata_as_string(ref),
+        get_appdata_as_string(ref))));
+  }
+  g_ptr_array_unref(refs);
+  return ErrorOr<flutter::EncodableList>(std::move(application_list));
+}
+
 ErrorOr<Installation> FlatpakShim::GetUserInstallation() {
   GError* error = nullptr;
   const auto installation = flatpak_installation_new_user(nullptr, &error);
@@ -646,7 +746,7 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
                                         "Failed to get user installation"));
     }
 
-    // Check if remote already exists
+    // Check if a remote already exists
     auto existing_remote = flatpak_installation_get_remote_by_name(
         installation, configuration.name().c_str(), nullptr, nullptr);
     if (existing_remote) {
@@ -774,208 +874,476 @@ ErrorOr<bool> FlatpakShim::RemoteRemove(const std::string& id) {
   }
 }
 
-ErrorOr<bool> FlatpakShim::ApplicationInstall(const std::string& id) {
-  try {
-    if (id.empty()) {
-      return ErrorOr<bool>(
-          FlutterError("INVALID_APP_ID", "Application ID is required"));
-    }
+void FlatpakShim::ApplicationInstall(
+    const std::string& id,
+    const std::function<void(ErrorOr<bool>)>& callback) {
+  if (id.empty()) {
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("INVALID_APP_ID", "Application ID is required")));
+    });
+    return;
+  }
 
-    spdlog::debug("[FlatpakPlugin] Installing application: {}", id);
+  spdlog::info("[FlatpakPlugin] Installing application: {}", id);
+  GError* error = nullptr;
+
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  if (error) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
+                  err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR",
+                                          "Failed to get user installation")));
+    });
+    return;
+  }
+
+  GObjectGuard<FlatpakInstallation> installation_guard(installation);
+
+  auto remote_and_ref = find_app_in_remotes(installation, id);
+  if (remote_and_ref.first.empty()) {
+    spdlog::error("[FlatpakPlugin] Application '{}' not found in any remote",
+                  id);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("APP_NOT_FOUND", "Application not found in remotes")));
+    });
+    return;
+  }
+
+  auto found_ref = flatpak_ref_parse(remote_and_ref.second.c_str(), &error);
+  if (error || !found_ref) {
+    spdlog::error("[FlatpakPlugin] Failed to parse found ref: {}",
+                  remote_and_ref.second);
+    if (error) {
+      g_clear_error(&error);
+    }
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("APP_NOT_FOUND", "Failed to parse found ref")));
+    });
+    return;
+  }
+
+  GObjectGuard<FlatpakRef> found_ref_guard(found_ref);
+
+  spdlog::info("[FlatpakPlugin] Found app '{}' in remote '{}' as '{}'", id,
+               remote_and_ref.first, remote_and_ref.second);
+
+  auto remote_name = remote_and_ref.first;
+  auto ref_name = remote_and_ref.second;
+
+  // Check if the app is already installed
+  auto installed_ref = flatpak_installation_get_installed_ref(
+      installation, FLATPAK_REF_KIND_APP, flatpak_ref_get_name(found_ref),
+      flatpak_ref_get_arch(found_ref), flatpak_ref_get_branch(found_ref),
+      nullptr, &error);
+
+  if (error && error->code != FLATPAK_ERROR_NOT_INSTALLED) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Error checking installed ref: {}", err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback, err_msg]() {
+      callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR", err_msg)));
+    });
+    return;
+  }
+  if (error) {
+    g_clear_error(&error);
+  }
+
+  if (installed_ref) {
+    spdlog::info("[FlatpakPlugin] Application '{}' is already installed", id);
+    g_object_unref(installed_ref);
+    asio::post(*strand_, [callback]() { callback(ErrorOr<bool>(true)); });
+    return;
+  }
+
+  spdlog::info("[FlatpakPlugin] Starting TWO-PHASE installation for: {}", id);
+
+  FlatpakTransaction* transaction =
+      flatpak_transaction_new_for_installation(installation, nullptr, &error);
+
+  if (error) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("TRANSACTION_ERROR", "Error creating transaction")));
+    });
+    return;
+  }
+
+  GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
+
+  // Install only dependencies
+  flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_disable_dependencies(transaction, FALSE);
+  flatpak_transaction_set_disable_related(transaction, TRUE);
+  flatpak_transaction_set_disable_prune(transaction, TRUE);
+  flatpak_transaction_set_reinstall(transaction, FALSE);
+  flatpak_transaction_set_no_pull(transaction, FALSE);
+  flatpak_transaction_set_no_deploy(transaction, FALSE);
+
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   this);
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), this);
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   this);
+
+  gboolean install = flatpak_transaction_add_install(
+      transaction, remote_name.c_str(), ref_name.c_str(), nullptr, &error);
+
+  if (error || !install) {
+    std::string error_msg = error ? error->message : "Failed to add install";
+    spdlog::error("[FlatpakPlugin] Failed to add install operation: {}",
+                  error_msg);
+    if (error) {
+      g_clear_error(&error);
+    }
+    asio::post(*strand_, [callback, error_msg]() {
+      callback(ErrorOr<bool>(FlutterError("ADD_INSTALL_ERROR", error_msg)));
+    });
+    return;
+  }
+
+  spdlog::info("[FlatpakPlugin] Added install operation, starting transaction");
+
+  // Notify Flutter that the installation is starting
+  flutter::EncodableMap start_event;
+  start_event[flutter::EncodableValue("type")] =
+      flutter::EncodableValue("installation_started");
+  start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
+  start_event[flutter::EncodableValue("ref")] =
+      flutter::EncodableValue(ref_name);
+  SendTransactionEvent(start_event);
+
+  // transfer ownership to thread
+  auto transaction_raw = transaction_guard.release();
+  auto installation_raw = installation_guard.release();
+  auto found_ref_raw = found_ref_guard.release();
+
+  auto self = shared_from_this();
+
+  // run transaction in a detached thread
+  std::thread([self, transaction_raw, callback, ref_name, remote_name,
+               strand_ptr = strand_, installation_raw, found_ref_raw]() {
+    pthread_setname_np(pthread_self(), "flatpak-install");
+
     GError* error = nullptr;
 
-    auto installation = flatpak_installation_new_user(nullptr, &error);
+    spdlog::info(
+        "[FlatpakPlugin] ===== PHASE 1: Installing dependencies =====");
+    gboolean success =
+        flatpak_transaction_run(transaction_raw, nullptr, &error);
+    spdlog::info("[FlatpakPlugin] Phase 1 transaction returned: {}",
+                 success ? "TRUE" : "FALSE");
+
+    std::string err_msg;
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                    error->message);
-      g_clear_error(&error);
-      return ErrorOr<bool>(FlutterError("INSTALLATION_ERROR",
-                                        "Failed to get user installation"));
-    }
-
-    // Try parsing as a full ref first
-    auto app_ref = flatpak_ref_parse(id.c_str(), &error);
-    if (!error && app_ref) {
-      const char* app_name = flatpak_ref_get_name(app_ref);
-      const char* app_arch = flatpak_ref_get_arch(app_ref);
-      const char* app_branch = flatpak_ref_get_branch(app_ref);
-
-      spdlog::debug(
-          "[FlatpakPlugin] Parsed ref - name: {}, arch: {}, branch: {}",
-          app_name, app_arch, app_branch);
-
-      std::string remote_name =
-          find_remote_for_app(installation, app_name, app_arch, app_branch);
-      if (remote_name.empty()) {
-        spdlog::error("[FlatpakPlugin] Failed to find remote for app: {}",
-                      app_name);
-        g_object_unref(app_ref);
-        g_object_unref(installation);
-        return ErrorOr<bool>(
-            FlutterError("INSTALL_FAILED", "Failed to find remote for app"));
-      }
-
-      FlatpakInstalledRef* installed_ref = flatpak_installation_install(
-          installation, remote_name.c_str(), FLATPAK_REF_KIND_APP, app_name,
-          app_arch, app_branch, nullptr, nullptr, nullptr, &error);
-
-      if (error) {
-        spdlog::error("[FlatpakPlugin] Failed to install '{}': {}", id,
-                      error->message);
-        g_object_unref(app_ref);
-        g_object_unref(installation);
-        g_clear_error(&error);
-        return ErrorOr<bool>(
-            FlutterError("INSTALL_FAILED", "Failed to install application"));
-      }
-
-      if (installed_ref) {
-        spdlog::info("[FlatpakPlugin] Successfully installed: {}", id);
-        g_object_unref(installed_ref);
-      }
-      g_object_unref(app_ref);
-      g_object_unref(installation);
-      return ErrorOr<bool>(true);
-    }
-
-    if (error) {
+      err_msg = error->message;
+      spdlog::error("[FlatpakPlugin] Phase 1 error: {}", err_msg);
       g_clear_error(&error);
     }
 
-    // Search in all remotes for this app ID
-    auto remote_and_ref = find_app_in_remotes(installation, id);
-    if (remote_and_ref.first.empty()) {
-      spdlog::error("[FlatpakPlugin] Application '{}' not found in any remote",
-                    id);
-      g_object_unref(installation);
-      return ErrorOr<bool>(
-          FlutterError("APP_NOT_FOUND", "Application not found in remotes"));
+    if (!success) {
+      spdlog::error("[FlatpakPlugin] Phase 1 (dependencies) failed");
+      asio::post(*strand_ptr, [self, callback, err_msg, transaction_raw,
+                               found_ref_raw, installation_raw]() {
+        callback(ErrorOr<bool>(FlutterError(
+            "INSTALL_FAILED", "Dependency installation failed: " + err_msg)));
+        g_object_unref(transaction_raw);
+        g_object_unref(installation_raw);
+        g_object_unref(found_ref_raw);
+      });
+      return;
     }
 
-    auto found_ref = flatpak_ref_parse(remote_and_ref.second.c_str(), &error);
-    if (error || !found_ref) {
-      spdlog::error("[FlatpakPlugin] Failed to parse found ref: {}",
-                    remote_and_ref.second);
-      g_object_unref(installation);
-      if (error) {
-        g_clear_error(&error);
+    // check if the app was already installed
+    spdlog::info(
+        "[FlatpakPlugin] Phase 1 complete, checking if app was installed...");
+
+    // wait for filesystem sync
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    // Check if the app is now installed, it might have been installed in phase
+    // 1
+    GError* check_error = nullptr;
+    auto fresh_install = flatpak_installation_new_user(nullptr, &check_error);
+    bool app_already_installed = false;
+
+    if (!check_error && fresh_install) {
+      const auto check_ref = flatpak_installation_get_installed_ref(
+          fresh_install, FLATPAK_REF_KIND_APP,
+          flatpak_ref_get_name(found_ref_raw),
+          flatpak_ref_get_arch(found_ref_raw),
+          flatpak_ref_get_branch(found_ref_raw), nullptr, &check_error);
+
+      if (check_ref) {
+        spdlog::info(
+            "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase 2.");
+        g_object_unref(check_ref);
+        app_already_installed = true;
       }
-      return ErrorOr<bool>(
-          FlutterError("APP_NOT_FOUND", "Failed to parse found ref"));
+      if (check_error) {
+        g_clear_error(&check_error);
+      }
+      g_object_unref(fresh_install);
     }
 
-    const char* app_name = flatpak_ref_get_name(found_ref);
-    const char* app_arch = flatpak_ref_get_arch(found_ref);
-    const char* app_branch = flatpak_ref_get_branch(found_ref);
+    // If the app is already installed, skip Phase 2
+    if (app_already_installed) {
+      spdlog::info("[FlatpakPlugin] Installation complete after Phase 1");
+      asio::post(*strand_ptr, [self, callback, ref_name, transaction_raw,
+                               found_ref_raw, installation_raw]() {
+        spdlog::info("[FlatpakPlugin] Application '{}' successfully installed",
+                     ref_name);
+        callback(ErrorOr<bool>(true));
 
-    spdlog::info("[FlatpakPlugin] Found app '{}' in remote '{}' as '{}'", id,
-                 remote_and_ref.first, remote_and_ref.second);
-
-    FlatpakInstalledRef* installed_ref = flatpak_installation_install(
-        installation, remote_and_ref.first.c_str(), FLATPAK_REF_KIND_APP,
-        app_name, app_arch, app_branch, nullptr, nullptr, nullptr, &error);
-
-    if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to install '{}': {}", id,
-                    error->message);
-      g_object_unref(found_ref);
-      g_object_unref(installation);
-      g_clear_error(&error);
-      return ErrorOr<bool>(
-          FlutterError("INSTALL_FAILED", "Failed to install application"));
+        g_object_unref(transaction_raw);
+        g_object_unref(installation_raw);
+        g_object_unref(found_ref_raw);
+      });
+      return;
     }
 
-    if (installed_ref) {
-      spdlog::info("[FlatpakPlugin] Successfully installed: {}", id);
-      g_object_unref(installed_ref);
+    // create a new transaction for just the app, with dependencies disabled
+    GError* phase2_error = nullptr;
+    FlatpakTransaction* phase2_transaction =
+        flatpak_transaction_new_for_installation(installation_raw, nullptr,
+                                                 &phase2_error);
+
+    if (phase2_error || !phase2_transaction) {
+      std::string phase2_err = phase2_error
+                                   ? phase2_error->message
+                                   : "Failed to create phase 2 transaction";
+      spdlog::error("[FlatpakPlugin] Phase 2 transaction creation failed: {}",
+                    phase2_err);
+      if (phase2_error)
+        g_clear_error(&phase2_error);
+
+      asio::post(*strand_ptr, [self, callback, phase2_err, transaction_raw,
+                               found_ref_raw, installation_raw]() {
+        callback(ErrorOr<bool>(FlutterError("TRANSACTION_ERROR", phase2_err)));
+        g_object_unref(transaction_raw);
+        g_object_unref(installation_raw);
+        g_object_unref(found_ref_raw);
+      });
+      return;
+    }
+    flatpak_transaction_set_no_interaction(phase2_transaction, TRUE);
+    flatpak_transaction_set_disable_dependencies(phase2_transaction, TRUE);
+    flatpak_transaction_set_disable_related(phase2_transaction, TRUE);
+    flatpak_transaction_set_disable_prune(phase2_transaction, TRUE);
+    flatpak_transaction_set_reinstall(phase2_transaction, FALSE);
+    flatpak_transaction_set_no_pull(phase2_transaction, FALSE);
+    flatpak_transaction_set_no_deploy(phase2_transaction, FALSE);
+
+    g_signal_connect(phase2_transaction, "new-operation",
+                     G_CALLBACK(FlatpakShim::OnNewOperation), self.get());
+    g_signal_connect(phase2_transaction, "operation-done",
+                     G_CALLBACK(FlatpakShim::OnOperationComplete), self.get());
+    g_signal_connect(phase2_transaction, "operation-error",
+                     G_CALLBACK(FlatpakShim::OnOperationError), self.get());
+    gboolean app_added = flatpak_transaction_add_install(
+        phase2_transaction, remote_name.c_str(), ref_name.c_str(), nullptr,
+        &phase2_error);
+
+    if (phase2_error || !app_added) {
+      std::string add_err =
+          phase2_error ? phase2_error->message : "Failed to add app install";
+      spdlog::error("[FlatpakPlugin] Failed to add app to phase 2: {}",
+                    add_err);
+      if (phase2_error)
+        g_clear_error(&phase2_error);
+      g_object_unref(phase2_transaction);
+
+      asio::post(*strand_ptr, [self, callback, add_err, transaction_raw,
+                               found_ref_raw, installation_raw]() {
+        callback(ErrorOr<bool>(FlutterError("ADD_INSTALL_ERROR", add_err)));
+        g_object_unref(transaction_raw);
+        g_object_unref(installation_raw);
+        g_object_unref(found_ref_raw);
+      });
+      return;
+    }
+    gboolean phase2_success =
+        flatpak_transaction_run(phase2_transaction, nullptr, &phase2_error);
+    std::string phase2_err_msg;
+    if (phase2_error) {
+      phase2_err_msg = phase2_error->message;
+      spdlog::error("[FlatpakPlugin] Phase 2 error: {}", phase2_err_msg);
+      g_clear_error(&phase2_error);
     }
 
-    g_object_unref(found_ref);
-    g_object_unref(installation);
-    return ErrorOr<bool>(true);
-  } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception installing application: {}",
-                  e.what());
-    return ErrorOr<bool>(FlutterError("INSTALL_FAILED", "Exception occurred"));
-  }
+    g_object_unref(phase2_transaction);
+
+    if (!phase2_success) {
+      asio::post(*strand_ptr, [self, callback, phase2_err_msg, transaction_raw,
+                               found_ref_raw, installation_raw]() {
+        callback(ErrorOr<bool>(FlutterError(
+            "INSTALL_FAILED", "App installation failed: " + phase2_err_msg)));
+        g_object_unref(transaction_raw);
+        g_object_unref(installation_raw);
+        g_object_unref(found_ref_raw);
+      });
+      return;
+    }
+
+    spdlog::info("[FlatpakPlugin] verifying installation...");
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    bool verified = false;
+    GError* verify_error = nullptr;
+    auto fresh_installation =
+        flatpak_installation_new_user(nullptr, &verify_error);
+
+    if (!verify_error && fresh_installation) {
+      auto verify_ref = flatpak_installation_get_installed_ref(
+          fresh_installation, FLATPAK_REF_KIND_APP,
+          flatpak_ref_get_name(found_ref_raw),
+          flatpak_ref_get_arch(found_ref_raw),
+          flatpak_ref_get_branch(found_ref_raw), nullptr, &verify_error);
+
+      if (verify_ref) {
+        spdlog::info("[FlatpakPlugin] Installation verified: {}", ref_name);
+        g_object_unref(verify_ref);
+        verified = true;
+      } else if (verify_error) {
+        spdlog::error("[FlatpakPlugin] Verification failed: {}",
+                      verify_error->message);
+        g_clear_error(&verify_error);
+      }
+
+      g_object_unref(fresh_installation);
+    }
+
+    asio::post(*strand_ptr, [self, callback, verified, ref_name,
+                             transaction_raw, found_ref_raw,
+                             installation_raw]() {
+      if (verified) {
+        spdlog::info(
+            "[FlatpakPlugin] Application '{}' successfully installed and "
+            "verified",
+            ref_name);
+        callback(ErrorOr<bool>(true));
+      } else {
+        spdlog::error(
+            "[FlatpakPlugin] Installation completed but verification failed");
+        callback(ErrorOr<bool>(
+            FlutterError("INSTALL_VERIFICATION_FAILED",
+                         "Installation completed but app not found")));
+      }
+
+      g_object_unref(transaction_raw);
+      g_object_unref(installation_raw);
+      g_object_unref(found_ref_raw);
+    });
+  }).detach();
 }
 
-ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
-  try {
-    if (id.empty()) {
-      return ErrorOr<bool>(
-          FlutterError("INVALID_APP_ID", "Application ID is required"));
-    }
+void FlatpakShim::ApplicationUninstall(
+    const std::string& id,
+    const std::function<void(ErrorOr<bool>)>& callback) {
+  if (id.empty()) {
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("INVALID_APP_ID", "Application ID is required")));
+    });
+    return;
+  }
 
-    spdlog::debug("[FlatpakPlugin] Uninstalling application: {}", id);
-    GError* error = nullptr;
+  spdlog::debug("[FlatpakPlugin] Uninstalling application: {}", id);
+  GError* error = nullptr;
 
-    auto installation = flatpak_installation_new_user(nullptr, &error);
-    if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                    error->message);
-      g_clear_error(&error);
-      return ErrorOr<bool>(FlutterError("INSTALLATION_ERROR",
-                                        "Failed to get user installation"));
-    }
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  if (error) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
+                  err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(FlutterError("UNINSTALLATION_ERROR",
+                                          "Failed to get user installation")));
+    });
+    return;
+  }
 
-    // Try parsing as a full ref first
-    auto app_ref = flatpak_ref_parse(id.c_str(), &error);
-    if (!error && app_ref) {
-      const char* app_name = flatpak_ref_get_name(app_ref);
-      const char* app_arch = flatpak_ref_get_arch(app_ref);
-      const char* app_branch = flatpak_ref_get_branch(app_ref);
+  GObjectGuard<FlatpakInstallation> installation_guard(installation);
+  FlatpakTransaction* transaction =
+      flatpak_transaction_new_for_installation(installation, nullptr, &error);
+  if (error) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("TRANSACTION_ERROR", "Error creating transaction")));
+    });
+    return;
+  }
 
-      spdlog::debug(
-          "[FlatpakPlugin] Parsed ref - name: {}, arch: {}, branch: {}",
-          app_name, app_arch, app_branch);
+  GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
+  flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_disable_dependencies(transaction, FALSE);
+  flatpak_transaction_set_disable_related(transaction, FALSE);
+  flatpak_transaction_set_disable_prune(transaction, FALSE);
 
-      gboolean result = flatpak_installation_uninstall(
-          installation, FLATPAK_REF_KIND_APP, app_name, app_arch, app_branch,
-          nullptr, nullptr, nullptr, &error);
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   this);
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), this);
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   this);
 
-      if (error) {
-        spdlog::error("[FlatpakPlugin] Failed to uninstall '{}': {}", id,
-                      error->message);
-        g_object_unref(app_ref);
-        g_object_unref(installation);
-        g_clear_error(&error);
-        return ErrorOr<bool>(FlutterError("UNINSTALL_FAILED",
-                                          "Failed to uninstall application"));
-      }
+  std::string found_app_name;
+  std::string found_arch;
+  std::string found_branch;
+  bool app_found = false;
 
-      if (result) {
-        spdlog::info("[FlatpakPlugin] Successfully uninstalled: {}", id);
-      }
-      g_object_unref(app_ref);
-      g_object_unref(installation);
-      return ErrorOr(static_cast<bool>(result));
-    }
+  // Try parsing as a full ref first
+  auto app_ref = flatpak_ref_parse(id.c_str(), &error);
+  if (!error && app_ref) {
+    found_app_name = flatpak_ref_get_name(app_ref);
+    found_arch = flatpak_ref_get_arch(app_ref);
+    found_branch = flatpak_ref_get_branch(app_ref);
+    app_found = true;
 
-    if (error) {
-      g_clear_error(&error);
-    }
+    spdlog::debug("[FlatpakPlugin] Parsed ref - name: {}, arch: {}, branch: {}",
+                  found_app_name.c_str(), found_arch.c_str(),
+                  found_branch.c_str());
 
-    // Search in installed apps
+    g_object_unref(app_ref);
+  }
+
+  if (error) {
+    g_clear_error(&error);
+  }
+
+  // If not found as a full ref, search in installed apps
+  if (!app_found) {
     spdlog::debug("[FlatpakPlugin] Searching installed apps for: {}", id);
 
     const auto refs =
         flatpak_installation_list_installed_refs(installation, nullptr, &error);
     if (error) {
+      std::string err_msg = error->message;
       spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                    error->message);
+                    err_msg);
       g_clear_error(&error);
-      g_object_unref(installation);
-      return ErrorOr<bool>(
-          FlutterError("UNINSTALL_ERROR", "Failed to get installed apps"));
+      asio::post(*strand_, [callback]() {
+        callback(ErrorOr<bool>(
+            FlutterError("UNINSTALL_ERROR", "Failed to get installed apps")));
+      });
+      return;
     }
 
-    std::string found_app_name;
-    std::string found_arch;
-    std::string found_branch;
-    bool app_found = false;
-
-    // Search for exact match first, then partial match
+    // Search for the exact match first, then a partial match
     for (guint i = 0; i < refs->len && !app_found; i++) {
       const auto ref =
           static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
@@ -986,7 +1354,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
 
       if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
         std::string ref_name_str(ref_name);
-        // Check for exact match
+        // Check for the exact match
         if (ref_name_str == id) {
           found_app_name = ref_name_str;
           found_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
@@ -997,7 +1365,7 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
       }
     }
 
-    // If no exact match, try partial match
+    // If no exact match, try a partial match
     if (!app_found) {
       for (guint i = 0; i < refs->len; i++) {
         const auto ref =
@@ -1023,60 +1391,376 @@ ErrorOr<bool> FlatpakShim::ApplicationUninstall(const std::string& id) {
     }
 
     g_ptr_array_unref(refs);
-
-    if (!app_found) {
-      spdlog::error(
-          "[FlatpakPlugin] Application '{}' not found in installed "
-          "applications",
-          id);
-      g_object_unref(installation);
-      return ErrorOr<bool>(
-          FlutterError("APP_NOT_FOUND", "Application not found"));
-    }
-
-    spdlog::info(
-        "[FlatpakPlugin] Found installed app '{}' -> name: {}, arch: {}, "
-        "branch: {}",
-        id, found_app_name, found_arch, found_branch);
-
-    gboolean result = flatpak_installation_uninstall(
-        installation, FLATPAK_REF_KIND_APP, found_app_name.c_str(),
-        found_arch.c_str(), found_branch.c_str(), nullptr, nullptr, nullptr,
-        &error);
-
-    if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to uninstall '{}': {}", id,
-                    error->message);
-      g_object_unref(installation);
-      g_clear_error(&error);
-      return ErrorOr<bool>(
-          FlutterError("UNINSTALL_FAILED", "Failed to uninstall application"));
-    }
-
-    if (result) {
-      spdlog::info("[FlatpakPlugin] Successfully uninstalled: {}", id);
-    }
-    g_object_unref(installation);
-    return ErrorOr<bool>(static_cast<bool>(result));
-  } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception uninstalling application: {}",
-                  e.what());
-    return ErrorOr<bool>(
-        FlutterError("UNINSTALL_FAILED", "Exception occurred"));
   }
+
+  if (!app_found) {
+    spdlog::error(
+        "[FlatpakPlugin] Application '{}' not found in installed "
+        "applications",
+        id);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("APP_NOT_FOUND", "Application not found")));
+    });
+    return;
+  }
+
+  const std::string ref =
+      "app/" + found_app_name + "/" + found_arch + "/" + found_branch;
+  auto found_ref = flatpak_ref_parse(ref.c_str(), &error);
+  if (error || !found_ref) {
+    std::string err_msg = error ? error->message : "Failed to parse ref";
+    spdlog::error("[FlatpakPlugin] Failed to parse ref '{}': {}", ref, err_msg);
+    if (error) {
+      g_clear_error(&error);
+    }
+    asio::post(*strand_, [callback, err_msg]() {
+      callback(ErrorOr<bool>(FlutterError("PARSE_ERROR", err_msg)));
+    });
+    return;
+  }
+
+  GObjectGuard<FlatpakRef> found_ref_guard(found_ref);
+  spdlog::info(
+      "[FlatpakPlugin] Found installed app '{}' -> name: {}, arch: {}, "
+      "branch: {}",
+      id, found_app_name, found_arch, found_branch);
+
+  const gboolean uninstall =
+      flatpak_transaction_add_uninstall(transaction, ref.c_str(), &error);
+
+  if (error || !uninstall) {
+    std::string err_msg = error ? error->message : "Failed to add uninstall";
+    spdlog::error("[FlatpakPlugin] Failed to uninstall '{}': {}", id, err_msg);
+    if (error) {
+      g_clear_error(&error);
+    }
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("UNINSTALL_FAILED", "Failed to uninstall application")));
+    });
+    return;
+  }
+
+  spdlog::info(
+      "[FlatpakPlugin] Added uninstall operation, starting transaction");
+
+  // Notify Flutter that the uninstallation is starting
+  flutter::EncodableMap start_event;
+  start_event[flutter::EncodableValue("type")] =
+      flutter::EncodableValue("update_started");
+  start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
+  start_event[flutter::EncodableValue("ref")] =
+      flutter::EncodableValue(found_app_name);
+  SendTransactionEvent(start_event);
+
+  // transfer ownership to thread
+  auto transaction_raw = transaction_guard.release();
+  auto installation_raw = installation_guard.release();
+  auto found_ref_raw = found_ref_guard.release();
+  auto self = shared_from_this();
+
+  std::thread([self, transaction_raw, installation_raw, found_app_name,
+               strand_ptr = strand_, found_ref_raw, callback]() {
+    pthread_setname_np(pthread_self(), "flatpak-uninstall");
+
+    GError* error = nullptr;
+    spdlog::info("[FlatpakPlugin] Starting uninstall transaction...");
+
+    // Run transaction with the dedicated context
+    gboolean success =
+        flatpak_transaction_run(transaction_raw, nullptr, &error);
+
+    std::string err_msg;
+    if (error) {
+      err_msg = error->message;
+      spdlog::error("[FlatpakPlugin] Uninstall transaction failed: {}",
+                    err_msg);
+      g_clear_error(&error);
+    }
+
+    if (success) {
+      spdlog::info("[FlatpakPlugin] Uninstall {} transaction completed",
+                   found_app_name);
+    } else {
+      spdlog::error("[FlatpakPlugin] Uninstall {} transaction failed",
+                    found_app_name);
+    }
+
+    // Cleanup GObjects
+    g_object_unref(transaction_raw);
+    g_object_unref(installation_raw);
+    g_object_unref(found_ref_raw);
+
+    // Post result back to original strand
+    asio::post(*strand_ptr, [self, callback, success, err_msg]() {
+      if (success) {
+        callback(ErrorOr<bool>(true));
+      } else {
+        callback(ErrorOr<bool>(
+            FlutterError("UNINSTALL_FAILED", "Uninstall failed: " + err_msg)));
+      }
+    });
+  }).detach();
+}
+
+void FlatpakShim::ApplicationUpdate(
+    const std::string& id,
+    const std::function<void(ErrorOr<bool>)>& callback) {
+  if (id.empty()) {
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("INVALID_APP_ID", "Application ID is required")));
+    });
+    return;
+  }
+
+  spdlog::debug("[FlatpakPlugin] Updating application: {}", id);
+  // Check if the application is installed first
+  FlatpakInstalledRef* installed = nullptr;
+  std::string full_ref;
+  GError* error = nullptr;
+  auto installation = flatpak_installation_new_user(nullptr, &error);
+  if (error) {
+    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
+                  error->message);
+    g_clear_error(&error);
+    callback(ErrorOr<bool>(
+        FlutterError("UPDATE_ERROR", "Failed to get user installation")));
+  }
+
+  auto refs =
+      flatpak_installation_list_installed_refs(installation, nullptr, &error);
+  if (error) {
+    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
+                  error->message);
+    g_clear_error(&error);
+    g_object_unref(installation);
+    callback(ErrorOr<bool>(
+        FlutterError("UPDATE_ERROR", "Failed to get installed apps")));
+  }
+
+  bool app_found = false;
+  std::string found_app_name;
+  std::string found_arch;
+  std::string found_branch;
+
+  // Search for the application/runtime
+  for (guint i = 0; i < refs->len && !app_found; i++) {
+    const auto ref =
+        static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+
+    if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
+      std::string ref_name_str(ref_name);
+      const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+      const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
+      std::string full_app_id;
+      if (flatpak_ref_get_kind(FLATPAK_REF(ref)) == FLATPAK_REF_KIND_APP) {
+        full_app_id = "app/";
+      } else if (flatpak_ref_get_kind(FLATPAK_REF(ref)) ==
+                 FLATPAK_REF_KIND_RUNTIME) {
+        full_app_id = "runtime/";
+      }
+
+      full_app_id += ref_name_str + "/";
+      full_app_id += (ref_arch ? ref_arch : "");
+      full_app_id += "/";
+      full_app_id += (ref_branch ? ref_branch : "");
+
+      if (full_app_id == id || ref_name_str == id) {
+        found_app_name = ref_name_str;
+        found_arch = ref_arch ? ref_arch : "";
+        found_branch = ref_branch ? ref_branch : "";
+        app_found = true;
+        full_ref = full_app_id;
+        g_object_ref(ref);
+        installed = ref;
+        break;
+      }
+    }
+  }
+
+  // some apps maybe installed system-wide, check there too
+  if (!app_found) {
+    g_ptr_array_unref(refs);
+    g_object_unref(installation);
+    installation = flatpak_installation_new_system(nullptr, &error);
+    refs =
+        flatpak_installation_list_installed_refs(installation, nullptr, &error);
+    if (!error) {
+      // Search for the application/runtime in system installation
+      for (guint i = 0; i < refs->len && !app_found; i++) {
+        const auto ref =
+            static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+
+        if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
+          std::string ref_name_str(ref_name);
+          const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+          const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
+          std::string full_app_id;
+          if (flatpak_ref_get_kind(FLATPAK_REF(ref)) == FLATPAK_REF_KIND_APP) {
+            full_app_id = "app/";
+          } else if (flatpak_ref_get_kind(FLATPAK_REF(ref)) ==
+                     FLATPAK_REF_KIND_RUNTIME) {
+            full_app_id = "runtime/";
+          }
+
+          full_app_id += ref_name_str + "/";
+          full_app_id += (ref_arch ? ref_arch : "");
+          full_app_id += "/";
+          full_app_id += (ref_branch ? ref_branch : "");
+
+          if (full_app_id == id || ref_name_str == id) {
+            found_app_name = ref_name_str;
+            found_arch = ref_arch ? ref_arch : "";
+            found_branch = ref_branch ? ref_branch : "";
+            app_found = true;
+            full_ref = full_app_id;
+            g_object_ref(ref);
+            installed = ref;
+            break;
+          }
+        }
+      }
+    }
+  }
+  g_ptr_array_unref(refs);
+
+  if (!app_found) {
+    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
+    g_object_unref(installation);
+    callback(
+        ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
+    return;
+  }
+
+  GObjectGuard<FlatpakInstallation> installation_guard(installation);
+  FlatpakTransaction* transaction =
+      flatpak_transaction_new_for_installation(installation, nullptr, &error);
+  if (error) {
+    std::string err_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("TRANSACTION_ERROR", "Error creating transaction")));
+    });
+    return;
+  }
+
+  GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
+  flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_disable_dependencies(transaction, FALSE);
+  flatpak_transaction_set_disable_related(transaction, FALSE);
+  flatpak_transaction_set_disable_prune(transaction, FALSE);
+
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   this);
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), this);
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   this);
+
+  GObjectGuard<FlatpakRef> found_ref_guard(FLATPAK_REF(installed));
+  spdlog::info(
+      "[FlatpakPlugin] Found installed app '{}' -> name: {}, arch: {}, "
+      "branch: {}",
+      id, found_app_name, found_arch, found_branch);
+
+  const gboolean update = flatpak_transaction_add_update(
+      transaction, full_ref.c_str(), nullptr, nullptr, &error);
+
+  if (error || !update) {
+    std::string err_msg = error ? error->message : "Failed to add update";
+    spdlog::error("[FlatpakPlugin] Failed to update '{}': {}", id, err_msg);
+    if (error) {
+      g_clear_error(&error);
+    }
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("UPDATE_FAILED", "Failed to update application")));
+    });
+    return;
+  }
+
+  spdlog::info("[FlatpakPlugin] Added update operation, starting transaction");
+
+  // Notify Flutter that the update is starting
+  flutter::EncodableMap start_event;
+  start_event[flutter::EncodableValue("type")] =
+      flutter::EncodableValue("update_started");
+  start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
+  start_event[flutter::EncodableValue("ref")] =
+      flutter::EncodableValue(found_app_name);
+  SendTransactionEvent(start_event);
+
+  // transfer ownership to thread
+  auto transaction_raw = transaction_guard.release();
+  auto installation_raw = installation_guard.release();
+  auto found_ref_raw = found_ref_guard.release();
+  auto self = shared_from_this();
+
+  std::thread([self, transaction_raw, installation_raw, found_app_name,
+               strand_ptr = strand_, found_ref_raw, callback]() {
+    pthread_setname_np(pthread_self(), "flatpak-update");
+
+    GError* error = nullptr;
+    spdlog::info("[FlatpakPlugin] Starting update transaction...");
+
+    // Run transaction with the dedicated context
+    gboolean success =
+        flatpak_transaction_run(transaction_raw, nullptr, &error);
+
+    std::string err_msg;
+    if (error) {
+      err_msg = error->message;
+      spdlog::error("[FlatpakPlugin] update transaction failed: {}", err_msg);
+      g_clear_error(&error);
+    }
+
+    if (success) {
+      spdlog::info("[FlatpakPlugin] update {} transaction completed",
+                   found_app_name);
+    } else {
+      spdlog::error("[FlatpakPlugin] update {} transaction failed",
+                    found_app_name);
+    }
+
+    // Cleanup GObjects
+    g_object_unref(transaction_raw);
+    g_object_unref(installation_raw);
+    g_object_unref(found_ref_raw);
+
+    // Post result back to original strand
+    asio::post(*strand_ptr, [self, callback, success, err_msg]() {
+      if (success) {
+        callback(ErrorOr<bool>(true));
+      } else {
+        callback(ErrorOr<bool>(
+            FlutterError("UPDATE_FAILED", "update failed: " + err_msg)));
+      }
+    });
+  }).detach();
 }
 
 ErrorOr<bool> FlatpakShim::ApplicationStart(
     const std::string& id,
-    const flutter::EncodableMap* /* configuration */) {
+    asio::io_context::strand& strand,
+    const std::shared_ptr<PortalManager>& portal_manager) {
   if (id.empty()) {
     return ErrorOr<bool>(
         FlutterError("INVALID_APP_ID", "Application ID is required"));
   }
 
+  if (is_app_running(id)) {
+    return ErrorOr<bool>(
+        FlutterError("APP_RUNNING", "Application already running"));
+  }
+
   spdlog::debug("[FlatpakPlugin] Starting application: {}", id);
 
   // Check if the application is installed first
+  FlatpakInstalledRef* installed = nullptr;
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
@@ -1087,7 +1771,7 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
         FlutterError("INSTALLATION_ERROR", "Failed to get user installation"));
   }
 
-  const auto refs =
+  auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
     spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
@@ -1128,11 +1812,53 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
         found_arch = ref_arch ? ref_arch : "";
         found_branch = ref_branch ? ref_branch : "";
         app_found = true;
+        g_object_ref(ref);
+        installed = ref;
         break;
       }
     }
   }
 
+  // some apps maybe installed system-wide, check there too
+  if (!app_found) {
+    g_ptr_array_unref(refs);
+    g_object_unref(installation);
+    installation = flatpak_installation_new_system(nullptr, &error);
+    refs =
+        flatpak_installation_list_installed_refs(installation, nullptr, &error);
+    if (!error) {
+      // Search for the application in system installation
+      for (guint i = 0; i < refs->len && !app_found; i++) {
+        const auto ref =
+            static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+
+        if (flatpak_ref_get_kind(FLATPAK_REF(ref)) != FLATPAK_REF_KIND_APP) {
+          continue;
+        }
+
+        if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
+          std::string ref_name_str(ref_name);
+          const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+          const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
+          std::string full_app_id = "app/";
+          full_app_id += ref_name_str + "/";
+          full_app_id += (ref_arch ? ref_arch : "");
+          full_app_id += "/";
+          full_app_id += (ref_branch ? ref_branch : "");
+
+          if (full_app_id == id || ref_name_str == id) {
+            found_app_name = ref_name_str;
+            found_arch = ref_arch ? ref_arch : "";
+            found_branch = ref_branch ? ref_branch : "";
+            app_found = true;
+            g_object_ref(ref);
+            installed = ref;
+            break;
+          }
+        }
+      }
+    }
+  }
   g_ptr_array_unref(refs);
 
   if (!app_found) {
@@ -1147,11 +1873,100 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
       "branch: {})",
       id, found_app_name, found_arch, found_branch);
 
-  // TODO: Implement actual application launching using
-  // flatpak_installation_launch_full
+  g_object_ref(installed);
+  g_object_ref(installation);
 
+  std::promise<ErrorOr<bool>> runtime_promise;
+  auto runtime_future = runtime_promise.get_future();
+
+  check_runtime(installed, installation, strand,
+                [&runtime_promise,
+                 strand_ptr = &strand](const ErrorOr<bool>& runtime_result) {
+                  asio::post(*strand_ptr, [&runtime_promise, runtime_result]() {
+                    runtime_promise.set_value(runtime_result);
+                  });
+                });
+
+  auto runtime_result = runtime_future.get();
+
+  if (runtime_result.has_error()) {
+    spdlog::error("[FlatpakPlugin] Runtime check failed: {}",
+                  runtime_result.error().message());
+    g_object_unref(installed);
+    g_object_unref(installation);
+    return runtime_result;
+  }
+
+  if (!runtime_result.value()) {
+    spdlog::error("[FlatpakPlugin] Runtime not available for app");
+    g_object_unref(installed);
+    g_object_unref(installation);
+    return ErrorOr<bool>(
+        FlutterError("RUNTIME_ERROR", "Runtime not available for app"));
+  }
+
+  // Use promise/future for create_sandbox
+  std::promise<bool> sandbox_promise;
+  auto sandbox_future = sandbox_promise.get_future();
+
+  create_sandbox(
+      installed, strand,
+      [&sandbox_promise, strand_ptr = &strand](bool success) {
+        asio::post(*strand_ptr, [&sandbox_promise, success]() {
+          sandbox_promise.set_value(success);
+        });
+      },
+      portal_manager.get());
+
+  bool sandbox_success = sandbox_future.get();
+
+  if (!sandbox_success) {
+    spdlog::error("[FlatpakPlugin] Failed to create sandbox");
+    g_object_unref(installed);
+    g_object_unref(installation);
+    return ErrorOr<bool>(
+        FlutterError("START_FAILED", "Failed to create sandbox"));
+  }
+
+  FlatpakInstance* instance = nullptr;
+  flatpak_installation_launch_full(
+      installation, FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP, found_app_name.c_str(),
+      found_arch.c_str(), found_branch.c_str(), nullptr, &instance, nullptr,
+      &error);
+
+  if (error) {
+    spdlog::error("[FlatpakPlugin] Failed to run app: {}", error->message);
+    g_clear_error(&error);
+    g_object_unref(installed);
+    g_object_unref(installation);
+    return ErrorOr<bool>(
+        FlutterError("START_FAILED", "Failed to launch application"));
+  }
+
+  if (instance) {
+    pid_t pid = flatpak_instance_get_pid(instance);
+    spdlog::info(
+        "[FlatpakPlugin] Successfully launched application: {} (PID: {})",
+        found_app_name, pid);
+
+    auto app_session = std::make_shared<MonitorSession>(
+        &strand, found_app_name, pid, portal_manager, instance);
+
+    {
+      std::lock_guard<std::mutex> lock(monitor_mutex_);
+      active_sessions_[found_app_name] = app_session;
+    }
+
+    monitor_app(app_session);
+
+    g_object_unref(installed);
+    g_object_unref(installation);
+    return ErrorOr<bool>(true);
+  }
+
+  g_object_unref(installed);
   g_object_unref(installation);
-  return ErrorOr<bool>(true);
+  return ErrorOr<bool>(FlutterError("START_FAILED", "Failed to get instance"));
 }
 
 ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
@@ -1160,78 +1975,39 @@ ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
         FlutterError("INVALID_APP_ID", "Application ID is required"));
   }
 
-  spdlog::debug("[FlatpakPlugin] Stopping application: {}", id);
-
-  // Check if the application is installed first
-  GError* error = nullptr;
-  auto installation = flatpak_installation_new_user(nullptr, &error);
-  if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
-    g_clear_error(&error);
-    return ErrorOr<bool>(
-        FlutterError("INSTALLATION_ERROR", "Failed to get user installation"));
+  spdlog::info("[FlatpakPlugin] Stopping application: {}", id);
+  const auto app = active_sessions_.find(id);
+  if (app == active_sessions_.end()) {
+    return ErrorOr<bool>(false);
   }
 
-  const auto refs =
-      flatpak_installation_list_installed_refs(installation, nullptr, &error);
-  if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
-    g_clear_error(&error);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("STOP_FAILED", "Failed to get installed apps"));
-  }
+  FlatpakInstance* instance = app->second->instance;
 
-  bool app_found = false;
-  std::string found_app_name;
-
-  // Search for the application
-  for (guint i = 0; i < refs->len && !app_found; i++) {
-    const auto ref =
-        static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
-
-    if (flatpak_ref_get_kind(FLATPAK_REF(ref)) != FLATPAK_REF_KIND_APP) {
-      continue;
+  const pid_t child_pid = flatpak_instance_get_child_pid(instance);
+  if (child_pid > 0) {
+    spdlog::info("[FlatpakPlugin] Sending SIGTERM to child PID: {}", child_pid);
+    if (kill(child_pid, SIGTERM) != 0) {
+      spdlog::error("[FlatpakPlugin] Failed to send SIGTERM: {}",
+                    strerror(errno));
     }
 
-    if (const auto ref_name = flatpak_ref_get_name(FLATPAK_REF(ref))) {
-      std::string ref_name_str(ref_name);
-      const auto ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
-      const auto ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
-
-      std::string full_app_id = "app/";
-      full_app_id += ref_name_str + "/";
-      full_app_id += (ref_arch ? ref_arch : "");
-      full_app_id += "/";
-      full_app_id += (ref_branch ? ref_branch : "");
-
-      if (full_app_id == id || ref_name_str == id) {
-        found_app_name = ref_name_str;
-        app_found = true;
+    bool exited = false;
+    for (int i = 0; i < 50; i++) {
+      if (kill(child_pid, 0) != 0) {
+        exited = true;
+        spdlog::info("[FlatpakPlugin] App exited gracefully: {}", id);
         break;
       }
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (!exited) {
+      spdlog::error("[FlatpakPlugin] Forcing kill of entire process group");
+      kill(child_pid, SIGKILL);
     }
   }
 
-  g_ptr_array_unref(refs);
-
-  if (!app_found) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("APP_NOT_FOUND", "Application not found"));
-  }
-
-  spdlog::info("[FlatpakPlugin] Would stop application: {} (name: {})", id,
-               found_app_name);
-
-  // TODO: Implement actual application stopping
-  // This could involve using process management APIs to find and terminate
-  // running Flatpak applications
-
-  g_object_unref(installation);
+  active_sessions_.erase(app);
+  spdlog::info("[FlatpakPlugin] App stopped and cleaned up: {}", id);
   return ErrorOr<bool>(true);
 }
 
@@ -1604,7 +2380,7 @@ std::string FlatpakShim::get_metadata_as_string(
 
   if (!g_bytes) {
     if (error != nullptr) {
-      spdlog::error("[FlatpakPlugin] Error loading metadata: %s\n",
+      spdlog::error("[FlatpakPlugin] Error loading metadata: {}\n",
                     error->message);
       g_clear_error(&error);
     }
@@ -1625,7 +2401,7 @@ std::string FlatpakShim::get_appdata_as_string(
       flatpak_installed_ref_load_appdata(installed_ref, nullptr, &error);
   if (!g_bytes) {
     if (error != nullptr) {
-      SPDLOG_ERROR("[FlatpakPlugin] {}", error->message);
+      spdlog::error("[FlatpakPlugin] {}", error->message);
       g_clear_error(&error);
     }
     return {};
@@ -2028,6 +2804,1038 @@ std::string FlatpakShim::create_appdata(const Component& component) {
   document.Accept(writer);
 
   return buffer.GetString();
+}
+
+void FlatpakShim::create_sandbox(FlatpakInstalledRef* installed_ref,
+                                 const asio::io_context::strand& strand,
+                                 const std::function<void(bool)>& callback,
+                                 PortalManager* portal_manager) {
+  const std::string metadata = get_metadata_as_string(installed_ref);
+  const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
+  spdlog::debug("[FlatpakPlugin] Create sandbox for: {}",
+                sandbox.application.name);
+
+  setup_portal_sessions(
+      sandbox, strand, portal_manager,
+      [sandbox, callback](const ErrorOr<bool>& success) {
+        if (!success.value()) {
+          spdlog::error(
+              "[FlatpakPlugin] Failed to setup portal interfaces for {}",
+              sandbox.application.name);
+          callback(false);
+          return;
+        }
+        spdlog::debug("[FlatpakPlugin] Sandbox setup completed for {}",
+                      sandbox.application.name);
+        callback(true);
+      });
+}
+
+void FlatpakShim::setup_portal_sessions(
+    const sandbox& configs,
+    const asio::io_context::strand& strand,
+    PortalManager* portal_manager,
+    const std::function<void(ErrorOr<bool>)>& callback) {
+  std::vector<PortalInterface> interfaces;
+
+  for (const auto& interface : configs.session_bus) {
+    PortalInterface portal;
+    portal.interface_name = interface;
+    portal.bus_type = BUS_TYPE::SESSION;
+    portal.service_name = interface;
+
+    portal.object_path = "/" + interface;
+    std::replace(portal.object_path.begin(), portal.object_path.end(), '.',
+                 '/');
+    interfaces.push_back(portal);
+  }
+
+  for (const auto& interface : configs.system_bus) {
+    PortalInterface portal;
+    portal.interface_name = interface;
+    portal.bus_type = BUS_TYPE::SYSTEM;
+    portal.service_name = interface;
+
+    portal.object_path = "/" + interface;
+    std::replace(portal.object_path.begin(), portal.object_path.end(), '.',
+                 '/');
+    interfaces.push_back(portal);
+  }
+  if (interfaces.empty()) {
+    asio::post(strand, [callback, name = configs.application.name]() {
+      spdlog::error("[FlatpakPlugin] No portal interfaces to register for {}",
+                    name);
+      callback(ErrorOr<bool>(true));
+    });
+    return;
+  }
+
+  try {
+    portal_manager->register_application(configs.application.name, interfaces);
+    asio::post(
+        strand, [callback, name = configs.application.name, interfaces]() {
+          spdlog::info("[FlatpakPlugin] Registered {} D-Bus interfaces for {}",
+                       interfaces.size(), name);
+
+          callback(ErrorOr<bool>(true));
+        });
+  } catch (const std::exception& e) {
+    std::string error_message = e.what();
+    asio::post(strand, [callback, error_message]() {
+      spdlog::error("[FlatpakPlugin] Failed to register interfaces: {}",
+                    error_message);
+      callback(ErrorOr<bool>(false));
+    });
+  }
+  // TODO: check and request permissions
+}
+
+FlatpakShim::sandbox FlatpakShim::parse_metadata(const std::string& metadata) {
+  FlatpakShim::sandbox sandbox;
+  auto application = extract_metadataSections(metadata, "Application");
+  auto context = extract_metadataSections(metadata, "Context");
+  const auto session_bus =
+      extract_metadataSections(metadata, "Session Bus Policy");
+  const auto system_bus =
+      extract_metadataSections(metadata, "System Bus Policy");
+  auto extra_data = extract_metadataSections(metadata, "Extra Data");
+  const auto build = extract_metadataSections(metadata, "Build");
+
+  sandbox.environment = extract_metadataSections(metadata, "Environment");
+
+  // parse application data
+  if (application.count("name")) {
+    sandbox.application.name = application["name"];
+  }
+  if (application.count("runtime")) {
+    sandbox.application.runtime = application["runtime"];
+  }
+  if (application.count("sdk")) {
+    sandbox.application.sdk = application["sdk"];
+  }
+  if (application.count("base")) {
+    sandbox.application.base = application["base"];
+  }
+  if (application.count("command")) {
+    sandbox.application.command = application["command"];
+  }
+
+  // parse context
+  if (context.count("shared")) {
+    sandbox.context.shared =
+        plugin_common::StringTools::split(context["shared"], ";");
+  }
+  if (context.count("sockets")) {
+    sandbox.context.sockets =
+        plugin_common::StringTools::split(context["sockets"], ";");
+  }
+  if (context.count("devices")) {
+    sandbox.context.devices =
+        plugin_common::StringTools::split(context["devices"], ";");
+  }
+  if (context.count("filesystems")) {
+    sandbox.context.filesystems =
+        plugin_common::StringTools::split(context["filesystems"], ";");
+  }
+
+  // parse session bus
+  for (const auto& [fst, snd] : session_bus) {
+    sandbox.session_bus.emplace_back(fst);
+  }
+
+  // parse system bus
+  for (const auto& [fst, snd] : system_bus) {
+    sandbox.system_bus.emplace_back(fst);
+  }
+
+  // parse extra data
+  if (extra_data.count("name")) {
+    sandbox.extra.name = extra_data["name"];
+  }
+  if (extra_data.count("checksum")) {
+    sandbox.extra.checksum = extra_data["checksum"];
+  }
+  if (extra_data.count("size")) {
+    sandbox.extra.size = extra_data["size"];
+  }
+  if (extra_data.count("uri")) {
+    sandbox.extra.uri = extra_data["uri"];
+  }
+
+  // parse build
+  if (build.count("built-extensions")) {
+    sandbox.built_extensions =
+        plugin_common::StringTools::split(context["built-extensions"], ";");
+  }
+  return sandbox;
+}
+
+std::map<std::string, std::string> FlatpakShim::extract_metadataSections(
+    const std::string& metadata,
+    const std::string& section) {
+  std::map<std::string, std::string> values;
+
+  std::string escapedName = std::regex_replace(
+      section, std::regex(R"([\.\[\](){}*+?^$|\\])"), R"(\$&)");
+  std::string pattern = R"(\[)" + escapedName + R"(\]\s*\n((?:[^[].*\n?)*))";
+  std::regex sectionReg(pattern);
+  if (std::smatch match; std::regex_search(metadata, match, sectionReg)) {
+    std::string content = match[1];
+    std::regex kvPattern(R"(^([a-zA-Z][a-zA-Z0-9_.-]*)\s*=\s*([^\n]+))");
+
+    std::istringstream stream(content);
+    std::string line;
+    while (std::getline(stream, line)) {
+      plugin_common::StringTools::trimSpaces(line);
+
+      if (!line.empty() && line[0] == '[') {
+        break;
+      }
+
+      if (std::smatch match2; std::regex_match(line, match2, kvPattern)) {
+        std::string val = match2[2];
+        plugin_common::StringTools::trimSpaces(val);
+        values[match2[1]] = val;
+      }
+    }
+  }
+  return values;
+}
+
+void FlatpakShim::monitor_app(const std::shared_ptr<MonitorSession>& session) {
+  if (!session || session->cancelled) {
+    return;
+  }
+
+  if (!session->instance) {
+    spdlog::error("[FlatpakPlugin] No instance running for app: {}",
+                  session->name);
+    cleanup_app(session);
+    return;
+  }
+
+  spdlog::debug("[FlatpakPlugin] Monitoring App {}", session->name);
+
+  if (!flatpak_instance_is_running(session->instance)) {
+    spdlog::info("[FlatpakPlugin] Instance {} is no longer running",
+                 session->name);
+    cleanup_app(session);
+    return;
+  }
+
+  spdlog::debug("[FlatpakPlugin] Instance {} still running", session->name);
+  check_app(session);
+}
+
+void FlatpakShim::cleanup_app(const std::shared_ptr<MonitorSession>& session) {
+  if (!session) {
+    return;
+  }
+  session->cancelled = true;
+
+  spdlog::info("[FlatpakPlugin] Cleaning up App {}", session->name);
+  if (session->timer) {
+    session->timer->cancel();
+  }
+
+  if (auto pm = session->portal_manager.lock()) {
+    try {
+      pm->unregister_application(session->name);
+      spdlog::debug("[FlatpakPlugin] Unregister portal for App {}",
+                    session->name);
+    } catch (std::exception& e) {
+      spdlog::error("[FlatpakPlugin] Unregister portal for App {} failed: {}",
+                    session->name, e.what());
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(monitor_mutex_);
+    active_sessions_.erase(session->name);
+  }
+  spdlog::info("[FlatpakPlugin] Cleaning up App {} completed", session->name);
+}
+
+void FlatpakShim::check_app(const std::shared_ptr<MonitorSession>& session) {
+  if (!session || session->cancelled) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(monitor_mutex_);
+  if (active_sessions_.find(session->name) == active_sessions_.end()) {
+    spdlog::error("[FlatpakPlugin] Session not found for app: {}",
+                  session->name);
+    return;
+  }
+
+  if (!session->timer) {
+    spdlog::error("[FlatpakPlugin] Timer is null for app: {}", session->name);
+    cleanup_app(session);
+    return;
+  }
+
+  if (!session->strand) {
+    spdlog::error("[FlatpakPlugin] io_context is null for app: {}",
+                  session->name);
+    cleanup_app(session);
+    return;
+  }
+  try {
+    session->timer->expires_after(std::chrono::milliseconds(500));
+
+    std::weak_ptr<MonitorSession> weak_session = session;
+    session->timer->async_wait(asio::bind_executor(
+        *session->strand, [weak_session](const asio::error_code& ec) {
+          auto session = weak_session.lock();
+          if (!session) {
+            return;
+          }
+          if (ec) {
+            if (ec == asio::error::operation_aborted) {
+              spdlog::debug("[FlatpakPlugin] Timer cancelled for {}",
+                            session->name);
+            } else {
+              spdlog::error("[FlatpakPlugin] Timer error for {}: {}",
+                            session->name, ec.message());
+            }
+            return;
+          }
+          monitor_app(session);
+        }));
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Application {} failed: {}", session->name,
+                  e.what());
+    cleanup_app(session);
+  }
+}
+
+void FlatpakShim::stop_all_monitoring() {
+  std::lock_guard<std::mutex> lock(monitor_mutex_);
+
+  spdlog::info("[FlatpakPlugin] Stopping {} active monitors",
+               active_sessions_.size());
+
+  for (auto& [app_id, session] : active_sessions_) {
+    if (session) {
+      session->cancelled = true;
+      if (session->timer) {
+        session->timer->cancel();
+      }
+    }
+  }
+
+  active_sessions_.clear();
+}
+
+bool FlatpakShim::is_app_running(const std::string& app_name) {
+  std::lock_guard<std::mutex> lock(monitor_mutex_);
+  return active_sessions_.find(app_name) != active_sessions_.end();
+}
+
+void FlatpakShim::check_runtime(
+    FlatpakInstalledRef* installed_ref,
+    FlatpakInstallation* installation,
+    asio::io_context::strand& strand,
+    const std::function<void(ErrorOr<bool>)>& callback) {
+  if (!installed_ref) {
+    asio::post(strand, [callback]() {
+      callback(
+          ErrorOr<bool>(FlutterError("INVALID_REF", "Installed ref is null")));
+    });
+    return;
+  }
+
+  GError* error = nullptr;
+  if (error) {
+    std::string error_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Failed to get installation: {}", error_msg);
+    g_clear_error(&error);
+    asio::post(strand, [callback, error_msg]() {
+      callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR", error_msg)));
+    });
+    return;
+  }
+
+  const std::string metadata = get_metadata_as_string(installed_ref);
+  const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
+  std::string runtime = "runtime/" + sandbox.application.runtime;
+  std::vector<std::string> extensions{};
+
+  // space for debugging in system extensions
+  const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(installed_ref));
+  auto remote_ref = find_app_in_remotes(installation, ref_name);
+  std::string remote = remote_ref.first;
+  auto ref = remote_ref.second.c_str();
+  auto related_extensions = flatpak_installation_list_remote_related_refs_sync(
+      installation, remote.c_str(), ref, nullptr, &error);
+  for (guint i = 0; i < related_extensions->len; i++) {
+    const auto ext = static_cast<FlatpakRelatedRef*>(
+        g_ptr_array_index(related_extensions, i));
+    const char* related_name = flatpak_ref_get_name(FLATPAK_REF(ext));
+    const char* related_branch = flatpak_ref_get_branch(FLATPAK_REF(ext));
+    const char* related_arch = flatpak_ref_get_arch(FLATPAK_REF(ext));
+    std::string related = "runtime/" + std::string(related_name) + "/" +
+                          std::string(related_arch) + "/" +
+                          std::string(related_branch);
+    if (flatpak_related_ref_should_download(ext)) {
+      extensions.emplace_back(related);
+    }
+  }
+
+  const std::string& extension_remote = remote;
+  const std::string& runtime_remote = remote;
+  if (runtime.empty()) {
+    spdlog::error("[FlatpakPlugin] No runtime specified for {}",
+                  sandbox.application.name);
+    asio::post(strand, [callback]() {
+      callback(ErrorOr<bool>(
+          FlutterError("NO_RUNTIME", "App has no runtime requirement")));
+    });
+    return;
+  }
+
+  spdlog::debug("[FlatpakPlugin] Checking runtime: {} for {}", runtime,
+                sandbox.application.name);
+
+  // Check if runtime is NOT installed
+  if (!is_runtime_installed_for_app(runtime, installation)) {
+    spdlog::warn("[FlatpakPlugin] Runtime {} not installed, installing...",
+                 runtime);
+
+    install_runtime(
+        runtime, runtime_remote, strand, installation,
+        [callback, strand = &strand, installation, extensions, extension_remote,
+         this](const ErrorOr<bool>& runtime_result) {
+          if (!runtime_result.value()) {
+            spdlog::error("[FlatpakPlugin] Failed to install runtime");
+            asio::post(*strand, [callback, runtime_result]() {
+              callback(runtime_result);
+            });
+            return;
+          }
+
+          spdlog::info("[FlatpakPlugin] Runtime installed successfully");
+
+          if (!extensions.empty()) {
+            install_extensions(
+                extensions, extension_remote, *strand, installation,
+                [callback, installation,
+                 strand](const ErrorOr<bool>& ext_result) {
+                  asio::post(*strand, [callback, ext_result, installation]() {
+                    g_object_unref(installation);
+                    callback(ext_result);
+                  });
+                });
+          } else {
+            asio::post(*strand,
+                       [callback]() { callback(ErrorOr<bool>(true)); });
+          }
+        });
+    return;
+  }
+
+  // Runtime installed, check extensions
+  spdlog::debug(
+      "[FlatpakPlugin] Runtime already installed, checking extensions");
+
+  if (!extensions.empty()) {
+    install_extensions(extensions, extension_remote, strand, installation,
+                       [callback, strand = &strand,
+                        installation](const ErrorOr<bool>& ext_result) {
+                         asio::post(*strand,
+                                    [callback, ext_result, installation]() {
+                                      g_object_unref(installation);
+                                      callback(ext_result);
+                                    });
+                       });
+  } else {
+    asio::post(strand, [callback, installation]() {
+      g_object_unref(installation);
+      callback(ErrorOr<bool>(true));
+    });
+  }
+}
+
+bool FlatpakShim::is_runtime_installed_for_app(
+    const std::string& runtime,
+    FlatpakInstallation* installation) {
+  GError* error = nullptr;
+  auto refs = flatpak_installation_list_installed_refs_by_kind(
+      installation, FLATPAK_REF_KIND_RUNTIME, nullptr, &error);
+  if (error) {
+    spdlog::error("[FlatpakPlugin] Failed to fetch runtimes : {}",
+                  error->message);
+    g_clear_error(&error);
+    return false;
+  }
+  bool found = false;
+  for (guint i = 0; i < refs->len; i++) {
+    auto* ref = static_cast<FlatpakInstalledRef*>(g_ptr_array_index(refs, i));
+
+    const char* ref_name = flatpak_ref_get_name(FLATPAK_REF(ref));
+    const char* ref_arch = flatpak_ref_get_arch(FLATPAK_REF(ref));
+    const char* ref_branch = flatpak_ref_get_branch(FLATPAK_REF(ref));
+
+    std::string ref_runtime = "runtime/" + std::string(ref_name) + '/' +
+                              std::string(ref_arch) + '/' +
+                              std::string(ref_branch);
+
+    if (ref_runtime == runtime) {
+      found = true;
+      spdlog::debug("[FlatpakPlugin] Found runtime : {}", ref_runtime);
+    }
+  }
+  g_clear_error(&error);
+  g_ptr_array_unref(refs);
+  return found;
+}
+
+void FlatpakShim::install_runtime(
+    const std::string& runtime,
+    const std::string& remote,
+    asio::io_context::strand& strand,
+    FlatpakInstallation* installation,
+    const std::function<void(ErrorOr<bool>)>& complete_callback) {
+  if (runtime.empty()) {
+    asio::post(strand, [complete_callback]() {
+      complete_callback(
+          ErrorOr<bool>(FlutterError("INVALID_RUNTIME", "Runtime is empty")));
+    });
+    return;
+  }
+  GError* error = nullptr;
+  spdlog::info("[FlatpakPlugin] Installing runtime {}", runtime);
+  FlatpakTransaction* transaction =
+      flatpak_transaction_new_for_installation(installation, nullptr, &error);
+  if (error) {
+    spdlog::error(
+        "[FlatpakPlugin] Error installing runtime creating transction : {}",
+        error->message);
+    g_clear_error(&error);
+    asio::post(strand, [complete_callback]() {
+      complete_callback(ErrorOr<bool>(
+          FlutterError("INVALID_RUNTIME", "error creating transction")));
+    });
+    return;
+  }
+
+  auto self = shared_from_this();
+  flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_reinstall(transaction, FALSE);
+
+  // connect all transaction signals
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   self.get());
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), self.get());
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   self.get());
+  g_signal_connect(transaction, "ready", G_CALLBACK(OnTransactionReady),
+                   self.get());
+
+  auto install = flatpak_transaction_add_install(
+      transaction, remote.c_str(), runtime.c_str(), nullptr, &error);
+  if (error || !install) {
+    spdlog::error("[FlatpakPlugin] Error installing runtime : {}",
+                  error->message);
+    g_clear_error(&error);
+    asio::post(strand, [complete_callback]() {
+      complete_callback(ErrorOr<bool>(
+          FlutterError("INSTALL_RUNTIME", "Error while add install")));
+    });
+    g_object_unref(transaction);
+    return;
+  }
+
+  // run transaction async, since it will block the thread until it finishes.
+  std::thread([transaction, strand_ptr = &strand, complete_callback, self,
+               runtime]() {
+    pthread_setname_np(pthread_self(), "flatpak-runtime");
+
+    spdlog::info("[FlatpakPlugin] Starting runtime installation for: {}",
+                 runtime);
+
+    GError* error = nullptr;
+    auto success = flatpak_transaction_run(transaction, nullptr, &error);
+
+    std::string error_message;
+    if (error) {
+      error_message = error->message;
+      spdlog::error("[FlatpakPlugin] Runtime installation error: {}",
+                    error_message);
+      g_clear_error(&error);
+    }
+
+    asio::post(*strand_ptr, [complete_callback, success, error_message,
+                             runtime]() {
+      if (success) {
+        spdlog::info("[FlatpakPlugin] Runtime '{}' installed successfully",
+                     runtime);
+        complete_callback(ErrorOr<bool>(true));
+      } else {
+        spdlog::error("[FlatpakPlugin] Runtime '{}' installation failed: {}",
+                      runtime, error_message);
+        complete_callback(
+            ErrorOr<bool>(FlutterError("INSTALL_RUNTIME", error_message)));
+      }
+    });
+
+    g_object_unref(transaction);
+    spdlog::debug("[FlatpakPlugin] Runtime installation thread exiting");
+  }).detach();
+}
+
+void FlatpakShim::install_extensions(
+    const std::vector<std::string>& extensions,
+    const std::string& remote,
+    asio::io_context::strand& strand,
+    FlatpakInstallation* installation,
+    const std::function<void(ErrorOr<bool>)>& complete_callback) {
+  if (extensions.empty()) {
+    spdlog::debug("[FlatpakPlugin] Installing extensions is empty");
+    asio::post(strand, [complete_callback]() {
+      complete_callback(ErrorOr<bool>(true));
+    });
+    return;
+  }
+
+  GError* error = nullptr;
+  std::vector<std::string> missing_extensions;
+  spdlog::info("[FlatpakPlugin] Installing {} extensions", extensions.size());
+
+  for (const auto& extension : extensions) {
+    FlatpakRef* ref = flatpak_ref_parse(extension.c_str(), &error);
+    if (error) {
+      spdlog::error("[FlatpakPlugin] Error parsing extension : {}",
+                    error->message);
+      g_clear_error(&error);
+      continue;
+    }
+    FlatpakInstalledRef* is_installed = flatpak_installation_get_installed_ref(
+        installation, FLATPAK_REF_KIND_RUNTIME, flatpak_ref_get_name(ref),
+        flatpak_ref_get_arch(ref), flatpak_ref_get_branch(ref), nullptr,
+        &error);
+
+    if (is_installed) {
+      spdlog::debug("[FlatpakPlugin] Extension {} already installed",
+                    extension);
+      g_object_unref(is_installed);
+      g_object_unref(ref);
+      continue;
+    }
+    if (error) {
+      if (error->code == FLATPAK_ERROR_NOT_INSTALLED) {
+        missing_extensions.emplace_back(extension);
+        spdlog::debug("[FlatpakPlugin] Extension {} not installed", extension);
+      } else {
+        spdlog::error("[FlatpakPlugin] Error checking extension {}: {}",
+                      extension, error->message);
+      }
+      g_clear_error(&error);
+    }
+    g_object_unref(ref);
+  }
+  if (missing_extensions.empty()) {
+    spdlog::debug("[FlatpakPlugin] All extensions already installed");
+    asio::post(strand, [complete_callback]() {
+      complete_callback(ErrorOr<bool>(true));
+    });
+    return;
+  }
+  FlatpakTransaction* transaction =
+      flatpak_transaction_new_for_installation(installation, nullptr, &error);
+
+  if (error) {
+    std::string error_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Failed to create transaction: {}",
+                  error_msg);
+    g_clear_error(&error);
+    asio::post(strand, [complete_callback, error_msg]() {
+      complete_callback(
+          ErrorOr<bool>(FlutterError("TRANSACTION_ERROR", error_msg)));
+    });
+    return;
+  }
+
+  auto self = shared_from_this();
+  flatpak_transaction_set_no_interaction(transaction, TRUE);
+  flatpak_transaction_set_reinstall(transaction, FALSE);
+
+  // connect all transaction signals
+  g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
+                   self.get());
+  g_signal_connect(transaction, "operation-done",
+                   G_CALLBACK(OnOperationComplete), self.get());
+  g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
+                   self.get());
+  g_signal_connect(transaction, "ready", G_CALLBACK(OnTransactionReady),
+                   self.get());
+
+  // Add all extensions to the transaction
+  for (const auto& ext : missing_extensions) {
+    flatpak_transaction_add_install(transaction, remote.c_str(), ext.c_str(),
+                                    nullptr, &error);
+
+    if (error) {
+      spdlog::error("[FlatpakPlugin] Failed to add extension '{}': {}", ext,
+                    error->message);
+      g_clear_error(&error);
+      continue;
+    }
+  }
+
+  // Run transaction in separate thread
+  std::thread([transaction, strand_ptr = &strand, complete_callback,
+               count = missing_extensions.size(), self]() {
+    pthread_setname_np(pthread_self(), "flatpak-ext");
+
+    spdlog::info(
+        "[FlatpakPlugin] Extension installation thread started for {} "
+        "extensions",
+        count);
+
+    GError* error = nullptr;
+    gboolean success = flatpak_transaction_run(transaction, nullptr, &error);
+
+    std::string error_message;
+    if (error) {
+      error_message = error->message;
+      spdlog::error("[FlatpakPlugin] Extension installation error: {}",
+                    error_message);
+      g_clear_error(&error);
+    }
+
+    // Post the result back to the original strand
+    asio::post(
+        *strand_ptr, [complete_callback, success, error_message, count]() {
+          if (success) {
+            spdlog::info("[FlatpakPlugin] Successfully installed {} extensions",
+                         count);
+            complete_callback(ErrorOr<bool>(true));
+          } else {
+            spdlog::error("[FlatpakPlugin] Extension installation failed: {}",
+                          error_message);
+            complete_callback(ErrorOr<bool>(
+                FlutterError("EXTENSION_INSTALL_FAILED", error_message)));
+          }
+        });
+
+    g_object_unref(transaction);
+    spdlog::debug("[FlatpakPlugin] Extension installation thread exiting");
+  }).detach();
+}
+
+void FlatpakShim::SetupTransactionEventChannel(
+    flutter::BinaryMessenger* messenger) {
+  if (!messenger_) {
+    spdlog::error(
+        "[FlatpakPlugin] Messenger is null, cannot setup event channel");
+    return;
+  }
+  spdlog::debug("[FlatpakPlugin] SetupEventChannel");
+
+  event_channel_ =
+      std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
+          messenger, "flutter.io/flatpakPlugin/flatpakEvents",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  spdlog::debug("[FlatpakPlugin] EventChannel created");
+  event_channel_->SetStreamHandler(
+      std::make_unique<
+          flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
+          [this](const flutter::EncodableValue* /* arguments */,
+                 std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
+                     events)
+              -> std::unique_ptr<
+                  flutter::StreamHandlerError<flutter::EncodableValue>> {
+            spdlog::debug("[FlatpakPlugin] Event sink connected");
+            {
+              std::lock_guard<std::mutex> lock(event_sink_mutex_);
+              event_sink_ = std::move(events);
+            }
+            return nullptr;
+          },
+          [this](const flutter::EncodableValue* /* arguments */)
+              -> std::unique_ptr<
+                  flutter::StreamHandlerError<flutter::EncodableValue>> {
+            spdlog::debug("[FlatpakPlugin] Event sink disconnected");
+            {
+              std::lock_guard<std::mutex> lock(event_sink_mutex_);
+              event_sink_ = nullptr;
+            }
+            return nullptr;
+          }));
+}
+
+void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
+  std::lock_guard<std::mutex> lock(event_sink_mutex_);
+  if (!event_sink_) {
+    spdlog::error("[FlatpakPlugin] Event sink is null, cannot send event");
+    return;
+  }
+  try {
+    event_sink_->Success(flutter::EncodableValue(event));
+  } catch (...) {
+  }
+}
+
+void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
+                                    gpointer user_data) {
+  auto* handler = static_cast<FlatpakShim*>(user_data);
+
+  auto is_estimating = flatpak_transaction_progress_get_is_estimating(progress);
+  auto percentage = flatpak_transaction_progress_get_progress(progress);
+  auto status = flatpak_transaction_progress_get_status(progress);
+  auto bytes_transfered =
+      flatpak_transaction_progress_get_bytes_transferred(progress);
+  auto start_time = flatpak_transaction_progress_get_start_time(progress);
+
+  std::cout << "\r";
+  std::cout << "Progress: " << percentage << "%";
+
+  if (status && strlen(status) > 0) {
+    std::cout << " | Status: " << status;
+  }
+
+  if (bytes_transfered > 0) {
+    double mb_transferred =
+        static_cast<double>(bytes_transfered) / (1024.0 * 1024.0);
+    std::cout << " | Downloaded: " << std::fixed << std::setprecision(2)
+              << mb_transferred << " MB";
+  }
+
+  if (start_time > 0 && bytes_transfered > 0) {
+    auto current_time = g_get_monotonic_time();
+    auto elapsed_time = current_time - start_time;
+    if (elapsed_time > 0) {
+      auto speed = (static_cast<double>(bytes_transfered) /
+                    static_cast<double>(elapsed_time)) *
+                   1000000.0;
+      double speed_mbps = speed / (1024.0 * 1024.0);
+      std::cout << " | Speed: " << std::fixed << std::setprecision(2)
+                << speed_mbps << " MB/s";
+    }
+  }
+  std::cout << std::flush;
+  if (percentage >= 100) {
+    std::cout << std::endl;
+  }
+
+  // stream data to flutter
+  try {
+    flutter::EncodableMap ProgressMap;
+    ProgressMap[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("progress");
+    ProgressMap[flutter::EncodableValue("progress")] =
+        flutter::EncodableValue(static_cast<int32_t>(percentage));
+    ProgressMap[flutter::EncodableValue("is_estimating")] =
+        flutter::EncodableValue(static_cast<bool>(is_estimating));
+    ProgressMap[flutter::EncodableValue("status")] =
+        flutter::EncodableValue(status ? std::string(status) : "");
+    ProgressMap[flutter::EncodableValue("bytes")] =
+        flutter::EncodableValue(static_cast<int64_t>(bytes_transfered));
+    ProgressMap[flutter::EncodableValue("start_time")] =
+        flutter::EncodableValue(static_cast<int64_t>(start_time));
+
+    // Calculate speed
+    if (start_time > 0 && bytes_transfered > 0) {
+      auto current_time = g_get_monotonic_time();
+      auto elapsed_time = current_time - start_time;
+      if (elapsed_time > 0) {
+        auto speed = (static_cast<double>(bytes_transfered) /
+                      static_cast<double>(elapsed_time)) *
+                     1000000.0;
+        ProgressMap[flutter::EncodableValue("speed_bps")] =
+            flutter::EncodableValue(speed);
+      }
+    }
+
+    handler->SendTransactionEvent(ProgressMap);
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Error sending progress event: {}", e.what());
+  }
+}
+
+void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
+                                 FlatpakTransactionOperation* operation,
+                                 FlatpakTransactionProgress* progress,
+                                 gpointer user_data) {
+  auto* handler = static_cast<FlatpakShim*>(user_data);
+
+  if (progress) {
+    g_signal_connect(progress, "changed", G_CALLBACK(OnProgressChanged),
+                     handler);
+  }
+
+  auto operation_ref = flatpak_transaction_operation_get_ref(operation);
+  auto operation_type =
+      flatpak_transaction_operation_get_operation_type(operation);
+
+  flutter::EncodableMap OperationMap;
+  OperationMap[flutter::EncodableValue("type")] =
+      flutter::CustomEncodableValue("operation_started");
+  OperationMap[flutter::EncodableValue("operation_ref")] =
+      flutter::CustomEncodableValue(operation_ref ? operation_ref : "");
+
+  std::string operation_type_str = "unknown";
+  switch (operation_type) {
+    case FLATPAK_TRANSACTION_OPERATION_INSTALL:
+      operation_type_str = "install";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_UPDATE:
+      operation_type_str = "update";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
+      operation_type_str = "install_bundle";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
+      operation_type_str = "uninstall";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_LAST_TYPE:
+      operation_type_str = "last_type";
+      break;
+    default:
+      break;
+  }
+
+  OperationMap[flutter::EncodableValue("operation_type")] =
+      flutter::CustomEncodableValue(operation_type_str);
+  handler->SendTransactionEvent(OperationMap);
+}
+
+void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
+                                      FlatpakTransactionOperation* operation,
+                                      const char* commit,
+                                      FlatpakTransactionResult result,
+                                      gpointer user_data) {
+  auto* handler = static_cast<FlatpakShim*>(user_data);
+
+  const char* ref = flatpak_transaction_operation_get_ref(operation);
+  auto type = flatpak_transaction_operation_get_operation_type(operation);
+
+  std::string type_str =
+      (type == FLATPAK_TRANSACTION_OPERATION_INSTALL) ? "install" : "other";
+
+  if (ref) {
+    std::string ref_str(ref);
+    spdlog::info(
+        "[FlatpakPlugin] Operation completed: {} {} (result: {})", type_str,
+        ref_str,
+        result == FLATPAK_TYPE_TRANSACTION_RESULT ? "SUCCESS" : "FAILED");
+  }
+
+  flutter::EncodableMap OperationCompleteMap;
+  OperationCompleteMap[flutter::EncodableValue("type")] =
+      flutter::CustomEncodableValue("operation_complete");
+  OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
+      flutter::CustomEncodableValue(ref ? ref : "");
+  OperationCompleteMap[flutter::EncodableValue("commit")] =
+      flutter::CustomEncodableValue(commit);
+  OperationCompleteMap[flutter::EncodableValue("success")] =
+      flutter::CustomEncodableValue(result);
+
+  handler->SendTransactionEvent(OperationCompleteMap);
+}
+
+gboolean FlatpakShim::OnOperationError(
+    FlatpakTransaction* transaction,
+    FlatpakTransactionOperation* operation,
+    const GError* error,
+    FlatpakTransactionErrorDetails error_details,
+    gpointer user_data) {
+  auto* handler = static_cast<FlatpakShim*>(user_data);
+
+  auto operation_ref = flatpak_transaction_operation_get_ref(operation);
+
+  try {
+    flutter::EncodableMap OperationErrorMap;
+    OperationErrorMap[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("operation_error");
+    OperationErrorMap[flutter::EncodableValue("operation_ref")] =
+        flutter::EncodableValue(operation_ref ? std::string(operation_ref)
+                                              : "");
+    OperationErrorMap[flutter::EncodableValue("error_message")] =
+        flutter::EncodableValue(error ? std::string(error->message) : "");
+    OperationErrorMap[flutter::EncodableValue("fatal")] =
+        flutter::EncodableValue(
+            !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
+
+    handler->SendTransactionEvent(OperationErrorMap);
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Error sending operation error event: {}",
+                  e.what());
+  }
+  return TRUE;
+}
+
+gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
+                                         gpointer user_data) {
+  auto* handler = static_cast<FlatpakShim*>(user_data);
+
+  spdlog::info(
+      "[FlatpakPlugin] Transaction ready, checking operations to be "
+      "performed...");
+
+  GList* operations = flatpak_transaction_get_operations(transaction);
+  int total_ops = static_cast<int>(g_list_length(operations));
+
+  spdlog::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
+
+  flutter::EncodableMap ready_event;
+  ready_event[flutter::EncodableValue("type")] =
+      flutter::EncodableValue("transaction_ready");
+  ready_event[flutter::EncodableValue("total_operations")] =
+      flutter::EncodableValue(total_ops);
+
+  flutter::EncodableList ops_list;
+
+  for (GList* l = operations; l != nullptr; l = l->next) {
+    auto* op = static_cast<FlatpakTransactionOperation*>(l->data);
+    const char* ref = flatpak_transaction_operation_get_ref(op);
+    FlatpakTransactionOperationType type =
+        flatpak_transaction_operation_get_operation_type(op);
+
+    std::string type_str;
+    switch (type) {
+      case FLATPAK_TRANSACTION_OPERATION_INSTALL:
+        type_str = "install";
+        break;
+      case FLATPAK_TRANSACTION_OPERATION_UPDATE:
+        type_str = "update";
+        break;
+      case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
+        type_str = "install_bundle";
+        break;
+      case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
+        type_str = "uninstall";
+        break;
+      default:
+        type_str = "unknown";
+        break;
+    }
+
+    std::string ref_str = ref ? ref : "unknown";
+    spdlog::info("[FlatpakPlugin] - Operation: {} {}", type_str, ref_str);
+
+    std::string kind = "unknown";
+    if (ref_str.find("app/") == 0) {
+      kind = "app";
+    } else if (ref_str.find("runtime/") == 0) {
+      kind = "runtime";
+    }
+
+    flutter::EncodableMap op_map;
+    op_map[flutter::EncodableValue("ref")] = flutter::EncodableValue(ref_str);
+    op_map[flutter::EncodableValue("type")] = flutter::EncodableValue(type_str);
+    op_map[flutter::EncodableValue("kind")] = flutter::EncodableValue(kind);
+
+    ops_list.emplace_back(op_map);
+  }
+
+  ready_event[flutter::EncodableValue("operations")] =
+      flutter::EncodableValue(ops_list);
+
+  handler->SendTransactionEvent(ready_event);
+
+  return TRUE;
 }
 
 }  // namespace flatpak_plugin

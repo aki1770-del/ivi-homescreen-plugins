@@ -22,6 +22,7 @@
 #include <flutter/standard_message_codec.h>
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -381,17 +382,25 @@ class FlatpakApi {
   virtual ErrorOr<bool> RemoteRemove(const std::string& id) = 0;
   // Get a list of applications installed on machine.
   virtual ErrorOr<flutter::EncodableList> GetApplicationsInstalled() = 0;
+  // Get a list of applications needing update on machine.
+  virtual ErrorOr<flutter::EncodableList> GetApplicationsUpdate() = 0;
   // Get list of applications hosted on a remote.
   virtual ErrorOr<flutter::EncodableList> GetApplicationsRemote(
       const std::string& id) = 0;
   // Install application of given id.
-  virtual ErrorOr<bool> ApplicationInstall(const std::string& id) = 0;
-  // Uninstall application with specified id.
-  virtual ErrorOr<bool> ApplicationUninstall(const std::string& id) = 0;
-  // Start application using specified configuration.
-  virtual ErrorOr<bool> ApplicationStart(
+  virtual void ApplicationInstall(
       const std::string& id,
-      const flutter::EncodableMap* configuration) = 0;
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
+  // Uninstall application with specified id.
+  virtual void ApplicationUninstall(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
+  // Update application with specified id.
+  virtual void ApplicationUpdate(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
+  // Start application using specified configuration.
+  virtual ErrorOr<bool> ApplicationStart(const std::string& id) = 0;
   // Stop application with given id.
   virtual ErrorOr<bool> ApplicationStop(const std::string& id) = 0;
 

@@ -25,13 +25,14 @@
 #include "flatpak_shim.h"
 #include "messages.g.h"
 #include "plugins/flatpak/cache/cache_manager.h"
+#include "plugins/flatpak/portals/portal_manager.h"
 
 namespace flatpak_plugin {
 class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrar* registrar);
 
-  FlatpakPlugin();
+  explicit FlatpakPlugin(flutter::PluginRegistrar* registrar);
 
   ~FlatpakPlugin() override;
 
@@ -62,20 +63,30 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   // Get a list of applications installed on machine.
   ErrorOr<flutter::EncodableList> GetApplicationsInstalled() override;
 
+  // Get a list of applications needing update on machine.
+  ErrorOr<flutter::EncodableList> GetApplicationsUpdate() override;
+
   // Get list of applications hosted on a remote.
   ErrorOr<flutter::EncodableList> GetApplicationsRemote(
       const std::string& id) override;
 
   // Install application of given id.
-  ErrorOr<bool> ApplicationInstall(const std::string& id) override;
+  void ApplicationInstall(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) override;
 
   // Uninstall application with specified id.
-  ErrorOr<bool> ApplicationUninstall(const std::string& id) override;
+  void ApplicationUninstall(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) override;
+
+  // Update application with specified id.
+  void ApplicationUpdate(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) override;
 
   // Start application using specified configuration.
-  ErrorOr<bool> ApplicationStart(
-      const std::string& id,
-      const flutter::EncodableMap* configuration) override;
+  ErrorOr<bool> ApplicationStart(const std::string& id) override;
 
   // Stop application with given id.
   ErrorOr<bool> ApplicationStop(const std::string& id) override;
@@ -89,10 +100,13 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   std::string name_;
   std::thread thread_;
   pthread_t pthread_self_;
-  std::unique_ptr<asio::io_context> io_context_;
+  std::shared_ptr<asio::io_context> io_context_;
   asio::executor_work_guard<decltype(io_context_->get_executor())> work_;
   std::unique_ptr<asio::io_context::strand> strand_;
-  std::unique_ptr<CacheManager> manager_;
+  std::unique_ptr<CacheManager> cache_manager_;
+  std::shared_ptr<PortalManager> portal_manager_;
+  friend struct flatpak_plugin::FlatpakShim;
+  flutter::PluginRegistrar* registrar_;
 };
 }  // namespace flatpak_plugin
 
