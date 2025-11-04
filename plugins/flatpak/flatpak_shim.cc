@@ -3525,55 +3525,91 @@ void FlatpakShim::install_extensions(
 
 void FlatpakShim::SetupTransactionEventChannel(
     flutter::BinaryMessenger* messenger) {
-  if (!messenger_) {
+
+  if (!messenger) {
     spdlog::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
     return;
   }
-  spdlog::debug("[FlatpakPlugin] SetupEventChannel");
 
-  event_channel_ =
-      std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-          messenger, "flutter.io/flatpakPlugin/flatpakEvents",
-          &flutter::StandardMethodCodec::GetInstance());
+  if (event_channel_) {
+    spdlog::error("[FlatpakPlugin] Event channel already exists!");
+    return;
+  }
 
-  spdlog::debug("[FlatpakPlugin] EventChannel created");
-  event_channel_->SetStreamHandler(
-      std::make_unique<
-          flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
-          [this](const flutter::EncodableValue* /* arguments */,
-                 std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
-                     events)
-              -> std::unique_ptr<
-                  flutter::StreamHandlerError<flutter::EncodableValue>> {
-            spdlog::debug("[FlatpakPlugin] Event sink connected");
-            {
-              std::lock_guard<std::mutex> lock(event_sink_mutex_);
-              event_sink_ = std::move(events);
-            }
-            return nullptr;
-          },
-          [this](const flutter::EncodableValue* /* arguments */)
-              -> std::unique_ptr<
-                  flutter::StreamHandlerError<flutter::EncodableValue>> {
-            spdlog::debug("[FlatpakPlugin] Event sink disconnected");
-            {
-              std::lock_guard<std::mutex> lock(event_sink_mutex_);
-              event_sink_ = nullptr;
-            }
-            return nullptr;
-          }));
+  try {
+    event_channel_ =
+        std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
+            messenger,
+            "flutter.io/flatpakPlugin/flatpakEvents",
+            &flutter::StandardMethodCodec::GetInstance());
+
+    // Set stream handler
+    event_channel_->SetStreamHandler(
+        std::make_unique<
+            flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
+            // onListen callback
+            [this](const flutter::EncodableValue* /* arguments */,
+                   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
+                       events)
+                -> std::unique_ptr<
+                    flutter::StreamHandlerError<flutter::EncodableValue>> {
+
+              {
+                std::lock_guard<std::mutex> lock(event_sink_mutex_);
+                event_sink_ = std::move(events);
+              }
+
+              // Send connection confirmation event
+              flutter::EncodableMap test_event;
+              test_event[flutter::EncodableValue("type")] =
+                  flutter::EncodableValue("connection_established");
+              test_event[flutter::EncodableValue("message")] =
+                  flutter::EncodableValue("Event channel ready");
+              SendTransactionEvent(test_event);
+
+              return nullptr;
+            },
+            // onCancel callback
+            [this](const flutter::EncodableValue* /* arguments */)
+                -> std::unique_ptr<
+                    flutter::StreamHandlerError<flutter::EncodableValue>> {
+              {
+                std::lock_guard<std::mutex> lock(event_sink_mutex_);
+                event_sink_ = nullptr;
+              }
+
+              return nullptr;
+            }));
+    spdlog::info("[FlatpakPlugin] Channel name: flutter.io/flatpakPlugin/flatpakEvents");
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
+                  e.what());
+  }
 }
 
 void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
   std::lock_guard<std::mutex> lock(event_sink_mutex_);
+
   if (!event_sink_) {
-    spdlog::error("[FlatpakPlugin] Event sink is null, cannot send event");
+    spdlog::error(
+        "[FlatpakPlugin] Cannot send event - sink is null. "
+        "Flutter may not be listening yet.");
     return;
   }
+
   try {
     event_sink_->Success(flutter::EncodableValue(event));
-  } catch (...) {
+
+    if (event.find(flutter::EncodableValue("type")) != event.end()) {
+      auto type_value = event[flutter::EncodableValue("type")];
+      if (std::holds_alternative<std::string>(type_value)) {
+        spdlog::debug("[FlatpakPlugin] Event sent: {}",
+                      std::get<std::string>(type_value));
+      }
+    }
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Exception sending event: {}", e.what());
   }
 }
 
@@ -3619,38 +3655,44 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
     std::cout << std::endl;
   }
 
-  // stream data to flutter
-  try {
-    flutter::EncodableMap ProgressMap;
-    ProgressMap[flutter::EncodableValue("type")] =
-        flutter::EncodableValue("progress");
-    ProgressMap[flutter::EncodableValue("progress")] =
-        flutter::EncodableValue(static_cast<int32_t>(percentage));
-    ProgressMap[flutter::EncodableValue("is_estimating")] =
-        flutter::EncodableValue(static_cast<bool>(is_estimating));
-    ProgressMap[flutter::EncodableValue("status")] =
-        flutter::EncodableValue(status ? std::string(status) : "");
-    ProgressMap[flutter::EncodableValue("bytes")] =
-        flutter::EncodableValue(static_cast<int64_t>(bytes_transfered));
-    ProgressMap[flutter::EncodableValue("start_time")] =
-        flutter::EncodableValue(static_cast<int64_t>(start_time));
+  if (handler->strand_) {
+    asio::post(*handler->strand_, [handler, percentage, is_estimating,
+                                   status = status ? std::string(status) : std::string(""),
+                                   bytes_transfered, start_time]() {
+      try {
+        flutter::EncodableMap ProgressMap;
+        ProgressMap[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("progress");
+        ProgressMap[flutter::EncodableValue("progress")] =
+            flutter::EncodableValue(static_cast<int32_t>(percentage));
+        ProgressMap[flutter::EncodableValue("is_estimating")] =
+            flutter::EncodableValue(static_cast<bool>(is_estimating));
+        ProgressMap[flutter::EncodableValue("status")] =
+            flutter::EncodableValue(status);
+        ProgressMap[flutter::EncodableValue("bytes")] =
+            flutter::EncodableValue(static_cast<int64_t>(bytes_transfered));
+        ProgressMap[flutter::EncodableValue("start_time")] =
+            flutter::EncodableValue(static_cast<int64_t>(start_time));
 
-    // Calculate speed
-    if (start_time > 0 && bytes_transfered > 0) {
-      auto current_time = g_get_monotonic_time();
-      auto elapsed_time = current_time - start_time;
-      if (elapsed_time > 0) {
-        auto speed = (static_cast<double>(bytes_transfered) /
-                      static_cast<double>(elapsed_time)) *
-                     1000000.0;
-        ProgressMap[flutter::EncodableValue("speed_bps")] =
-            flutter::EncodableValue(speed);
+        // Calculate speed
+        if (start_time > 0 && bytes_transfered > 0) {
+          auto current_time = g_get_monotonic_time();
+          auto elapsed_time = current_time - start_time;
+          if (elapsed_time > 0) {
+            auto speed = (static_cast<double>(bytes_transfered) /
+                          static_cast<double>(elapsed_time)) *
+                         1000000.0;
+            ProgressMap[flutter::EncodableValue("speed_bps")] =
+                flutter::EncodableValue(speed);
+          }
+        }
+
+        handler->SendTransactionEvent(ProgressMap);
+      } catch (const std::exception& e) {
+        spdlog::error("[FlatpakPlugin] Error sending progress event: {}",
+                      e.what());
       }
-    }
-
-    handler->SendTransactionEvent(ProgressMap);
-  } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error sending progress event: {}", e.what());
+    });
   }
 }
 
@@ -3669,36 +3711,48 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
   auto operation_type =
       flatpak_transaction_operation_get_operation_type(operation);
 
-  flutter::EncodableMap OperationMap;
-  OperationMap[flutter::EncodableValue("type")] =
-      flutter::CustomEncodableValue("operation_started");
-  OperationMap[flutter::EncodableValue("operation_ref")] =
-      flutter::CustomEncodableValue(operation_ref ? operation_ref : "");
+  if (handler->strand_) {
+    asio::post(*handler->strand_, [handler,
+                                   operation_ref = operation_ref ? std::string(operation_ref) : std::string(""),
+                                   operation_type]() {
+      try {
+        flutter::EncodableMap OperationMap;
+        OperationMap[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("operation_started");
+        OperationMap[flutter::EncodableValue("operation_ref")] =
+            flutter::EncodableValue(operation_ref);
 
-  std::string operation_type_str = "unknown";
-  switch (operation_type) {
-    case FLATPAK_TRANSACTION_OPERATION_INSTALL:
-      operation_type_str = "install";
-      break;
-    case FLATPAK_TRANSACTION_OPERATION_UPDATE:
-      operation_type_str = "update";
-      break;
-    case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
-      operation_type_str = "install_bundle";
-      break;
-    case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
-      operation_type_str = "uninstall";
-      break;
-    case FLATPAK_TRANSACTION_OPERATION_LAST_TYPE:
-      operation_type_str = "last_type";
-      break;
-    default:
-      break;
+        std::string operation_type_str = "unknown";
+        switch (operation_type) {
+          case FLATPAK_TRANSACTION_OPERATION_INSTALL:
+            operation_type_str = "install";
+            break;
+          case FLATPAK_TRANSACTION_OPERATION_UPDATE:
+            operation_type_str = "update";
+            break;
+          case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
+            operation_type_str = "install_bundle";
+            break;
+          case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
+            operation_type_str = "uninstall";
+            break;
+          case FLATPAK_TRANSACTION_OPERATION_LAST_TYPE:
+            operation_type_str = "last_type";
+            break;
+          default:
+            break;
+        }
+
+        OperationMap[flutter::EncodableValue("operation_type")] =
+            flutter::EncodableValue(operation_type_str);
+
+        handler->SendTransactionEvent(OperationMap);
+      } catch (const std::exception& e) {
+        spdlog::error("[FlatpakPlugin] Error sending operation event: {}",
+                      e.what());
+      }
+    });
   }
-
-  OperationMap[flutter::EncodableValue("operation_type")] =
-      flutter::CustomEncodableValue(operation_type_str);
-  handler->SendTransactionEvent(OperationMap);
 }
 
 void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
@@ -3715,24 +3769,35 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
       (type == FLATPAK_TRANSACTION_OPERATION_INSTALL) ? "install" : "other";
 
   if (ref) {
-    std::string ref_str(ref);
     spdlog::info(
         "[FlatpakPlugin] Operation completed: {} {} (result: {})", type_str,
-        ref_str,
+        std::string(ref),
         result == FLATPAK_TYPE_TRANSACTION_RESULT ? "SUCCESS" : "FAILED");
   }
 
-  flutter::EncodableMap OperationCompleteMap;
-  OperationCompleteMap[flutter::EncodableValue("type")] =
-      flutter::CustomEncodableValue("operation_complete");
-  OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
-      flutter::CustomEncodableValue(ref ? ref : "");
-  OperationCompleteMap[flutter::EncodableValue("commit")] =
-      flutter::CustomEncodableValue(commit);
-  OperationCompleteMap[flutter::EncodableValue("success")] =
-      flutter::CustomEncodableValue(result);
+  if (handler->strand_) {
+    asio::post(*handler->strand_, [handler,
+                                   ref = ref ? std::string(ref) : std::string(""),
+                                   commit = commit ? std::string(commit) : std::string(""),
+                                   result]() {
+      try {
+        flutter::EncodableMap OperationCompleteMap;
+        OperationCompleteMap[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("operation_complete");
+        OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
+            flutter::EncodableValue(ref);
+        OperationCompleteMap[flutter::EncodableValue("commit")] =
+            flutter::EncodableValue(commit);
+        OperationCompleteMap[flutter::EncodableValue("success")] =
+            flutter::EncodableValue(static_cast<int32_t>(result));
 
-  handler->SendTransactionEvent(OperationCompleteMap);
+        handler->SendTransactionEvent(OperationCompleteMap);
+      } catch (const std::exception& e) {
+        spdlog::error("[FlatpakPlugin] Error sending complete event: {}",
+                      e.what());
+      }
+    });
+  }
 }
 
 gboolean FlatpakShim::OnOperationError(
@@ -3745,24 +3810,31 @@ gboolean FlatpakShim::OnOperationError(
 
   auto operation_ref = flatpak_transaction_operation_get_ref(operation);
 
-  try {
-    flutter::EncodableMap OperationErrorMap;
-    OperationErrorMap[flutter::EncodableValue("type")] =
-        flutter::EncodableValue("operation_error");
-    OperationErrorMap[flutter::EncodableValue("operation_ref")] =
-        flutter::EncodableValue(operation_ref ? std::string(operation_ref)
-                                              : "");
-    OperationErrorMap[flutter::EncodableValue("error_message")] =
-        flutter::EncodableValue(error ? std::string(error->message) : "");
-    OperationErrorMap[flutter::EncodableValue("fatal")] =
-        flutter::EncodableValue(
-            !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
+  if (handler->strand_) {
+    asio::post(*handler->strand_, [handler,
+                                   operation_ref = operation_ref ? std::string(operation_ref) : std::string(""),
+                                   error_message = error ? std::string(error->message) : std::string(""),
+                                   error_details]() {
+      try {
+        flutter::EncodableMap OperationErrorMap;
+        OperationErrorMap[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("operation_error");
+        OperationErrorMap[flutter::EncodableValue("operation_ref")] =
+            flutter::EncodableValue(operation_ref);
+        OperationErrorMap[flutter::EncodableValue("error_message")] =
+            flutter::EncodableValue(error_message);
+        OperationErrorMap[flutter::EncodableValue("fatal")] =
+            flutter::EncodableValue(
+                !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
 
-    handler->SendTransactionEvent(OperationErrorMap);
-  } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error sending operation error event: {}",
-                  e.what());
+        handler->SendTransactionEvent(OperationErrorMap);
+      } catch (const std::exception& e) {
+        spdlog::error("[FlatpakPlugin] Error sending error event: {}",
+                      e.what());
+      }
+    });
   }
+
   return TRUE;
 }
 
@@ -3770,23 +3842,12 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
                                          gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
 
-  spdlog::info(
-      "[FlatpakPlugin] Transaction ready, checking operations to be "
-      "performed...");
-
   GList* operations = flatpak_transaction_get_operations(transaction);
   int total_ops = static_cast<int>(g_list_length(operations));
 
   spdlog::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
 
-  flutter::EncodableMap ready_event;
-  ready_event[flutter::EncodableValue("type")] =
-      flutter::EncodableValue("transaction_ready");
-  ready_event[flutter::EncodableValue("total_operations")] =
-      flutter::EncodableValue(total_ops);
-
   flutter::EncodableList ops_list;
-
   for (GList* l = operations; l != nullptr; l = l->next) {
     auto* op = static_cast<FlatpakTransactionOperation*>(l->data);
     const char* ref = flatpak_transaction_operation_get_ref(op);
@@ -3830,10 +3891,24 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     ops_list.emplace_back(op_map);
   }
 
-  ready_event[flutter::EncodableValue("operations")] =
-      flutter::EncodableValue(ops_list);
+  if (handler->strand_) {
+    asio::post(*handler->strand_, [handler, total_ops, ops_list = std::move(ops_list)]() {
+      try {
+        flutter::EncodableMap ready_event;
+        ready_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("transaction_ready");
+        ready_event[flutter::EncodableValue("total_operations")] =
+            flutter::EncodableValue(total_ops);
+        ready_event[flutter::EncodableValue("operations")] =
+            flutter::EncodableValue(ops_list);
 
-  handler->SendTransactionEvent(ready_event);
+        handler->SendTransactionEvent(ready_event);
+      } catch (const std::exception& e) {
+        spdlog::error("[FlatpakPlugin] Error sending ready event: {}",
+                      e.what());
+      }
+    });
+  }
 
   return TRUE;
 }

@@ -36,6 +36,8 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
 
   ~FlatpakPlugin() override;
 
+  void Init();
+
   // Get Flatpak Version
   ErrorOr<std::string> GetVersion() override;
 
@@ -105,7 +107,7 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   std::unique_ptr<asio::io_context::strand> strand_;
   std::unique_ptr<CacheManager> cache_manager_;
   std::shared_ptr<PortalManager> portal_manager_;
-  friend struct flatpak_plugin::FlatpakShim;
+  std::shared_ptr<FlatpakShim> shim_;
   flutter::PluginRegistrar* registrar_;
 };
 }  // namespace flatpak_plugin

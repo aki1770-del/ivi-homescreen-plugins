@@ -28,6 +28,7 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include "messages.g.h"
 #include "plugins/common/common.h"
+#include "plugins/common/glib/main_loop.h"
 
 namespace flatpak_plugin {
 
@@ -37,6 +38,8 @@ void FlatpakPlugin::RegisterWithRegistrar(flutter::PluginRegistrar* registrar) {
 
   SetUp(registrar->messenger(), plugin.get());
 
+  plugin->Init();
+
   registrar->AddPlugin(std::move(plugin));
 }
 
@@ -45,6 +48,8 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
       registrar_(registrar) {
+  plugin_common_glib::MainLoop::GetInstance();
+  spdlog::info("[FlatpakPlugin] GLIB Main loop initialized");
   thread_ = std::thread([&] { io_context_->run(); });
 
   asio::post(*strand_, [&]() {
@@ -63,6 +68,8 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
     }
   }
 
+  shim_ = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
+                                        strand_.get());
   portal_manager_ = std::make_shared<PortalManager>(*io_context_);
   cache_manager_ = CacheManager::Builder()
                        .WithDatabasePath("/tmp/flatpak_plugin.db")
@@ -82,6 +89,11 @@ FlatpakPlugin::~FlatpakPlugin() {
   if (thread_.joinable()) {
     thread_.join();
   }
+}
+
+void FlatpakPlugin::Init() {
+  shim_-> SetupTransactionEventChannel(registrar_->messenger());
+  spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
 }
 
 // Get Flatpak Version
