@@ -3144,15 +3144,6 @@ void FlatpakShim::check_runtime(
   }
 
   GError* error = nullptr;
-  if (error) {
-    std::string error_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Failed to get installation: {}", error_msg);
-    g_clear_error(&error);
-    asio::post(strand, [callback, error_msg]() {
-      callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR", error_msg)));
-    });
-    return;
-  }
 
   const std::string metadata = get_metadata_as_string(installed_ref);
   const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
@@ -3164,20 +3155,29 @@ void FlatpakShim::check_runtime(
   auto remote_ref = find_app_in_remotes(installation, ref_name);
   std::string remote = remote_ref.first;
   auto ref = remote_ref.second.c_str();
+
   auto related_extensions = flatpak_installation_list_remote_related_refs_sync(
       installation, remote.c_str(), ref, nullptr, &error);
-  for (guint i = 0; i < related_extensions->len; i++) {
-    const auto ext = static_cast<FlatpakRelatedRef*>(
-        g_ptr_array_index(related_extensions, i));
-    const char* related_name = flatpak_ref_get_name(FLATPAK_REF(ext));
-    const char* related_branch = flatpak_ref_get_branch(FLATPAK_REF(ext));
-    const char* related_arch = flatpak_ref_get_arch(FLATPAK_REF(ext));
-    std::string related = "runtime/" + std::string(related_name) + "/" +
-                          std::string(related_arch) + "/" +
-                          std::string(related_branch);
-    if (flatpak_related_ref_should_download(ext)) {
-      extensions.emplace_back(related);
+
+  if (error) {
+    spdlog::error("[FlatpakPlugin] Failed to list related refs: {}",
+                  error->message);
+    g_clear_error(&error);
+  } else if (related_extensions) {
+    for (guint i = 0; i < related_extensions->len; i++) {
+      const auto ext = static_cast<FlatpakRelatedRef*>(
+          g_ptr_array_index(related_extensions, i));
+      const char* related_name = flatpak_ref_get_name(FLATPAK_REF(ext));
+      const char* related_branch = flatpak_ref_get_branch(FLATPAK_REF(ext));
+      const char* related_arch = flatpak_ref_get_arch(FLATPAK_REF(ext));
+      std::string related = "runtime/" + std::string(related_name) + "/" +
+                            std::string(related_arch) + "/" +
+                            std::string(related_branch);
+      if (flatpak_related_ref_should_download(ext)) {
+        extensions.emplace_back(related);
+      }
     }
+    g_ptr_array_unref(related_extensions);
   }
 
   const std::string& extension_remote = remote;
@@ -3203,7 +3203,7 @@ void FlatpakShim::check_runtime(
     install_runtime(
         runtime, runtime_remote, strand, installation,
         [callback, strand = &strand, installation, extensions, extension_remote,
-         this](const ErrorOr<bool>& runtime_result) {
+         self = shared_from_this()](const ErrorOr<bool>& runtime_result) {
           if (!runtime_result.value()) {
             spdlog::error("[FlatpakPlugin] Failed to install runtime");
             asio::post(*strand, [callback, runtime_result]() {
@@ -3215,7 +3215,9 @@ void FlatpakShim::check_runtime(
           spdlog::info("[FlatpakPlugin] Runtime installed successfully");
 
           if (!extensions.empty()) {
-            install_extensions(
+            spdlog::debug(
+                "[FlatpakPlugin] Checking Extensions after installing runtime");
+            self->install_extensions(
                 extensions, extension_remote, *strand, installation,
                 [callback, installation,
                  strand](const ErrorOr<bool>& ext_result) {
@@ -3225,8 +3227,10 @@ void FlatpakShim::check_runtime(
                   });
                 });
           } else {
-            asio::post(*strand,
-                       [callback]() { callback(ErrorOr<bool>(true)); });
+            asio::post(*strand, [callback, installation]() {
+              g_object_unref(installation);
+              callback(ErrorOr<bool>(true));
+            });
           }
         });
     return;
@@ -3236,22 +3240,27 @@ void FlatpakShim::check_runtime(
   spdlog::debug(
       "[FlatpakPlugin] Runtime already installed, checking extensions");
 
-  if (!extensions.empty()) {
-    install_extensions(extensions, extension_remote, strand, installation,
-                       [callback, strand = &strand,
-                        installation](const ErrorOr<bool>& ext_result) {
-                         asio::post(*strand,
-                                    [callback, ext_result, installation]() {
-                                      g_object_unref(installation);
-                                      callback(ext_result);
-                                    });
-                       });
-  } else {
+  if (extensions.empty()) {
+    spdlog::info("[FlatpakPlugin] No extensions needed for {}",
+                 sandbox.application.name);
+
     asio::post(strand, [callback, installation]() {
       g_object_unref(installation);
       callback(ErrorOr<bool>(true));
     });
+    return;
   }
+
+  spdlog::debug("[FlatpakPlugin] checking {} extensions", extensions.size());
+  install_extensions(extensions, extension_remote, strand, installation,
+                     [callback, strand_ptr = &strand,
+                      installation](const ErrorOr<bool>& result) {
+                       asio::post(*strand_ptr,
+                                  [callback, result, installation]() {
+                                    g_object_unref(installation);
+                                    callback(result);
+                                  });
+                     });
 }
 
 bool FlatpakShim::is_runtime_installed_for_app(
@@ -3430,9 +3439,13 @@ void FlatpakShim::install_extensions(
                       extension, error->message);
       }
       g_clear_error(&error);
+    } else {
+      missing_extensions.emplace_back(extension);
+      spdlog::debug("[FlatpakPlugin] Extension {} not installed", extension);
     }
     g_object_unref(ref);
   }
+
   if (missing_extensions.empty()) {
     spdlog::debug("[FlatpakPlugin] All extensions already installed");
     asio::post(strand, [complete_callback]() {
@@ -3458,6 +3471,8 @@ void FlatpakShim::install_extensions(
   auto self = shared_from_this();
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_reinstall(transaction, FALSE);
+  flatpak_transaction_set_disable_dependencies(transaction, FALSE);
+  flatpak_transaction_set_disable_related(transaction, FALSE);
 
   // connect all transaction signals
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
@@ -3525,7 +3540,6 @@ void FlatpakShim::install_extensions(
 
 void FlatpakShim::SetupTransactionEventChannel(
     flutter::BinaryMessenger* messenger) {
-
   if (!messenger) {
     spdlog::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
@@ -3540,8 +3554,7 @@ void FlatpakShim::SetupTransactionEventChannel(
   try {
     event_channel_ =
         std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-            messenger,
-            "flutter.io/flatpakPlugin/flatpakEvents",
+            messenger, "flutter.io/flatpakPlugin/flatpakEvents",
             &flutter::StandardMethodCodec::GetInstance());
 
     // Set stream handler
@@ -3549,12 +3562,12 @@ void FlatpakShim::SetupTransactionEventChannel(
         std::make_unique<
             flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
             // onListen callback
-            [this](const flutter::EncodableValue* /* arguments */,
-                   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
-                       events)
+            [this](
+                const flutter::EncodableValue* /* arguments */,
+                std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
+                    events)
                 -> std::unique_ptr<
                     flutter::StreamHandlerError<flutter::EncodableValue>> {
-
               {
                 std::lock_guard<std::mutex> lock(event_sink_mutex_);
                 event_sink_ = std::move(events);
@@ -3581,7 +3594,8 @@ void FlatpakShim::SetupTransactionEventChannel(
 
               return nullptr;
             }));
-    spdlog::info("[FlatpakPlugin] Channel name: flutter.io/flatpakPlugin/flatpakEvents");
+    spdlog::info(
+        "[FlatpakPlugin] Channel name: flutter.io/flatpakPlugin/flatpakEvents");
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
                   e.what());
@@ -3657,7 +3671,8 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
 
   if (handler->strand_) {
     asio::post(*handler->strand_, [handler, percentage, is_estimating,
-                                   status = status ? std::string(status) : std::string(""),
+                                   status = status ? std::string(status)
+                                                   : std::string(""),
                                    bytes_transfered, start_time]() {
       try {
         flutter::EncodableMap ProgressMap;
@@ -3712,46 +3727,49 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
       flatpak_transaction_operation_get_operation_type(operation);
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler,
-                                   operation_ref = operation_ref ? std::string(operation_ref) : std::string(""),
-                                   operation_type]() {
-      try {
-        flutter::EncodableMap OperationMap;
-        OperationMap[flutter::EncodableValue("type")] =
-            flutter::EncodableValue("operation_started");
-        OperationMap[flutter::EncodableValue("operation_ref")] =
-            flutter::EncodableValue(operation_ref);
+    asio::post(
+        *handler->strand_,
+        [handler,
+         operation_ref =
+             operation_ref ? std::string(operation_ref) : std::string(""),
+         operation_type]() {
+          try {
+            flutter::EncodableMap OperationMap;
+            OperationMap[flutter::EncodableValue("type")] =
+                flutter::EncodableValue("operation_started");
+            OperationMap[flutter::EncodableValue("operation_ref")] =
+                flutter::EncodableValue(operation_ref);
 
-        std::string operation_type_str = "unknown";
-        switch (operation_type) {
-          case FLATPAK_TRANSACTION_OPERATION_INSTALL:
-            operation_type_str = "install";
-            break;
-          case FLATPAK_TRANSACTION_OPERATION_UPDATE:
-            operation_type_str = "update";
-            break;
-          case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
-            operation_type_str = "install_bundle";
-            break;
-          case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
-            operation_type_str = "uninstall";
-            break;
-          case FLATPAK_TRANSACTION_OPERATION_LAST_TYPE:
-            operation_type_str = "last_type";
-            break;
-          default:
-            break;
-        }
+            std::string operation_type_str = "unknown";
+            switch (operation_type) {
+              case FLATPAK_TRANSACTION_OPERATION_INSTALL:
+                operation_type_str = "install";
+                break;
+              case FLATPAK_TRANSACTION_OPERATION_UPDATE:
+                operation_type_str = "update";
+                break;
+              case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
+                operation_type_str = "install_bundle";
+                break;
+              case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
+                operation_type_str = "uninstall";
+                break;
+              case FLATPAK_TRANSACTION_OPERATION_LAST_TYPE:
+                operation_type_str = "last_type";
+                break;
+              default:
+                break;
+            }
 
-        OperationMap[flutter::EncodableValue("operation_type")] =
-            flutter::EncodableValue(operation_type_str);
+            OperationMap[flutter::EncodableValue("operation_type")] =
+                flutter::EncodableValue(operation_type_str);
 
-        handler->SendTransactionEvent(OperationMap);
-      } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending operation event: {}",
-                      e.what());
-      }
-    });
+            handler->SendTransactionEvent(OperationMap);
+          } catch (const std::exception& e) {
+            spdlog::error("[FlatpakPlugin] Error sending operation event: {}",
+                          e.what());
+          }
+        });
   }
 }
 
@@ -3776,27 +3794,27 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
   }
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler,
-                                   ref = ref ? std::string(ref) : std::string(""),
-                                   commit = commit ? std::string(commit) : std::string(""),
-                                   result]() {
-      try {
-        flutter::EncodableMap OperationCompleteMap;
-        OperationCompleteMap[flutter::EncodableValue("type")] =
-            flutter::EncodableValue("operation_complete");
-        OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
-            flutter::EncodableValue(ref);
-        OperationCompleteMap[flutter::EncodableValue("commit")] =
-            flutter::EncodableValue(commit);
-        OperationCompleteMap[flutter::EncodableValue("success")] =
-            flutter::EncodableValue(static_cast<int32_t>(result));
+    asio::post(
+        *handler->strand_,
+        [handler, ref = ref ? std::string(ref) : std::string(""),
+         commit = commit ? std::string(commit) : std::string(""), result]() {
+          try {
+            flutter::EncodableMap OperationCompleteMap;
+            OperationCompleteMap[flutter::EncodableValue("type")] =
+                flutter::EncodableValue("operation_complete");
+            OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
+                flutter::EncodableValue(ref);
+            OperationCompleteMap[flutter::EncodableValue("commit")] =
+                flutter::EncodableValue(commit);
+            OperationCompleteMap[flutter::EncodableValue("success")] =
+                flutter::EncodableValue(static_cast<int32_t>(result));
 
-        handler->SendTransactionEvent(OperationCompleteMap);
-      } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending complete event: {}",
-                      e.what());
-      }
-    });
+            handler->SendTransactionEvent(OperationCompleteMap);
+          } catch (const std::exception& e) {
+            spdlog::error("[FlatpakPlugin] Error sending complete event: {}",
+                          e.what());
+          }
+        });
   }
 }
 
@@ -3811,28 +3829,32 @@ gboolean FlatpakShim::OnOperationError(
   auto operation_ref = flatpak_transaction_operation_get_ref(operation);
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler,
-                                   operation_ref = operation_ref ? std::string(operation_ref) : std::string(""),
-                                   error_message = error ? std::string(error->message) : std::string(""),
-                                   error_details]() {
-      try {
-        flutter::EncodableMap OperationErrorMap;
-        OperationErrorMap[flutter::EncodableValue("type")] =
-            flutter::EncodableValue("operation_error");
-        OperationErrorMap[flutter::EncodableValue("operation_ref")] =
-            flutter::EncodableValue(operation_ref);
-        OperationErrorMap[flutter::EncodableValue("error_message")] =
-            flutter::EncodableValue(error_message);
-        OperationErrorMap[flutter::EncodableValue("fatal")] =
-            flutter::EncodableValue(
-                !(error_details & FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
+    asio::post(
+        *handler->strand_,
+        [handler,
+         operation_ref =
+             operation_ref ? std::string(operation_ref) : std::string(""),
+         error_message = error ? std::string(error->message) : std::string(""),
+         error_details]() {
+          try {
+            flutter::EncodableMap OperationErrorMap;
+            OperationErrorMap[flutter::EncodableValue("type")] =
+                flutter::EncodableValue("operation_error");
+            OperationErrorMap[flutter::EncodableValue("operation_ref")] =
+                flutter::EncodableValue(operation_ref);
+            OperationErrorMap[flutter::EncodableValue("error_message")] =
+                flutter::EncodableValue(error_message);
+            OperationErrorMap[flutter::EncodableValue("fatal")] =
+                flutter::EncodableValue(
+                    !(error_details &
+                      FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
 
-        handler->SendTransactionEvent(OperationErrorMap);
-      } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending error event: {}",
-                      e.what());
-      }
-    });
+            handler->SendTransactionEvent(OperationErrorMap);
+          } catch (const std::exception& e) {
+            spdlog::error("[FlatpakPlugin] Error sending error event: {}",
+                          e.what());
+          }
+        });
   }
 
   return TRUE;
@@ -3892,7 +3914,8 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
   }
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler, total_ops, ops_list = std::move(ops_list)]() {
+    asio::post(*handler->strand_, [handler, total_ops,
+                                   ops_list = std::move(ops_list)]() {
       try {
         flutter::EncodableMap ready_event;
         ready_event[flutter::EncodableValue("type")] =

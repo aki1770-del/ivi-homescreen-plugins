@@ -555,9 +555,8 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id =
-      "com.valvesoftware.Steam";  // net.lutris.Lutris // com.spotify.Client //
-                                  // com.valvesoftware.Steam
+  auto id = "com.spotify.Client";  // net.lutris.Lutris // com.spotify.Client //
+                                   // com.valvesoftware.Steam
 
   auto result = shim->ApplicationStart(id, *strand, portal_manager);
 
