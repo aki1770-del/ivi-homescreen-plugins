@@ -38,6 +38,7 @@
 #include "appstream_catalog.h"
 #include "asio/bind_executor.hpp"
 #include "asio/post.hpp"
+#include <asio/dispatch.hpp>
 #include "component.h"
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
@@ -3244,7 +3245,8 @@ void FlatpakShim::check_runtime(
     spdlog::info("[FlatpakPlugin] No extensions needed for {}",
                  sandbox.application.name);
 
-    asio::post(strand, [callback, installation]() {
+    asio::dispatch(strand, [callback, installation]() {
+      spdlog::debug("[FlatpakPlugin] Executing callback (no extensions)");
       g_object_unref(installation);
       callback(ErrorOr<bool>(true));
     });
