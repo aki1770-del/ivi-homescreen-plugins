@@ -257,7 +257,7 @@ TEST_F(FlatpakPluginTest, AddEmptyRemoteTest) {
 
 // Install a real application and uninstall it in another test to clean
 // the environment.
-TEST_F(FlatpakPluginTest, InstallAppTest) {
+TEST_F(FlatpakPluginTest, ApplicationInstallTest) {
   auto io_context = std::make_shared<asio::io_context>();
   auto work_guard = asio::make_work_guard(*io_context);
   auto strand = std::make_shared<asio::io_context::strand>(*io_context);
@@ -558,13 +558,16 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto id = "com.spotify.Client";  // net.lutris.Lutris // com.spotify.Client //
                                    // com.valvesoftware.Steam
 
-  auto result = shim->ApplicationStart(id, *strand, portal_manager);
+  shim->ApplicationStart(
+      id, *strand, portal_manager,
+      [guard](const ErrorOr<bool>& result) { guard->set_value(result); });
 
-  if (result.has_error()) {
-    FAIL() << "ApplicationStart failed: " << result.error().message();
-  }
+  auto status = future.wait_for(std::chrono::minutes(2));
 
-  ASSERT_TRUE(result.value());
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Installation timed out after 2 minutes";
+
+  auto result = future.get();
 
   std::this_thread::sleep_for(std::chrono::minutes(2));
 
@@ -604,37 +607,60 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
                                    "com.visualstudio.code"};
   auto messenger = GetTestMessenger();
 
-  for (const auto& app_id : apps) {
-    auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
-    auto result = shim->ApplicationStart(app_id, *strand, portal_manager);
+  struct PromiseGuard {
+    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
+    std::once_flag flag;
 
-    if (result.has_error()) {
-      EXPECT_TRUE(result.value())
-          << "App " << app_id
-          << " failed to start: " << result.error().message();
-    } else {
-      EXPECT_TRUE(result.value());
+    void set_value(ErrorOr<bool> value) {
+      std::call_once(flag, [this, value = std::move(value)]() mutable {
+        try {
+          promise->set_value(std::move(value));
+        } catch (...) {
+        }
+      });
     }
+  };
+
+  for (const auto& app_id : apps) {
+    auto guard = std::make_shared<PromiseGuard>();
+    guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
+    auto future = guard->promise->get_future();
+
+    auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
+    shim->ApplicationStart(
+        app_id, *strand, portal_manager,
+        [guard](const ErrorOr<bool>& start_result) {
+          spdlog::debug("[FlatpakPlugin] ApplicationStart callback received");
+          guard->set_value(start_result);
+        });
+
+    auto status = future.wait_for(std::chrono::minutes(2));
+    ASSERT_NE(status, std::future_status::timeout)
+        << "App start timed out for " << app_id;
+
+    auto result = future.get();
+    EXPECT_TRUE(result.value()) << "Failed to start app: " << app_id;
+
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
-  std::this_thread::sleep_for(std::chrono::minutes(2));
+  std::this_thread::sleep_for(std::chrono::seconds(5));
 
   for (const auto& app_id : apps) {
     bool running = FlatpakShim::is_app_running(app_id);
-    EXPECT_TRUE(running);
+    EXPECT_TRUE(running) << "App not running: " << app_id;
   }
 
   for (const auto& app_id : apps) {
-    auto result = FlatpakShim::ApplicationStop(app_id);
-    EXPECT_TRUE(result.value());
+    auto stop_result = FlatpakShim::ApplicationStop(app_id);
+    EXPECT_TRUE(stop_result.value()) << "Failed to stop app: " << app_id;
   }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   for (const auto& app_id : apps) {
     bool running = FlatpakShim::is_app_running(app_id);
-    EXPECT_FALSE(running);
+    EXPECT_FALSE(running) << "App still running: " << app_id;
   }
 
   work_guard.reset();

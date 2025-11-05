@@ -35,10 +35,10 @@
 #include <flutter/event_stream_handler.h>
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/standard_method_codec.h>
+#include <asio/dispatch.hpp>
 #include "appstream_catalog.h"
 #include "asio/bind_executor.hpp"
 #include "asio/post.hpp"
-#include <asio/dispatch.hpp>
 #include "component.h"
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
@@ -1749,7 +1749,6 @@ void FlatpakShim::ApplicationStart(
     asio::io_context::strand& strand,
     const std::shared_ptr<PortalManager>& portal_manager,
     std::function<void(const ErrorOr<bool>&)> completion_callback) {
-
   if (id.empty()) {
     completion_callback(ErrorOr<bool>(
         FlutterError("INVALID_APP_ID", "Application ID is required")));
@@ -1780,7 +1779,8 @@ void FlatpakShim::ApplicationStart(
   auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}", error->message);
+    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
+                  error->message);
     g_clear_error(&error);
     g_object_unref(installation);
     completion_callback(ErrorOr<bool>(
@@ -1870,8 +1870,8 @@ void FlatpakShim::ApplicationStart(
   if (!app_found) {
     spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
     g_object_unref(installation);
-    completion_callback(ErrorOr<bool>(
-        FlutterError("APP_NOT_FOUND", "Application not found")));
+    completion_callback(
+        ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
     return;
   }
 
@@ -1883,13 +1883,11 @@ void FlatpakShim::ApplicationStart(
   g_object_ref(installed);
   g_object_ref(installation);
 
-
   check_runtime(
       installed, installation, strand,
       [this, completion_callback, installed, installation, found_app_name,
        found_arch, found_branch, portal_manager,
        strand_ptr = &strand](const ErrorOr<bool>& runtime_result) {
-
         if (runtime_result.has_error()) {
           spdlog::error("[FlatpakPlugin] Runtime check failed: {}",
                         runtime_result.error().message());
@@ -1910,10 +1908,9 @@ void FlatpakShim::ApplicationStart(
 
         create_sandbox(
             installed, *strand_ptr,
-            [this, completion_callback, installation, found_app_name, found_arch,
-             found_branch, portal_manager, installed,
+            [this, completion_callback, installation, found_app_name,
+             found_arch, found_branch, portal_manager, installed,
              strand_ptr](bool sandbox_success) {
-
               if (!sandbox_success) {
                 spdlog::error("[FlatpakPlugin] Failed to create sandbox");
                 g_object_unref(installed);
@@ -1944,8 +1941,9 @@ void FlatpakShim::ApplicationStart(
 
               if (instance) {
                 pid_t pid = flatpak_instance_get_pid(instance);
-                spdlog::info("[FlatpakPlugin] Successfully launched: {} (PID: {})",
-                             found_app_name, pid);
+                spdlog::info(
+                    "[FlatpakPlugin] Successfully launched: {} (PID: {})",
+                    found_app_name, pid);
 
                 auto app_session = std::make_shared<MonitorSession>(
                     strand_ptr, found_app_name, pid, portal_manager, instance);
@@ -3142,7 +3140,8 @@ void FlatpakShim::check_runtime(
     const std::function<void(ErrorOr<bool>)>& callback) {
   if (!installed_ref) {
     asio::dispatch(strand, [callback]() {
-      callback(ErrorOr<bool>(FlutterError("INVALID_REF", "Installed ref is null")));
+      callback(
+          ErrorOr<bool>(FlutterError("INVALID_REF", "Installed ref is null")));
     });
     return;
   }

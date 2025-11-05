@@ -319,9 +319,8 @@ void FlatpakPlugin::ApplicationUpdate(
 void FlatpakPlugin::ApplicationStart(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-
-  auto result_callback = std::make_shared<std::function<void(ErrorOr<bool>)>>(
-      std::move(result));
+  auto result_callback =
+      std::make_shared<std::function<void(ErrorOr<bool>)>>(std::move(result));
 
   asio::dispatch(*strand_, [this, id, result_callback]() {
     spdlog::debug("[FlatpakPlugin] ApplicationStart executing on strand");
