@@ -3137,9 +3137,8 @@ void FlatpakShim::check_runtime(
     asio::io_context::strand& strand,
     const std::function<void(ErrorOr<bool>)>& callback) {
   if (!installed_ref) {
-    asio::post(strand, [callback]() {
-      callback(
-          ErrorOr<bool>(FlutterError("INVALID_REF", "Installed ref is null")));
+    asio::dispatch(strand, [callback]() {
+      callback(ErrorOr<bool>(FlutterError("INVALID_REF", "Installed ref is null")));
     });
     return;
   }
@@ -3186,7 +3185,7 @@ void FlatpakShim::check_runtime(
   if (runtime.empty()) {
     spdlog::error("[FlatpakPlugin] No runtime specified for {}",
                   sandbox.application.name);
-    asio::post(strand, [callback]() {
+    asio::dispatch(strand, [callback]() {
       callback(ErrorOr<bool>(
           FlutterError("NO_RUNTIME", "App has no runtime requirement")));
     });
@@ -3402,7 +3401,8 @@ void FlatpakShim::install_extensions(
     const std::function<void(ErrorOr<bool>)>& complete_callback) {
   if (extensions.empty()) {
     spdlog::debug("[FlatpakPlugin] Installing extensions is empty");
-    asio::post(strand, [complete_callback]() {
+    asio::dispatch(strand, [complete_callback]() {
+      spdlog::debug("[FlatpakPlugin] Completing with success (no extensions)");
       complete_callback(ErrorOr<bool>(true));
     });
     return;
@@ -3449,8 +3449,10 @@ void FlatpakShim::install_extensions(
   }
 
   if (missing_extensions.empty()) {
-    spdlog::debug("[FlatpakPlugin] All extensions already installed");
-    asio::post(strand, [complete_callback]() {
+    spdlog::info("[FlatpakPlugin] All {} extensions already installed",
+                 extensions.size());
+    asio::dispatch(strand, [complete_callback]() {
+      spdlog::debug("[FlatpakPlugin] Completing with success (all installed)");
       complete_callback(ErrorOr<bool>(true));
     });
     return;
