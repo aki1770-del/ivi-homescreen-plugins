@@ -1744,18 +1744,22 @@ void FlatpakShim::ApplicationUpdate(
   }).detach();
 }
 
-ErrorOr<bool> FlatpakShim::ApplicationStart(
+void FlatpakShim::ApplicationStart(
     const std::string& id,
     asio::io_context::strand& strand,
-    const std::shared_ptr<PortalManager>& portal_manager) {
+    const std::shared_ptr<PortalManager>& portal_manager,
+    std::function<void(const ErrorOr<bool>&)> completion_callback) {
+
   if (id.empty()) {
-    return ErrorOr<bool>(
-        FlutterError("INVALID_APP_ID", "Application ID is required"));
+    completion_callback(ErrorOr<bool>(
+        FlutterError("INVALID_APP_ID", "Application ID is required")));
+    return;
   }
 
   if (is_app_running(id)) {
-    return ErrorOr<bool>(
-        FlutterError("APP_RUNNING", "Application already running"));
+    completion_callback(ErrorOr<bool>(
+        FlutterError("APP_RUNNING", "Application already running")));
+    return;
   }
 
   spdlog::debug("[FlatpakPlugin] Starting application: {}", id);
@@ -1768,19 +1772,20 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
     spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
                   error->message);
     g_clear_error(&error);
-    return ErrorOr<bool>(
-        FlutterError("INSTALLATION_ERROR", "Failed to get user installation"));
+    completion_callback(ErrorOr<bool>(
+        FlutterError("INSTALLATION_ERROR", "Failed to get user installation")));
+    return;
   }
 
   auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
+    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}", error->message);
     g_clear_error(&error);
     g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("START_FAILED", "Failed to get installed apps"));
+    completion_callback(ErrorOr<bool>(
+        FlutterError("START_FAILED", "Failed to get installed apps")));
+    return;
   }
 
   bool app_found = false;
@@ -1865,8 +1870,9 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
   if (!app_found) {
     spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
     g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("APP_NOT_FOUND", "Application not found"));
+    completion_callback(ErrorOr<bool>(
+        FlutterError("APP_NOT_FOUND", "Application not found")));
+    return;
   }
 
   spdlog::info(
@@ -1877,97 +1883,95 @@ ErrorOr<bool> FlatpakShim::ApplicationStart(
   g_object_ref(installed);
   g_object_ref(installation);
 
-  std::promise<ErrorOr<bool>> runtime_promise;
-  auto runtime_future = runtime_promise.get_future();
 
-  check_runtime(installed, installation, strand,
-                [&runtime_promise,
-                 strand_ptr = &strand](const ErrorOr<bool>& runtime_result) {
-                  asio::post(*strand_ptr, [&runtime_promise, runtime_result]() {
-                    runtime_promise.set_value(runtime_result);
-                  });
-                });
+  check_runtime(
+      installed, installation, strand,
+      [this, completion_callback, installed, installation, found_app_name,
+       found_arch, found_branch, portal_manager,
+       strand_ptr = &strand](const ErrorOr<bool>& runtime_result) {
 
-  auto runtime_result = runtime_future.get();
+        if (runtime_result.has_error()) {
+          spdlog::error("[FlatpakPlugin] Runtime check failed: {}",
+                        runtime_result.error().message());
+          g_object_unref(installed);
+          g_object_unref(installation);
+          completion_callback(runtime_result);
+          return;
+        }
 
-  if (runtime_result.has_error()) {
-    spdlog::error("[FlatpakPlugin] Runtime check failed: {}",
-                  runtime_result.error().message());
-    g_object_unref(installed);
-    g_object_unref(installation);
-    return runtime_result;
-  }
+        if (!runtime_result.value()) {
+          spdlog::error("[FlatpakPlugin] Runtime not available for app");
+          g_object_unref(installed);
+          g_object_unref(installation);
+          completion_callback(ErrorOr<bool>(
+              FlutterError("RUNTIME_ERROR", "Runtime not available for app")));
+          return;
+        }
 
-  if (!runtime_result.value()) {
-    spdlog::error("[FlatpakPlugin] Runtime not available for app");
-    g_object_unref(installed);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("RUNTIME_ERROR", "Runtime not available for app"));
-  }
+        create_sandbox(
+            installed, *strand_ptr,
+            [this, completion_callback, installation, found_app_name, found_arch,
+             found_branch, portal_manager, installed,
+             strand_ptr](bool sandbox_success) {
 
-  // Use promise/future for create_sandbox
-  std::promise<bool> sandbox_promise;
-  auto sandbox_future = sandbox_promise.get_future();
+              if (!sandbox_success) {
+                spdlog::error("[FlatpakPlugin] Failed to create sandbox");
+                g_object_unref(installed);
+                g_object_unref(installation);
+                completion_callback(ErrorOr<bool>(
+                    FlutterError("START_FAILED", "Failed to create sandbox")));
+                return;
+              }
 
-  create_sandbox(
-      installed, strand,
-      [&sandbox_promise, strand_ptr = &strand](bool success) {
-        asio::post(*strand_ptr, [&sandbox_promise, success]() {
-          sandbox_promise.set_value(success);
-        });
-      },
-      portal_manager.get());
+              // Launch the application
+              GError* error = nullptr;
+              FlatpakInstance* instance = nullptr;
+              flatpak_installation_launch_full(
+                  installation, FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP,
+                  found_app_name.c_str(), found_arch.c_str(),
+                  found_branch.c_str(), nullptr, &instance, nullptr, &error);
 
-  bool sandbox_success = sandbox_future.get();
+              if (error) {
+                spdlog::error("[FlatpakPlugin] Failed to launch app: {}",
+                              error->message);
+                g_clear_error(&error);
+                g_object_unref(installed);
+                g_object_unref(installation);
+                completion_callback(ErrorOr<bool>(FlutterError(
+                    "START_FAILED", "Failed to launch application")));
+                return;
+              }
 
-  if (!sandbox_success) {
-    spdlog::error("[FlatpakPlugin] Failed to create sandbox");
-    g_object_unref(installed);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("START_FAILED", "Failed to create sandbox"));
-  }
+              if (instance) {
+                pid_t pid = flatpak_instance_get_pid(instance);
+                spdlog::info("[FlatpakPlugin] Successfully launched: {} (PID: {})",
+                             found_app_name, pid);
 
-  FlatpakInstance* instance = nullptr;
-  flatpak_installation_launch_full(
-      installation, FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP, found_app_name.c_str(),
-      found_arch.c_str(), found_branch.c_str(), nullptr, &instance, nullptr,
-      &error);
+                auto app_session = std::make_shared<MonitorSession>(
+                    strand_ptr, found_app_name, pid, portal_manager, instance);
 
-  if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to run app: {}", error->message);
-    g_clear_error(&error);
-    g_object_unref(installed);
-    g_object_unref(installation);
-    return ErrorOr<bool>(
-        FlutterError("START_FAILED", "Failed to launch application"));
-  }
+                {
+                  std::lock_guard<std::mutex> lock(monitor_mutex_);
+                  active_sessions_[found_app_name] = app_session;
+                }
 
-  if (instance) {
-    pid_t pid = flatpak_instance_get_pid(instance);
-    spdlog::info(
-        "[FlatpakPlugin] Successfully launched application: {} (PID: {})",
-        found_app_name, pid);
+                monitor_app(app_session);
 
-    auto app_session = std::make_shared<MonitorSession>(
-        &strand, found_app_name, pid, portal_manager, instance);
+                g_object_unref(installed);
+                g_object_unref(installation);
 
-    {
-      std::lock_guard<std::mutex> lock(monitor_mutex_);
-      active_sessions_[found_app_name] = app_session;
-    }
+                completion_callback(ErrorOr<bool>(true));
+                return;
+              }
 
-    monitor_app(app_session);
-
-    g_object_unref(installed);
-    g_object_unref(installation);
-    return ErrorOr<bool>(true);
-  }
-
-  g_object_unref(installed);
-  g_object_unref(installation);
-  return ErrorOr<bool>(FlutterError("START_FAILED", "Failed to get instance"));
+              spdlog::error("[FlatpakPlugin] Failed to get instance");
+              g_object_unref(installed);
+              g_object_unref(installation);
+              completion_callback(ErrorOr<bool>(
+                  FlutterError("START_FAILED", "Failed to get instance")));
+            },
+            portal_manager.get());
+      });
 }
 
 ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {

@@ -316,20 +316,23 @@ void FlatpakPlugin::ApplicationUpdate(
   });
 }
 
-ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
+void FlatpakPlugin::ApplicationStart(
+    const std::string& id,
+    std::function<void(ErrorOr<bool> reply)> result) {
 
-  std::promise<ErrorOr<bool>> promise;
-  auto future = promise.get_future();
+  auto result_callback = std::make_shared<std::function<void(ErrorOr<bool>)>>(
+      std::move(result));
 
-  asio::dispatch(*strand_, [this, id, &promise, shim]() {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-    auto result = shim->ApplicationStart(id, *strand_, portal_manager_);
-    promise.set_value(std::move(result));
+  asio::dispatch(*strand_, [this, id, result_callback]() {
+    spdlog::debug("[FlatpakPlugin] ApplicationStart executing on strand");
+
+    shim_->ApplicationStart(
+        id, *strand_, portal_manager_,
+        [result_callback](const ErrorOr<bool>& start_result) {
+          spdlog::debug("[FlatpakPlugin] ApplicationStart callback received");
+          (*result_callback)(start_result);
+        });
   });
-
-  return future.get();
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {

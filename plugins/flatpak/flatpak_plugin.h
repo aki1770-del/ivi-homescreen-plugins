@@ -88,7 +88,9 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
       std::function<void(ErrorOr<bool> reply)> result) override;
 
   // Start application using specified configuration.
-  ErrorOr<bool> ApplicationStart(const std::string& id) override;
+  void ApplicationStart(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) override;
 
   // Stop application with given id.
   ErrorOr<bool> ApplicationStop(const std::string& id) override;

@@ -400,7 +400,9 @@ class FlatpakApi {
       const std::string& id,
       std::function<void(ErrorOr<bool> reply)> result) = 0;
   // Start application using specified configuration.
-  virtual ErrorOr<bool> ApplicationStart(const std::string& id) = 0;
+  virtual void ApplicationStart(
+      const std::string& id,
+      std::function<void(ErrorOr<bool> reply)> result) = 0;
   // Stop application with given id.
   virtual ErrorOr<bool> ApplicationStop(const std::string& id) = 0;
 
