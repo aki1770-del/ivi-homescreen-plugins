@@ -3557,59 +3557,60 @@ void FlatpakShim::SetupTransactionEventChannel(
     spdlog::error(
         "[FlatpakPlugin] Event channel already exists, "
         "re-registering stream handler");
-  } else {
-    try {
-      event_channel_ =
-          std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-              messenger, "flutter.io/flatpakPlugin/flatpakEvents",
-              &flutter::StandardMethodCodec::GetInstance());
-
-      spdlog::info(
-          "[FlatpakPlugin] Channel name: "
-          "flutter.io/flatpakPlugin/flatpakEvents");
-    } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
-                    e.what());
-      return;
-    }
+    return;
   }
+  try {
+    event_channel_ =
+        std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
+            messenger, "flutter.io/flatpakPlugin/flatpakEvents",
+            &flutter::StandardMethodCodec::GetInstance());
 
-  event_channel_->SetStreamHandler(
-      std::make_unique<
-          flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
-          // onListen callback
-          [this](const flutter::EncodableValue* /* arguments */,
-                 std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
-                     events)
-              -> std::unique_ptr<
-                  flutter::StreamHandlerError<flutter::EncodableValue>> {
-            {
-              std::lock_guard<std::mutex> lock(event_sink_mutex_);
-              event_sink_ = std::move(events);
-              spdlog::info("[FlatpakPlugin] Event sink connected");
-            }
+    spdlog::info(
+        "[FlatpakPlugin] Channel name: "
+        "flutter.io/flatpakPlugin/flatpakEvents");
 
-            // Send connection confirmation event
-            flutter::EncodableMap test_event;
-            test_event[flutter::EncodableValue("type")] =
-                flutter::EncodableValue("connection_established");
-            test_event[flutter::EncodableValue("message")] =
-                flutter::EncodableValue("Event channel ready");
-            SendTransactionEvent(test_event);
+    event_channel_->SetStreamHandler(
+        std::make_unique<
+            flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
+            // onListen callback
+            [this](
+                const flutter::EncodableValue* /* arguments */,
+                std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
+                    events)
+                -> std::unique_ptr<
+                    flutter::StreamHandlerError<flutter::EncodableValue>> {
+              {
+                std::lock_guard<std::mutex> lock(event_sink_mutex_);
+                event_sink_ = std::move(events);
+                spdlog::info("[FlatpakPlugin] Event sink connected");
+              }
 
-            return nullptr;
-          },
-          // onCancel callback
-          [this](const flutter::EncodableValue* /* arguments */)
-              -> std::unique_ptr<
-                  flutter::StreamHandlerError<flutter::EncodableValue>> {
-            {
-              std::lock_guard<std::mutex> lock(event_sink_mutex_);
-              event_sink_ = nullptr;
-              spdlog::info("[FlatpakPlugin] Event sink disconnected");
-            }
-            return nullptr;
-          }));
+              // Send connection confirmation event
+              flutter::EncodableMap test_event;
+              test_event[flutter::EncodableValue("type")] =
+                  flutter::EncodableValue("connection_established");
+              test_event[flutter::EncodableValue("message")] =
+                  flutter::EncodableValue("Event channel ready");
+              SendTransactionEvent(test_event);
+
+              return nullptr;
+            },
+            // onCancel callback
+            [this](const flutter::EncodableValue* /* arguments */)
+                -> std::unique_ptr<
+                    flutter::StreamHandlerError<flutter::EncodableValue>> {
+              {
+                std::lock_guard<std::mutex> lock(event_sink_mutex_);
+                event_sink_ = nullptr;
+                spdlog::info("[FlatpakPlugin] Event sink disconnected");
+              }
+              return nullptr;
+            }));
+  } catch (const std::exception& e) {
+    spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
+                  e.what());
+    return;
+  }
 }
 
 void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
