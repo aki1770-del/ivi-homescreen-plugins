@@ -49,9 +49,6 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
                        flutter::BinaryMessenger* messenger = nullptr,
                        asio::io_context::strand* strand = nullptr)
       : plugin_(plugin), messenger_(messenger), strand_(strand) {
-    if (messenger_) {
-      SetupTransactionEventChannel(messenger_);
-    }
   }
 
   /**
