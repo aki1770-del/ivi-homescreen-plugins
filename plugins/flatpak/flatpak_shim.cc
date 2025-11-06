@@ -1449,7 +1449,7 @@ void FlatpakShim::ApplicationUninstall(
   // Notify Flutter that the uninstallation is starting
   flutter::EncodableMap start_event;
   start_event[flutter::EncodableValue("type")] =
-      flutter::EncodableValue("update_started");
+      flutter::EncodableValue("uninstallation_started");
   start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
   start_event[flutter::EncodableValue("ref")] =
       flutter::EncodableValue(found_app_name);
