@@ -176,9 +176,6 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
 void FlatpakPlugin::ApplicationInstall(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -200,8 +197,8 @@ void FlatpakPlugin::ApplicationInstall(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
       if (install_result.has_error()) {
         FlutterError error("INSTALL_FAILED", install_result.error().message(),
                            flutter::EncodableValue());
@@ -221,9 +218,6 @@ void FlatpakPlugin::ApplicationInstall(
 void FlatpakPlugin::ApplicationUninstall(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -245,8 +239,8 @@ void FlatpakPlugin::ApplicationUninstall(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->ApplicationUninstall(
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationUninstall(
         id, [guard](const ErrorOr<bool>& uninstall_result) {
           if (uninstall_result.has_error()) {
             FlutterError error("UNINSTALL_FAILED",
@@ -268,9 +262,6 @@ void FlatpakPlugin::ApplicationUninstall(
 void FlatpakPlugin::ApplicationUpdate(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -292,8 +283,8 @@ void FlatpakPlugin::ApplicationUpdate(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->ApplicationUpdate(id, [guard](const ErrorOr<bool>& update_result) {
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationUpdate(id, [guard](const ErrorOr<bool>& update_result) {
       if (update_result.has_error()) {
         FlutterError error("UPDATE_FAILED", update_result.error().message(),
                            flutter::EncodableValue());
