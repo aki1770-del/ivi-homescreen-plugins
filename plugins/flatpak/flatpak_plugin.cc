@@ -201,8 +201,6 @@ void FlatpakPlugin::ApplicationInstall(
   guard->callback = std::move(result);
 
   asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
     shim->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
       if (install_result.has_error()) {
         FlutterError error("INSTALL_FAILED", install_result.error().message(),
@@ -248,8 +246,6 @@ void FlatpakPlugin::ApplicationUninstall(
   guard->callback = std::move(result);
 
   asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
     shim->ApplicationUninstall(
         id, [guard](const ErrorOr<bool>& uninstall_result) {
           if (uninstall_result.has_error()) {
@@ -297,8 +293,6 @@ void FlatpakPlugin::ApplicationUpdate(
   guard->callback = std::move(result);
 
   asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
     shim->ApplicationUpdate(id, [guard](const ErrorOr<bool>& update_result) {
       if (update_result.has_error()) {
         FlutterError error("UPDATE_FAILED", update_result.error().message(),
