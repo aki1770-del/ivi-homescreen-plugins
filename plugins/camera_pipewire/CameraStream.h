@@ -79,6 +79,17 @@ class CameraStream {
   static std::optional<std::string> GetFilePathForPicture();
   [[nodiscard]] std::string takePicture() const;
 
+  std::function<void(const uint8_t* y,
+                     int y_stride,
+                     const uint8_t* u_or_uv,
+                     int u_stride,
+                     const uint8_t* v,
+                     int v_stride,
+                     int width,
+                     int height,
+                     const char* raw)>
+      on_image_frame;
+
  private:
   // PipeWire objects
   flutter::PluginRegistrarDesktop* registrar_{};
@@ -108,7 +119,7 @@ class CameraStream {
 
   // Camera name
   std::string camera_id_;
-  std::string camera_output_format = "YUV2";
+  std::string camera_output_format = "YUY2";
   // PipeWire callbacks (static => dispatch to instance)
   static void OnStreamStateChanged(void* data,
                                    pw_stream_state old_state,
@@ -117,4 +128,4 @@ class CameraStream {
   static void OnStreamProcess(void* data);
 };
 
-#endif  // PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H_
+#endif PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H_

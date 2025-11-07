@@ -15,19 +15,21 @@
  */
 
 #include "camera_plugin.h"
-
+#include <flutter/event_stream_handler_functions.h>
+#include <flutter/plugin_registrar_homescreen.h>
+#include <flutter/standard_method_codec.h>
+#include <glib.h>
+#include <jpeglib.h>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
+#include "PipewireGraph.h"
+#include "plugins/common/common.h"
 
-#include <jpeglib.h>
 extern "C" {
 #include <pipewire/pipewire.h>
 }
-
-#include <flutter/plugin_registrar_homescreen.h>
-#include "PipewireGraph.h"
-#include "plugins/common/common.h"
 
 struct CameraInfo {
   uint32_t id;
@@ -74,6 +76,37 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
   if (!PipewireGraph::instance().initialize()) {
     spdlog::error("failed to initialize PipeWire manager!");
   }
+
+  auto messenger = registrar_->messenger();
+  image_channel_ =
+      std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
+          messenger, "camera_linux/image_stream",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  auto handler = std::make_unique<
+      flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
+      /* on_listen */
+      [this](
+          const flutter::EncodableValue* /*args*/,
+          std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& sink)
+          -> std::unique_ptr<
+              flutter::StreamHandlerError<flutter::EncodableValue>> {
+        spdlog::info("[camera_plugin] image_stream on_listen");
+        image_sink_ = std::move(sink);
+        StartImageStream();  // start PipeWire or a test generator
+        return nullptr;
+      },
+      /* on_cancel */
+      [this](const flutter::EncodableValue* /*args*/)
+          -> std::unique_ptr<
+              flutter::StreamHandlerError<flutter::EncodableValue>> {
+        spdlog::info("[camera_plugin] image_stream on_cancel");
+        StopImageStream();
+        image_sink_.reset();
+        return nullptr;
+      });
+
+  image_channel_->SetStreamHandler(std::move(handler));
 }
 
 CameraPlugin::~CameraPlugin() {
@@ -91,7 +124,7 @@ ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
     list.emplace_back(std::in_place_type<std::string>,
                       std::to_string(camera.id));
   }
-  return ErrorOr<flutter::EncodableList>(list);
+  return ErrorOr<flutter::EncodableList>(std::move(list));
 }
 
 void CameraPlugin::Create(
@@ -102,6 +135,52 @@ void CameraPlugin::Create(
   if (CameraId_CameraStream.find(camera_id) == CameraId_CameraStream.end()) {
     auto new_camera =
         std::make_shared<CameraStream>(registrar_, camera_id, 640, 480);
+
+    new_camera->on_image_frame =
+        [this](const uint8_t* y, int ys, const uint8_t* u_or_uv, int us,
+               const uint8_t* v, int vs, int w, int h, const char* raw) {
+          if (!image_stream_active_ || !image_sink_)
+            return;
+
+          struct Payload {
+            CameraPlugin* self;
+            std::vector<uint8_t> y, u, v;
+            int ys, us, vs, w, h;
+            std::string raw;
+          };
+          auto up = std::make_unique<Payload>(Payload{
+              this,
+              std::vector<uint8_t>(y, y + ys * h),
+              std::vector<uint8_t>(u_or_uv, u_or_uv + us * ((h + 1) / 2)),
+              (v ? std::vector<uint8_t>(v, v + vs * ((h + 1) / 2))
+                 : std::vector<uint8_t>()),
+              ys,
+              us,
+              vs,
+              w,
+              h,
+              raw ? std::string(raw) : std::string("I420"),
+          });
+
+          // hand off to GLib; after release(), up no longer owns it
+          Payload* p = up.release();
+
+          g_main_context_invoke_full(
+              nullptr, G_PRIORITY_DEFAULT,
+              +[](gpointer data) -> gboolean {  // '+' forces C-function pointer
+                auto* P = static_cast<Payload*>(data);
+                if (P->self->image_sink_ && P->raw == "I420") {
+                  P->self->SendI420Frame(P->y.data(), P->ys, P->u.data(), P->us,
+                                         P->v.data(), P->vs, P->w, P->h);
+                }
+                return G_SOURCE_REMOVE;
+              },
+              p,
+              +[](gpointer data) {  // exact GDestroyNotify
+                delete static_cast<Payload*>(data);
+              });
+        };
+
     CameraId_CameraStream.insert({camera_id, new_camera});
     TextureId_CameraStream.insert({new_camera->texture_id(), new_camera});
   }
@@ -153,7 +232,7 @@ int decode_mjpeg(const uint8_t* input,
   return 0;
 }
 /******************************************************************************
- * parse_props_param: Dump all properties from a SPA_TYPE_OBJECT_Props param
+ * parse_props_param: Dump all properties from an SPA_TYPE_OBJECT_Props param
  *
  * This function attempts to read each property key (like SPA_PROP_brightness)
  * from the param, then prints its value type. Real code might do more detailed
@@ -173,7 +252,7 @@ void save_image_to_jpeg(const std::string& filename,
   cinfo.err = jpeg_std_error(&jerr);
   jpeg_create_compress(&cinfo);
 
-  // Open file for writing
+  // Open a file for writing
   FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
     spdlog::error("error: unable to open file {} for writing!", filename);
@@ -291,4 +370,107 @@ void CameraPlugin::ResumePreview(
   camera_stream->ResumeStream();
   result({});
 }
+
+void CameraPlugin::StartImageStream() {
+  image_stream_active_ = true;
+}
+
+void CameraPlugin::StopImageStream() {
+  image_stream_active_ = false;
+}
+
+void CameraPlugin::SendI420Frame(const uint8_t* y,
+                                 int y_stride,
+                                 const uint8_t* u,
+                                 int u_stride,
+                                 const uint8_t* v,
+                                 int v_stride,
+                                 int width,
+                                 int height) const {
+  if (!image_sink_) {
+    return;
+  }
+
+  using flutter::EncodableList;
+  using flutter::EncodableMap;
+  using flutter::EncodableValue;
+
+  // size math as size_t
+  const auto y_size =
+      static_cast<std::size_t>(y_stride) * static_cast<std::size_t>(height);
+  const auto u_size =
+      static_cast<std::size_t>(u_stride) * static_cast<std::size_t>(height / 2);
+  const auto v_size =
+      static_cast<std::size_t>(v_stride) * static_cast<std::size_t>(height / 2);
+
+  auto yv = std::vector<std::uint8_t>(y, y + y_size);
+  auto uvv = std::vector<std::uint8_t>(u, u + u_size);
+  auto vv = std::vector<std::uint8_t>(v, v + v_size);
+
+  // EncodableValue number arm often expects 32- or 64-bit; use int32_t here.
+  const auto w32 = static_cast<std::int32_t>(width);
+  const auto h32 = static_cast<std::int32_t>(height);
+  const auto ys32 = static_cast<std::int32_t>(y_stride);
+  const auto us32 = static_cast<std::int32_t>(u_stride);
+  const auto vs32 = static_cast<std::int32_t>(v_stride);
+  constexpr std::int32_t kBytesPerPixel = 1;
+
+  EncodableList planes;
+
+  // Plane 0 (Y)
+  {
+    EncodableMap m;
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytes"),
+              EncodableValue(std::in_place_type<std::vector<std::uint8_t>>,
+                             std::move(yv)));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerRow"),
+              EncodableValue(std::in_place_type<std::int32_t>, ys32));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerPixel"),
+              EncodableValue(std::in_place_type<std::int32_t>, kBytesPerPixel));
+    planes.emplace_back(std::in_place_type<EncodableMap>, std::move(m));
+  }
+
+  // Plane 1 (U)
+  {
+    EncodableMap m;
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytes"),
+              EncodableValue(std::in_place_type<std::vector<std::uint8_t>>,
+                             std::move(uvv)));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerRow"),
+              EncodableValue(std::in_place_type<std::int32_t>, us32));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerPixel"),
+              EncodableValue(std::in_place_type<std::int32_t>, kBytesPerPixel));
+    planes.emplace_back(std::in_place_type<EncodableMap>, std::move(m));
+  }
+
+  // Plane 2 (V)
+  {
+    EncodableMap m;
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytes"),
+              EncodableValue(std::in_place_type<std::vector<std::uint8_t>>,
+                             std::move(vv)));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerRow"),
+              EncodableValue(std::in_place_type<std::int32_t>, vs32));
+    m.emplace(EncodableValue(std::in_place_type<std::string>, "bytesPerPixel"),
+              EncodableValue(std::in_place_type<std::int32_t>, kBytesPerPixel));
+    planes.emplace_back(std::in_place_type<EncodableMap>, std::move(m));
+  }
+
+  EncodableMap event;
+  event.emplace(EncodableValue(std::in_place_type<std::string>, "width"),
+                EncodableValue(std::in_place_type<std::int32_t>, w32));
+  event.emplace(EncodableValue(std::in_place_type<std::string>, "height"),
+                EncodableValue(std::in_place_type<std::int32_t>, h32));
+  event.emplace(EncodableValue(std::in_place_type<std::string>, "formatGroup"),
+                EncodableValue(std::in_place_type<std::string>, "yuv420"));
+  event.emplace(EncodableValue(std::in_place_type<std::string>, "raw"),
+                EncodableValue(std::in_place_type<std::string>, "I420"));
+  event.emplace(
+      EncodableValue(std::in_place_type<std::string>, "planes"),
+      EncodableValue(std::in_place_type<EncodableList>, std::move(planes)));
+
+  image_sink_->Success(
+      EncodableValue(std::in_place_type<EncodableMap>, std::move(event)));
+}
+
 }  // namespace camera_plugin
