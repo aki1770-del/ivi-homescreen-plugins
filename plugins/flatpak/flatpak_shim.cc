@@ -1747,7 +1747,7 @@ void FlatpakShim::ApplicationStart(
     const std::string& id,
     asio::io_context::strand& strand,
     const std::shared_ptr<PortalManager>& portal_manager,
-    std::function<void(const ErrorOr<bool>&)> completion_callback) {
+    const std::function<void(const ErrorOr<bool>&)>& completion_callback) {
   if (id.empty()) {
     completion_callback(ErrorOr<bool>(
         FlutterError("INVALID_APP_ID", "Application ID is required")));

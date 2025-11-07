@@ -229,7 +229,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       const std::string& id,
       asio::io_context::strand& strand,
       const std::shared_ptr<PortalManager>& portal_manager,
-      std::function<void(const ErrorOr<bool>&)> completion_callback);
+      const std::function<void(const ErrorOr<bool>&)>& completion_callback);
 
   /**
    * \brief Stop flatpak Application.
