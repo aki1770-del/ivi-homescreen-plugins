@@ -38,6 +38,7 @@ target_compile_options(plugin_flatpak PRIVATE
 target_link_libraries(plugin_flatpak PUBLIC
         PkgConfig::FLATPAK_DEPS
         plugin_common_curl
+        plugin_common_glib
         plugin_flatpak_cache
         platform_homescreen
 )

@@ -48,11 +48,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   explicit FlatpakShim(FlatpakPlugin* plugin = nullptr,
                        flutter::BinaryMessenger* messenger = nullptr,
                        asio::io_context::strand* strand = nullptr)
-      : plugin_(plugin), messenger_(messenger), strand_(strand) {
-    if (messenger_) {
-      SetupTransactionEventChannel(messenger_);
-    }
-  }
+      : plugin_(plugin), messenger_(messenger), strand_(strand) {}
 
   /**
    * \brief Retrieves an optional attribute from an XML node.
@@ -229,10 +225,11 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \return An ErrorOr object containing the EncodableList or an
    * error.
    */
-  ErrorOr<bool> ApplicationStart(
+  void ApplicationStart(
       const std::string& id,
       asio::io_context::strand& strand,
-      const std::shared_ptr<PortalManager>& portal_manager);
+      const std::shared_ptr<PortalManager>& portal_manager,
+      const std::function<void(const ErrorOr<bool>&)>& completion_callback);
 
   /**
    * \brief Stop flatpak Application.

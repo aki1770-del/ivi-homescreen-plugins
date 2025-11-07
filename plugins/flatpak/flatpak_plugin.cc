@@ -28,6 +28,7 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include "messages.g.h"
 #include "plugins/common/common.h"
+#include "plugins/common/glib/main_loop.h"
 
 namespace flatpak_plugin {
 
@@ -37,6 +38,8 @@ void FlatpakPlugin::RegisterWithRegistrar(flutter::PluginRegistrar* registrar) {
 
   SetUp(registrar->messenger(), plugin.get());
 
+  plugin->Init();
+
   registrar->AddPlugin(std::move(plugin));
 }
 
@@ -45,6 +48,8 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
       work_(io_context_->get_executor()),
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
       registrar_(registrar) {
+  plugin_common_glib::MainLoop::GetInstance();
+  spdlog::info("[FlatpakPlugin] GLIB Main loop initialized");
   thread_ = std::thread([&] { io_context_->run(); });
 
   asio::post(*strand_, [&]() {
@@ -63,6 +68,8 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
     }
   }
 
+  shim_ = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
+                                        strand_.get());
   portal_manager_ = std::make_shared<PortalManager>(*io_context_);
   cache_manager_ = CacheManager::Builder()
                        .WithDatabasePath("/tmp/flatpak_plugin.db")
@@ -82,6 +89,11 @@ FlatpakPlugin::~FlatpakPlugin() {
   if (thread_.joinable()) {
     thread_.join();
   }
+}
+
+void FlatpakPlugin::Init() {
+  shim_->SetupTransactionEventChannel(registrar_->messenger());
+  spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
 }
 
 // Get Flatpak Version
@@ -164,9 +176,6 @@ ErrorOr<flutter::EncodableList> FlatpakPlugin::GetApplicationsRemote(
 void FlatpakPlugin::ApplicationInstall(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -188,10 +197,8 @@ void FlatpakPlugin::ApplicationInstall(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
-    shim->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationInstall(id, [guard](const ErrorOr<bool>& install_result) {
       if (install_result.has_error()) {
         FlutterError error("INSTALL_FAILED", install_result.error().message(),
                            flutter::EncodableValue());
@@ -211,9 +218,6 @@ void FlatpakPlugin::ApplicationInstall(
 void FlatpakPlugin::ApplicationUninstall(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -235,10 +239,8 @@ void FlatpakPlugin::ApplicationUninstall(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
-    shim->ApplicationUninstall(
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationUninstall(
         id, [guard](const ErrorOr<bool>& uninstall_result) {
           if (uninstall_result.has_error()) {
             FlutterError error("UNINSTALL_FAILED",
@@ -260,9 +262,6 @@ void FlatpakPlugin::ApplicationUninstall(
 void FlatpakPlugin::ApplicationUpdate(
     const std::string& id,
     std::function<void(ErrorOr<bool> reply)> result) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
-
   struct PromiseGuard {
     std::function<void(ErrorOr<bool>)> callback;
     std::once_flag flag;
@@ -284,10 +283,8 @@ void FlatpakPlugin::ApplicationUpdate(
   auto guard = std::make_shared<PromiseGuard>();
   guard->callback = std::move(result);
 
-  asio::dispatch(*strand_, [this, id, guard, shim]() mutable {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-
-    shim->ApplicationUpdate(id, [guard](const ErrorOr<bool>& update_result) {
+  asio::dispatch(*strand_, [this, id, guard]() mutable {
+    shim_->ApplicationUpdate(id, [guard](const ErrorOr<bool>& update_result) {
       if (update_result.has_error()) {
         FlutterError error("UPDATE_FAILED", update_result.error().message(),
                            flutter::EncodableValue());
@@ -304,20 +301,22 @@ void FlatpakPlugin::ApplicationUpdate(
   });
 }
 
-ErrorOr<bool> FlatpakPlugin::ApplicationStart(const std::string& id) {
-  auto shim = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
-                                            strand_.get());
+void FlatpakPlugin::ApplicationStart(
+    const std::string& id,
+    std::function<void(ErrorOr<bool> reply)> result) {
+  auto result_callback =
+      std::make_shared<std::function<void(ErrorOr<bool>)>>(std::move(result));
 
-  std::promise<ErrorOr<bool>> promise;
-  auto future = promise.get_future();
+  asio::dispatch(*strand_, [this, id, result_callback]() {
+    spdlog::debug("[FlatpakPlugin] ApplicationStart executing on strand");
 
-  asio::dispatch(*strand_, [this, id, &promise, shim]() {
-    shim->SetupTransactionEventChannel(registrar_->messenger());
-    auto result = shim->ApplicationStart(id, *strand_, portal_manager_);
-    promise.set_value(std::move(result));
+    shim_->ApplicationStart(
+        id, *strand_, portal_manager_,
+        [result_callback](const ErrorOr<bool>& start_result) {
+          spdlog::debug("[FlatpakPlugin] ApplicationStart callback received");
+          (*result_callback)(start_result);
+        });
   });
-
-  return future.get();
 }
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {
