@@ -33,7 +33,7 @@
  * CameraStream manages a single PipeWire MJPEG camera stream and its Flutter
  * texture.
  */
-class CameraStream {
+class camera_stream {
  public:
   /**
    * Create a new CameraStream.
@@ -43,15 +43,15 @@ class CameraStream {
    * @param width      Desired width of the MJPEG frames.
    * @param height     Desired height of the MJPEG frames.
    */
-  CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
-               std::string camera_id,
-               int width,
-               int height);
+  camera_stream(flutter::PluginRegistrarDesktop* plugin_registrar,
+                std::string camera_id,
+                int width,
+                int height);
 
   /**
    * Destructor. Automatically stops the camera stream if running.
    */
-  ~CameraStream();
+  ~camera_stream();
 
   /**
    * Start capturing from the given PipeWire node ID (camera).
@@ -128,4 +128,4 @@ class CameraStream {
   static void OnStreamProcess(void* data);
 };
 
-#endif PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H_
+#endif  // PLUGINS_CAMERA_PIPEWIRE_CAMERASTREAM_H
