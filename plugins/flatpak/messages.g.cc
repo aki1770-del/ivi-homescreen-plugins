@@ -920,7 +920,7 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
         &GetCodec());
     if (api != nullptr) {
       channel.SetMessageHandler(
-          [api](const EncodableValue& message,
+          [api](const EncodableValue& /* message */,
                 const flutter::MessageReply<EncodableValue>& reply) {
             try {
               ErrorOr<EncodableList> output = api->GetApplicationsUpdate();

@@ -50,6 +50,11 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
                        asio::io_context::strand* strand = nullptr)
       : plugin_(plugin), messenger_(messenger), strand_(strand) {}
 
+  ~FlatpakShim() {
+    plugin_ = nullptr;
+    messenger_ = nullptr;
+  }
+
   /**
    * \brief Retrieves an optional attribute from an XML node.
    * \param node Pointer to the XML node.

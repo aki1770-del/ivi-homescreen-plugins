@@ -2,16 +2,9 @@
 
 ### Status
 
-#### Validated Dart API
-
-```
-getVersion
-getDefaultArch
-getSupportedArches
-getSystemInstallations
-getUserInstallation
-getApplicationsInstalled
-```
+* Applications can be installed
+* Progress is display during installation
+* Applications can be started in sandbox
 
 ### Ubuntu Package Dependency
 
@@ -38,12 +31,12 @@ flatpak run org.gnome.Todo
 
 ### Flutter code
 
-https://github.com/meta-flutter/flatpak_flutter
+https://github.com/toyota-connected/tcna-packages/tree/v2.0/packages/flatpak
 
 ### Generate message.g.h and messages.g.cc
 
-    git clone https://github.com/meta-flutter/flatpak_flutter
-    cd flatpak_flutter
+    git clone https://github.com/toyota-connected/tcna-packages/tree/v2.0/packages/flatpak
+    cd packages/flatpak
     dart run pigeon --input pigeons/messages.dart
 
 ### Flatpak API reference

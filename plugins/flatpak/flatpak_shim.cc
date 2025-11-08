@@ -1261,8 +1261,6 @@ void FlatpakShim::ApplicationUninstall(
 
   spdlog::debug("[FlatpakPlugin] Uninstalling application: {}", id);
 
-  FlatpakInstalledRef* installed = nullptr;
-  std::string full_ref;
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
@@ -1316,9 +1314,7 @@ void FlatpakShim::ApplicationUninstall(
         found_arch = ref_arch ? ref_arch : "";
         found_branch = ref_branch ? ref_branch : "";
         app_found = true;
-        full_ref = full_app_id;
         g_object_ref(ref);
-        installed = ref;
         break;
       }
     }
@@ -1359,9 +1355,7 @@ void FlatpakShim::ApplicationUninstall(
             found_arch = ref_arch ? ref_arch : "";
             found_branch = ref_branch ? ref_branch : "";
             app_found = true;
-            full_ref = full_app_id;
             g_object_ref(ref);
-            installed = ref;
             break;
           }
         }
@@ -1884,8 +1878,8 @@ void FlatpakShim::ApplicationStart(
 
   check_runtime(
       installed, installation, strand,
-      [this, completion_callback, installed, installation, found_app_name,
-       found_arch, found_branch, portal_manager,
+      [completion_callback, installed, installation, found_app_name, found_arch,
+       found_branch, portal_manager,
        strand_ptr = &strand](const ErrorOr<bool>& runtime_result) {
         if (runtime_result.has_error()) {
           spdlog::error("[FlatpakPlugin] Runtime check failed: {}",
@@ -1907,8 +1901,8 @@ void FlatpakShim::ApplicationStart(
 
         create_sandbox(
             installed, *strand_ptr,
-            [this, completion_callback, installation, found_app_name,
-             found_arch, found_branch, portal_manager, installed,
+            [completion_callback, installation, found_app_name, found_arch,
+             found_branch, portal_manager, installed,
              strand_ptr](bool sandbox_success) {
               if (!sandbox_success) {
                 spdlog::error("[FlatpakPlugin] Failed to create sandbox");
@@ -3728,7 +3722,7 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
   }
 }
 
-void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
+void FlatpakShim::OnNewOperation(FlatpakTransaction* /* transaction */,
                                  FlatpakTransactionOperation* operation,
                                  FlatpakTransactionProgress* progress,
                                  gpointer user_data) {
@@ -3790,7 +3784,7 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
   }
 }
 
-void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
+void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
                                       FlatpakTransactionOperation* operation,
                                       const char* commit,
                                       FlatpakTransactionResult result,
@@ -3836,7 +3830,7 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
 }
 
 gboolean FlatpakShim::OnOperationError(
-    FlatpakTransaction* transaction,
+    FlatpakTransaction* /* transaction */,
     FlatpakTransactionOperation* operation,
     const GError* error,
     FlatpakTransactionErrorDetails error_details,
