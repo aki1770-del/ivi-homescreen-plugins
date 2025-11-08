@@ -8,6 +8,8 @@ add_library(plugin_common STATIC
         uuid/uuidxx.cc
 )
 add_subdirectory(sdbus)
+#  warning suppression
+target_compile_options(sdbus-c++-objlib PRIVATE "-Wno-strict-prototypes" "-Wno-sign-conversion")
 
 target_include_directories(plugin_common PUBLIC . ${PROJECT_BINARY_DIR})
 target_compile_definitions(plugin_common PUBLIC EGL_NO_X11)
