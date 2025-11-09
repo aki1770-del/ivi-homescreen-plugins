@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Toyota Connected North America
+ * Copyright 2020-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "CameraStream.h"
+#include "camera_stream.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -30,7 +30,7 @@
 #include <spa/param/video/raw.h>
 #include <spa/pod/builder.h>
 
-#include "PipewireGraph.h"
+#include "pipewire_graph.h"
 #include "plugins/common/common.h"
 
 static constexpr char kPictureCaptureExtension[] = "jpeg";
@@ -130,10 +130,10 @@ static int decode_yuy2(const uint8_t* input,
 //------------------------------------------------------------------------------
 // Constructor
 //------------------------------------------------------------------------------
-CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
-                           std::string camera_id,
-                           const int width,
-                           const int height)
+camera_stream::camera_stream(flutter::PluginRegistrarDesktop* plugin_registrar,
+                             std::string camera_id,
+                             const int width,
+                             const int height)
     : registrar_(plugin_registrar),
       width_(width),
       height_(height),
@@ -214,16 +214,16 @@ CameraStream::CameraStream(flutter::PluginRegistrarDesktop* plugin_registrar,
 //------------------------------------------------------------------------------
 // Destructor
 //------------------------------------------------------------------------------
-CameraStream::~CameraStream() {
+camera_stream::~camera_stream() {
   Stop();
 }
 
 //------------------------------------------------------------------------------
 // Start capturing from the given node ID
 //------------------------------------------------------------------------------
-bool CameraStream::Start(const std::string& camera_id) {
+bool camera_stream::Start(const std::string& camera_id) {
   // 1) Ensure the manager is running
-  auto& mgr = PipewireGraph::instance();
+  auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] fail to initialize PipewireGraph.");
     return false;
@@ -339,12 +339,12 @@ bool CameraStream::Start(const std::string& camera_id) {
 //------------------------------------------------------------------------------
 // Stop capturing
 //------------------------------------------------------------------------------
-void CameraStream::Stop() {
+void camera_stream::Stop() {
   if (!pw_stream_) {
     return;  // already stopped
   }
 
-  auto& mgr = PipewireGraph::instance();
+  auto& mgr = pipewire_graph::instance();
   auto* loop = mgr.threadLoop();
 
   // Lock while destroying
@@ -459,7 +459,7 @@ static void YUY2ToI420Planes(const uint8_t* src,
 //------------------------------------------------------------------------------
 // Private method: called each time there's a new MJPEG frame
 //------------------------------------------------------------------------------
-void CameraStream::HandleProcess() {
+void camera_stream::HandleProcess() {
   if (!pw_stream_)
     return;
   pw_buffer* buf = pw_stream_dequeue_buffer(pw_stream_);
@@ -570,25 +570,25 @@ const char* StreamStateToString(const pw_stream_state state) {
   }
 }
 
-void CameraStream::OnStreamStateChanged(void* /*data*/,
-                                        const pw_stream_state old_state,
-                                        const pw_stream_state new_state,
-                                        const char* /*error*/) {
+void camera_stream::OnStreamStateChanged(void* /*data*/,
+                                         const pw_stream_state old_state,
+                                         const pw_stream_state new_state,
+                                         const char* /*error*/) {
   spdlog::debug("[CameraStream] stream state changed from {} to {}",
                 StreamStateToString(old_state), StreamStateToString(new_state));
 }
 
-void CameraStream::OnStreamProcess(void* data) {
-  auto* self = static_cast<CameraStream*>(data);
+void camera_stream::OnStreamProcess(void* data) {
+  auto* self = static_cast<camera_stream*>(data);
   (void)self;
   self->HandleProcess();
 }
 
-void CameraStream::PauseStream() const {
+void camera_stream::PauseStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = PipewireGraph::instance();
+  auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
@@ -605,11 +605,11 @@ void CameraStream::PauseStream() const {
   pw_thread_loop_unlock(loop);
 }
 
-void CameraStream::ResumeStream() const {
+void camera_stream::ResumeStream() const {
   if (!pw_stream_)
     return;
 
-  auto& mgr = PipewireGraph::instance();
+  auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
     spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
@@ -625,7 +625,7 @@ void CameraStream::ResumeStream() const {
   { pw_stream_set_active(pw_stream_, true); }
   pw_thread_loop_unlock(loop);
 }
-std::optional<std::string> CameraStream::GetFilePathForPicture() {
+std::optional<std::string> camera_stream::GetFilePathForPicture() {
   std::ostringstream oss;
   oss << "xdg-user-dir PICTURES";
   std::string picture_path;
@@ -640,7 +640,7 @@ std::optional<std::string> CameraStream::GetFilePathForPicture() {
   return path;
 }
 
-std::string CameraStream::takePicture() const {
+std::string camera_stream::takePicture() const {
   auto filename = GetFilePathForPicture();
   save_image_to_jpeg(filename.value(), decoded_buffer_.get(), width_, height_,
                      3, 90);

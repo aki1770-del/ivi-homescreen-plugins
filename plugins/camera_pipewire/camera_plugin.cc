@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2024 Toyota Connected North America
+ * Copyright 2020-2025 Toyota Connected North America
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,21 @@
  */
 
 #include "camera_plugin.h"
+
+#include <memory>
+#include <string>
+#include <vector>
+
+extern "C" {
+#include <glib-2.0/glib.h>
+};
+#include <jpeglib.h>
+
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
-#include <glib.h>
-#include <jpeglib.h>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <vector>
-#include "PipewireGraph.h"
+
+#include "pipewire_graph.h"
 #include "plugins/common/common.h"
 
 extern "C" {
@@ -73,7 +78,7 @@ void CameraPlugin::RegisterWithRegistrar(
 CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* /*messenger*/)
     : mPreview(), registrar_(plugin_registrar) {
-  if (!PipewireGraph::instance().initialize()) {
+  if (!pipewire_graph::instance().initialize()) {
     spdlog::error("failed to initialize PipeWire manager!");
   }
 
@@ -110,12 +115,12 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
 }
 
 CameraPlugin::~CameraPlugin() {
-  PipewireGraph::instance().shutdown();
+  pipewire_graph::instance().shutdown();
 }
 
 ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
   flutter::EncodableList list;
-  const PipewireGraph& mgr = PipewireGraph::instance();
+  const pipewire_graph& mgr = pipewire_graph::instance();
 
   const auto cameras = mgr.getCameraNodes();
   for (auto camera : cameras) {
@@ -134,11 +139,12 @@ void CameraPlugin::Create(
   spdlog::debug("[camera_plugin] create camera_id: {}", camera_id);
   if (CameraId_CameraStream.find(camera_id) == CameraId_CameraStream.end()) {
     auto new_camera =
-        std::make_shared<CameraStream>(registrar_, camera_id, 640, 480);
+        std::make_shared<camera_stream>(registrar_, camera_id, 640, 480);
 
     new_camera->on_image_frame =
-        [this](const uint8_t* y, int ys, const uint8_t* u_or_uv, int us,
-               const uint8_t* v, int vs, int w, int h, const char* raw) {
+        [this](const uint8_t* y, const int ys, const uint8_t* u_or_uv,
+               const int us, const uint8_t* v, const int vs, const int w,
+               const int h, const char* raw) {
           if (!image_stream_active_ || !image_sink_)
             return;
 

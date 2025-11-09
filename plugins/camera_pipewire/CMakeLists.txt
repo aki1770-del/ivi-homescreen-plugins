@@ -1,5 +1,5 @@
 #
-# Copyright 2023-2024 Toyota Connected North America
+# Copyright 2023-2025 Toyota Connected North America
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ add_library(plugin_camera_pipewire STATIC
         camera_plugin_c_api.cc
         camera_plugin.cc
         messages.g.cc
-        CameraStream.cc
-        CameraStream.h
-        PipewireGraph.cc
-        PipewireGraph.h
+        camera_stream.cc
+        camera_stream.h
+        pipewire_graph.cc
+        pipewire_graph.h
 )
 
 target_include_directories(plugin_camera_pipewire PUBLIC

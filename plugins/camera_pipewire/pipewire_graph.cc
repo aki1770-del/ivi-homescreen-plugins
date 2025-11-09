@@ -1,40 +1,53 @@
+/*
+ * Copyright 2020-2025 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-#include "PipewireGraph.h"
+#include "pipewire_graph.h"
 
 #include <spdlog/spdlog.h>
 
-#include <iostream>
-
-PipewireGraph& PipewireGraph::instance() {
-  static PipewireGraph s_instance;
+pipewire_graph& pipewire_graph::instance() {
+  static pipewire_graph s_instance;
   return s_instance;
 }
 
-PipewireGraph::PipewireGraph() = default;
+pipewire_graph::pipewire_graph() = default;
 
-PipewireGraph::~PipewireGraph() {
-  // Ensure shutdown is called in case user forgot
+pipewire_graph::~pipewire_graph() {
+  // Ensure shutdown is called in case the user forgot
   if (initialized_) {
     shutdown();
   }
 }
 
 // Callback function for detecting cameras
-void PipewireGraph::on_global(void* data,
-                              const uint32_t id,
-                              uint32_t /*permissions*/,
-                              const char* type,
-                              uint32_t version,
-                              const struct spa_dict* props) {
+void pipewire_graph::on_global(void* data,
+                               const uint32_t id,
+                               uint32_t /*permissions*/,
+                               const char* type,
+                               const uint32_t version,
+                               const struct spa_dict* props) {
   if (!data) {
-    std::cerr << "[Error] on_global received null data\n";
+    spdlog::error("on_global received null data");
     return;
   }
 
   if (!props)
     return;
 
-  auto* self = static_cast<PipewireGraph*>(data);
+  auto* self = static_cast<pipewire_graph*>(data);
 
   if (strcmp(type, PW_TYPE_INTERFACE_Node) == 0) {
     self->handleNodeInfo(id, version, props);
@@ -44,12 +57,12 @@ void PipewireGraph::on_global(void* data,
     self->handleLinkInfo(id, version, props);
   }
 }
-void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
+void pipewire_graph::on_global_remove(void* data, const uint32_t id) {
   if (!data) {
     spdlog::error("[error] on_global_remove received null data");
     return;
   }
-  auto* self = static_cast<PipewireGraph*>(data);
+  auto* self = static_cast<pipewire_graph*>(data);
   self->nodes_.erase(id);
   self->node_ports_.erase(id);
   self->links_.erase(id);
@@ -71,7 +84,7 @@ void PipewireGraph::on_global_remove(void* data, const uint32_t id) {
       self->all_nodes_.end());
 }
 
-bool PipewireGraph::initialize() {
+bool pipewire_graph::initialize() {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (initialized_) {
@@ -82,7 +95,7 @@ bool PipewireGraph::initialize() {
   // 1) Initialize PipeWire library (safe to call once)
   pw_init(nullptr, nullptr);
 
-  // 2) Create main loop, context, and core
+  // 2) Create the main loop, context, and core
   pw_thread_loop_ = pw_thread_loop_new("camera-loop", nullptr);
   if (!pw_thread_loop_) {
     spdlog::error("[CameraManager] failed to create pw_main_loop.");
@@ -142,7 +155,7 @@ bool PipewireGraph::initialize() {
   return true;
 }
 
-void PipewireGraph::shutdown() {
+void pipewire_graph::shutdown() {
   std::lock_guard<std::mutex> lock(mutex_);
 
   if (!initialized_) {
@@ -177,9 +190,9 @@ void PipewireGraph::shutdown() {
   spdlog::info("[PipewireGraph] Shutdown completed");
 }
 
-void PipewireGraph::handleNodeInfo(const uint32_t id,
-                                   const uint32_t version,
-                                   const spa_dict* props) {
+void pipewire_graph::handleNodeInfo(const uint32_t id,
+                                    const uint32_t version,
+                                    const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   NodeInfo node{};
@@ -201,12 +214,12 @@ void PipewireGraph::handleNodeInfo(const uint32_t id,
     audio_nodes_.push_back(node);
   }
 
-  printNodeInfo(node);
+  printDebugNodeInfo(node);
 }
 
-void PipewireGraph::handlePortInfo(const uint32_t id,
-                                   uint32_t /* version */,
-                                   const spa_dict* props) {
+void pipewire_graph::handlePortInfo(const uint32_t id,
+                                    uint32_t /* version */,
+                                    const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   PortInfo port{};
@@ -220,12 +233,12 @@ void PipewireGraph::handlePortInfo(const uint32_t id,
     node_ports_[port.node_id].push_back(port);
   }
 
-  printPortInfo(port);
+  printDebugPortInfo(port);
 }
 
-void PipewireGraph::handleLinkInfo(const uint32_t id,
-                                   uint32_t /* version */,
-                                   const spa_dict* props) {
+void pipewire_graph::handleLinkInfo(const uint32_t id,
+                                    uint32_t /* version */,
+                                    const spa_dict* props) {
   std::lock_guard lock(data_mutex_);
 
   LinkInfo link{};
@@ -248,49 +261,49 @@ void PipewireGraph::handleLinkInfo(const uint32_t id,
   links_[id] = link;
   active_links_.push_back(link);
 
-  printLinkInfo(link);
+  printDebugLinkInfo(link);
 }
 
-bool PipewireGraph::isCamera(const spa_dict* props) {
+bool pipewire_graph::isCamera(const spa_dict* props) {
   const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
   return media_class &&
          (strstr(media_class, "Video/Source") || strstr(media_class, "Camera"));
 }
 
-bool PipewireGraph::isAudio(const spa_dict* props) {
+bool pipewire_graph::isAudio(const spa_dict* props) {
   const char* media_class = spa_dict_lookup(props, PW_KEY_MEDIA_CLASS);
   return media_class && (strstr(media_class, "Audio/Source") ||
                          strstr(media_class, "Audio/Sink"));
 }
 
-std::string PipewireGraph::getStringProperty(const spa_dict* props,
-                                             const char* key) {
+std::string pipewire_graph::getStringProperty(const spa_dict* props,
+                                              const char* key) {
   const char* value = spa_dict_lookup(props, key);
   return value ? std::string(value) : std::string();
 }
 
-const std::vector<NodeInfo>& PipewireGraph::getCameraNodes() const {
+const std::vector<NodeInfo>& pipewire_graph::getCameraNodes() const {
   std::lock_guard lock(data_mutex_);
   return camera_nodes_;
 }
 
-const std::vector<NodeInfo>& PipewireGraph::getAudioNodes() const {
+const std::vector<NodeInfo>& pipewire_graph::getAudioNodes() const {
   std::lock_guard lock(data_mutex_);
   return audio_nodes_;
 }
 
-const std::vector<NodeInfo>& PipewireGraph::getAllNodes() const {
+const std::vector<NodeInfo>& pipewire_graph::getAllNodes() const {
   std::lock_guard lock(data_mutex_);
   return all_nodes_;
 }
 
-const NodeInfo* PipewireGraph::getNodeById(const uint32_t id) const {
+const NodeInfo* pipewire_graph::getNodeById(const uint32_t id) const {
   std::lock_guard lock(data_mutex_);
   const auto it = nodes_.find(id);
   return (it != nodes_.end()) ? &it->second : nullptr;
 }
 
-const std::vector<PortInfo>& PipewireGraph::getPortsForNode(
+const std::vector<PortInfo>& pipewire_graph::getPortsForNode(
     const uint32_t node_id) const {
   std::lock_guard lock(data_mutex_);
   const auto it = node_ports_.find(node_id);
@@ -298,28 +311,28 @@ const std::vector<PortInfo>& PipewireGraph::getPortsForNode(
   return (it != node_ports_.end()) ? it->second : empty_vector;
 }
 
-const std::vector<LinkInfo>& PipewireGraph::getActiveLinks() const {
+const std::vector<LinkInfo>& pipewire_graph::getActiveLinks() const {
   std::lock_guard lock(data_mutex_);
   return active_links_;
 }
 
-void PipewireGraph::printNodeInfo(const NodeInfo& node) {
-  spdlog::info(
+void pipewire_graph::printDebugNodeInfo(const NodeInfo& node) {
+  spdlog::debug(
       "[PipewireGraph] Node ID: {} | Name: {} | Media Class: {} | Factory: {} "
       "| Version: {} | Camera: {} | Audio: {}",
       node.id, node.name, node.media_class, node.factory_name, node.version,
       node.is_camera, node.is_audio);
 }
 
-void PipewireGraph::printPortInfo(const PortInfo& port) {
-  spdlog::info(
+void pipewire_graph::printDebugPortInfo(const PortInfo& port) {
+  spdlog::debug(
       "[PipewireGraph] Port ID: {} | Node ID: {} | Name: {} | Direction: {} | "
       "Format: {}",
       port.id, port.node_id, port.name, port.direction, port.format);
 }
 
-void PipewireGraph::printLinkInfo(const LinkInfo& link) {
-  spdlog::info(
+void pipewire_graph::printDebugLinkInfo(const LinkInfo& link) {
+  spdlog::debug(
       "[PipewireGraph] Link ID: {} | Output Node: {} | Input Node: {} | Output "
       "Port: {} | Input Port: {}",
       link.id, link.output_node_id, link.input_node_id, link.output_port_id,

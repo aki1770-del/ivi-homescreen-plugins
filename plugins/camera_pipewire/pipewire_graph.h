@@ -1,3 +1,19 @@
+/*
+ * Copyright 2020-2025 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #ifndef PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H
 #define PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H
 
@@ -34,11 +50,11 @@ struct LinkInfo {
   uint32_t input_port_id;
 };
 
-class PipewireGraph {
+class pipewire_graph {
  public:
-  ~PipewireGraph();
-  PipewireGraph();
-  static PipewireGraph& instance();
+  ~pipewire_graph();
+  pipewire_graph();
+  static pipewire_graph& instance();
   pw_thread_loop* threadLoop() const { return pw_thread_loop_; }
   pw_core* core() const { return pw_core_; }
 
@@ -108,9 +124,9 @@ class PipewireGraph {
   bool initialized_ = false;
 
   // Debug/logging methods
-  static void printNodeInfo(const NodeInfo& node);
-  static void printPortInfo(const PortInfo& port);
-  static void printLinkInfo(const LinkInfo& link);
+  static void printDebugNodeInfo(const NodeInfo& node);
+  static void printDebugPortInfo(const PortInfo& port);
+  static void printDebugLinkInfo(const LinkInfo& link);
 };
 
 #endif  // PLUGINS_CAMERA_PIPEWIRE_PIPEWIREGRAPH_H

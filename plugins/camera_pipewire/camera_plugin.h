@@ -23,7 +23,7 @@
 #include <flutter/plugin_registrar.h>
 #include <flutter/plugin_registrar_homescreen.h>
 
-#include "CameraStream.h"
+#include "camera_stream.h"
 #include "event_channel.h"
 #include "messages.g.h"
 #include "plugins/common/common.h"
@@ -119,8 +119,8 @@ class CameraPlugin final : public flutter::Plugin, public CameraApi {
   std::map<std::string, std::unique_ptr<flutter::StreamHandler<>>>
       stream_handlers_;
 
-  std::map<std::string, std::shared_ptr<CameraStream>> CameraId_CameraStream;
-  std::map<GLuint, std::shared_ptr<CameraStream>> TextureId_CameraStream;
+  std::map<std::string, std::shared_ptr<camera_stream>> CameraId_CameraStream;
+  std::map<GLuint, std::shared_ptr<camera_stream>> TextureId_CameraStream;
 
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
       image_channel_;
