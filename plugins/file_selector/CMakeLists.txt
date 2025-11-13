@@ -17,7 +17,7 @@
 add_library(plugin_file_selector STATIC
         file_selector_plugin_c_api.cc
         file_selector_plugin.cc
-        messages.cc
+        messages.g.cc
 )
 
 target_include_directories(plugin_file_selector PRIVATE include)
