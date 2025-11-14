@@ -19,7 +19,7 @@
 
 #include <flutter/plugin_registrar.h>
 
-#include "messages.h"
+#include "messages.g.h"
 
 namespace plugin_file_selector {
 
@@ -31,6 +31,10 @@ class FileSelectorPlugin final : public flutter::Plugin,
   FileSelectorPlugin();
 
   ~FileSelectorPlugin() override;
+
+  ErrorOr<flutter::EncodableList> ShowFileChooser(
+      const PlatformFileChooserActionType& type,
+      const PlatformFileChooserOptions& options) override;
 
   // Disallow copy and assign.
   FileSelectorPlugin(const FileSelectorPlugin&) = delete;
