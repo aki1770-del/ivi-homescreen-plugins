@@ -2325,7 +2325,7 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
   if (appstream_dir) {
     if (auto appstream_path = g_file_get_path(appstream_dir)) {
       const std::string appstream_file =
-          std::string(appstream_path) + "/appstream.xml.gz";
+          std::string(appstream_path) + "/appstream.xml";
       catalog = AppstreamCatalog(appstream_file, "en");
       spdlog::debug("[FlatpakPlugin] AppstreamCatalog loaded {} components",
                     catalog->getTotalComponentCount());
