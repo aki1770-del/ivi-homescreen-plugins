@@ -82,7 +82,7 @@ flatpak --user run org.telegram.desktop
 ```bash
 eval `dbus-launch --sh-syntax`
 flatpak --user update --appstream
-SPDLOG_LEVEL=debug homescreen -b /usr/share/flutter/ toyota-connected-tcna-packages-flatpak-flutter-example/3.35.7/release/
+SPDLOG_LEVEL=debug homescreen -b /usr/share/flutter/toyota-connected-tcna-packages-flatpak-flutter-example/3.35.7/release/
 ```
 
 ### Troubleshooting: org.freedesktop.portal.Settings error
