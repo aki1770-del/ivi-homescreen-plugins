@@ -1024,6 +1024,29 @@ void FlatpakShim::ApplicationInstall(
       flutter::EncodableValue(ref_name);
   SendTransactionEvent(start_event);
 
+  guint64 estimated_download{0};
+  guint64 estimated_installed{0};
+  flatpak_installation_fetch_remote_size_sync(
+      installation, remote_name.c_str(), found_ref, &estimated_download,
+      &estimated_installed, nullptr, &error);
+  if (error) {
+    std::string error_msg = error->message;
+    spdlog::error("[FlatpakPlugin] Failed to fetch remote size: {}", error_msg);
+    g_clear_error(&error);
+    asio::post(*strand_, [callback, error_msg]() {
+      callback(
+          ErrorOr<bool>(FlutterError("FETCH_REMOTE_SIZE_ERROR", error_msg)));
+    });
+    return;
+  }
+  if (!check_desk_usage(installation, estimated_download)) {
+    asio::post(*strand_, [callback]() {
+      callback(ErrorOr<bool>(FlutterError(
+          "DISK_USAGE", "Not enough disk space available for installation")));
+    });
+    return;
+  }
+
   // transfer ownership to thread
   auto transaction_raw = transaction_guard.release();
   auto installation_raw = installation_guard.release();
@@ -3945,6 +3968,69 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
   }
 
   return TRUE;
+}
+
+bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
+                                   guint64 estimated_download) const {
+  GError* error = nullptr;
+  guint64 min_free_space{0};
+
+  if (!flatpak_installation_get_min_free_space_bytes(installation,
+                                                     &min_free_space, &error)) {
+    spdlog::error("[FlatpakPlugin] Error getting min free space: {}",
+                  error->message);
+    g_error_free(error);
+    return false;
+  }
+
+  std::string free_space_msg = "Minimum free space required: " +
+                               std::to_string(min_free_space / 1024 / 1024) +
+                               " MB";
+  spdlog::debug("[FlatpakPlugin] {}", free_space_msg);
+
+  const auto repo_path = flatpak_installation_get_path(installation);
+  auto info = g_file_query_filesystem_info(
+      repo_path, G_FILE_ATTRIBUTE_FILESYSTEM_FREE, nullptr, &error);
+
+  if (!info) {
+    spdlog::error("[FlatpakPlugin] Error getting free space: {}",
+                  error->message);
+    g_error_free(error);
+    return false;
+  }
+  const auto available_free_space_bytes =
+      g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+  std::string available_free_space_str =
+      "Available free space: " +
+      std::to_string(available_free_space_bytes / 1024 / 1024) + " MB";
+  spdlog::info("[FlatpakPlugin] {}", available_free_space_str);
+
+  // check if we have enough space
+  if (available_free_space_bytes < (min_free_space + estimated_download)) {
+    spdlog::error("[FlatpakPlugin] Not enough free space!");
+
+    flutter::EncodableMap disk_usage_event;
+    disk_usage_event[flutter::EncodableValue("type")] =
+        flutter::EncodableValue("free_space_error");
+    disk_usage_event[flutter::EncodableValue("available_mb")] =
+        flutter::EncodableValue(
+            static_cast<int64_t>(available_free_space_bytes / 1024 / 1024));
+    disk_usage_event[flutter::EncodableValue("required_mb")] =
+        flutter::EncodableValue(static_cast<int64_t>(
+            (min_free_space + estimated_download) / 1024 / 1024));
+    disk_usage_event[flutter::EncodableValue("message")] =
+        flutter::EncodableValue(
+            "Not enough disk space. Available: " +
+            std::to_string(available_free_space_bytes / 1024 / 1024) +
+            " MB, Required: " +
+            std::to_string((min_free_space + estimated_download) / 1024 /
+                           1024) +
+            " MB");
+
+    SendTransactionEvent(disk_usage_event);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace flatpak_plugin
