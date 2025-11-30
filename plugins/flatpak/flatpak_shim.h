@@ -520,6 +520,9 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
                                    gpointer user_data);
   static gboolean OnTransactionReady(FlatpakTransaction* transaction,
                                      gpointer user_data);
+
+  bool check_desk_usage(FlatpakInstallation* installation,
+                        guint64 estimated_download) const;
 };
 
 }  // namespace flatpak_plugin
