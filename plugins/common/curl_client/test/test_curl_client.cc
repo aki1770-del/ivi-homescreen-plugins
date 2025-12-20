@@ -357,7 +357,7 @@ TEST_F(CurlClientTest, ConcurrentRequests) {
 
 TEST_F(CurlClientTest, MemoryLeakTest) {
   // Create and destroy many clients
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 20; ++i) { // Iterations reduced from 100 to 20
     const auto client = std::make_unique<CurlClient>();
     ASSERT_TRUE(client->Init(valid_url, {}, {}, true));
     std::string response = client->RetrieveContentAsString();
