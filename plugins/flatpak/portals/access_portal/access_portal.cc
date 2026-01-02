@@ -391,7 +391,10 @@ void AccessPortal::SetResource(
     std::function<void(bool ready)> callback) {
    auto now = std::chrono::system_clock::now();
    auto now_c = std::chrono::system_clock::to_time_t(now);
-   auto log = std::put_time(std::localtime(&now_c), "%F %T");
+   std::ostringstream oss;
+   oss << std::put_time(std::localtime(&now_c), "%F %T");
+   std::string log = oss.str();
+
    PortalInterface access_interface;
    access_interface.service_name = "org.freedesktop.impl.portal.PermissionStore";
    access_interface.object_path = "/org/freedesktop/impl/portal/PermissionStore";
@@ -401,7 +404,7 @@ void AccessPortal::SetResource(
 
    proxy->callMethodAsync("Set")
       .onInterface("org.freedesktop.impl.portal.PermissionStore")
-      .withArguments(table,true,id, permissions,log._M_fmt)
+      .withArguments(table, true, id, permissions, log)
       .uponReplyInvoke([callback](std::optional<sdbus::Error> error) {
           if (error) {
               spdlog::error("[AccessPortal] Set Resource failed: {}", error->getMessage());
@@ -411,7 +414,7 @@ void AccessPortal::SetResource(
               callback(true);
           }
       });
-}
+ }
 
 void AccessPortal::DeleteResource(const std::string& table,
                                   const std::string& id,
