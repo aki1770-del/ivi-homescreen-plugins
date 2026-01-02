@@ -52,4 +52,11 @@ struct PortalInterfaceHash {
   }
 };
 
+static struct PortalInterface RequestInterface{
+  "org.freedesktop.portal.Desktop",
+  "",
+  "org.freedesktop.portal.Request",
+  BUS_TYPE::SESSION
+};
+
 #endif  // PORTAL_INTERFACE_H

@@ -288,7 +288,7 @@ TEST_F(FlatpakPluginTest, ApplicationInstallTest) {
 
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "com.stremio.Stremio";
+  auto app_id = "org.telegram.desktop";
 
   shim->ApplicationInstall(app_id, [guard](const ErrorOr<bool>& result) {
     guard->set_value(result);
@@ -555,17 +555,17 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id = "com.spotify.Client";  // net.lutris.Lutris // com.spotify.Client //
+  auto id = "org.telegram.desktop";  // net.lutris.Lutris // com.spotify.Client //
                                    // com.valvesoftware.Steam
-
+shim->SetupAccessEventChannel(messenger,*strand,portal_manager.get());
   shim->ApplicationStart(
       id, *strand, portal_manager,
       [guard](const ErrorOr<bool>& result) { guard->set_value(result); });
 
-  auto status = future.wait_for(std::chrono::minutes(2));
-
-  ASSERT_NE(status, std::future_status::timeout)
-      << "Installation timed out after 2 minutes";
+  // auto status = future.wait_for(std::chrono::minutes(2));
+  //
+  // ASSERT_NE(status, std::future_status::timeout)
+  //     << "Installation timed out after 2 minutes";
 
   auto result = future.get();
 

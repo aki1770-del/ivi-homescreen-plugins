@@ -93,6 +93,7 @@ FlatpakPlugin::~FlatpakPlugin() {
 
 void FlatpakPlugin::Init() {
   shim_->SetupTransactionEventChannel(registrar_->messenger());
+  shim_->SetupAccessEventChannel(registrar_->messenger(),*strand_,portal_manager_.get());
   spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
 }
 
