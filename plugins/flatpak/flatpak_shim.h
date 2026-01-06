@@ -1,5 +1,6 @@
 /*
  * Copyright 2020-2025 Toyota Connected North America
+ * Copyright 2025 Ahmed Wafdy
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -228,6 +229,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \param id Id of the application to start application.
    * \param strand Asio strand to execute async operations.
    * \param portal_manager Ptr to portal manager to execute portal operations.
+   * \param completion_callback Callback function for async operations.
    * \return An ErrorOr object containing the EncodableList or an
    * error.
    */
@@ -358,15 +360,14 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \param strand Asio strand to execute async operations.
    * \param portal_manager Pointer to portal manager used for creating access portal with event callback.
    */
-  void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,asio::io_context::strand& strand,PortalManager* portal_manager);
+  void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,const asio::io_context::strand& strand,PortalManager* portal_manager);
 
-
-  void RequestAppLaunchPermission(const std::string& app_id, FlatpakInstalledRef* installed_ref, const std::function<void(const std::map<std::string,bool>&)>& callback);
-
-  void HandlePermissionResponse(const std::string& request_id,const std::string& permission,bool granted);
-
-  // flutter streaming callback functions
-  void SendPermissionEvent(const flutter::EncodableMap& event,std::function<void(bool)> callback);
+  /**
+   * \brief Handles All methods responses comes from the flutter side.
+   * @param method_call A flutter method call for Method channel implementation.
+   * @param result A pointer for result implementation.
+   */
+  void HandleMethodCall(const flutter::MethodCall<flutter::EncodableValue>& method_call,std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
  private:
   struct sandbox {
     struct application {
@@ -529,6 +530,9 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   // flutter streaming callback functions
   void SendTransactionEvent(flutter::EncodableMap& event) const;
 
+  // flutter streaming callback functions
+  void SendPermissionEvent(const flutter::EncodableMap& event,const std::function<void(bool)>& callback);
+
   // callback triggered by "changed" signal
   static void OnProgressChanged(FlatpakTransactionProgress* progress,
                                 gpointer user_data);
@@ -558,13 +562,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   bool check_desk_usage(FlatpakInstallation* installation,
                         guint64 estimated_download) const;
 
+  void RequestAppLaunchPermission(const std::string& app_id, FlatpakInstalledRef* installed_ref, const std::function<void(const std::map<std::string,bool>&)>& callback);
+
+  void HandlePermissionResponse(const std::string& request_id,const std::string& permission,bool granted);
+
   void ShowNextDialog(const std::string& request_id);
 
   static std::string GenerateRequestId();
 
-  void CheckExistingPermissions(const std::string& app_id,const std::vector<std::string>& permissions,std::function<void(std::map<std::string,bool>)> callback);
-
-  void HandleMethodCall(const flutter::MethodCall<flutter::EncodableValue>& method_call,std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void CheckExistingPermissions(const std::string& app_id,const std::vector<std::string>& permissions,const std::function<void(std::map<std::string,bool>)>& callback)const;
 };
 
 }  // namespace flatpak_plugin

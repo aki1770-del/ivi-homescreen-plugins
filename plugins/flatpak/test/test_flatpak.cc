@@ -15,9 +15,9 @@
 using namespace flatpak_plugin;
 class TestBinaryMessenger : public flutter::BinaryMessenger {
  public:
-  void Send(const std::string& channel,
-            const uint8_t* message,
-            size_t message_size,
+  void Send(const std::string& /*channel*/,
+            const uint8_t* /*message*/,
+            size_t /*message_size*/,
             flutter::BinaryReply reply) const override {
     // No-op for tests
     if (reply) {
@@ -555,8 +555,8 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id = "org.telegram.desktop";  // net.lutris.Lutris // com.spotify.Client //
-                                   // com.valvesoftware.Steam
+  auto id = "com.visualstudio.code";  // net.lutris.Lutris // com.spotify.Client //
+                                   // com.valvesoftware.Steam // org.telegram.desktop
 shim->SetupAccessEventChannel(messenger,*strand,portal_manager.get());
   shim->ApplicationStart(
       id, *strand, portal_manager,

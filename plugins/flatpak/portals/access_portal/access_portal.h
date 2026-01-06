@@ -26,34 +26,27 @@
 #include "plugins/common/sdbus/sdbus.h"
 
 namespace flatpak_plugin {
-struct AccessDialogOptions {
-  std::string title;
-  std::string icon;
-  bool modal = true;
-};
-
-struct AccessRequest {
-  std::string handle;
-  std::string app_id;
-  AccessDialogOptions options;
-  std::unique_ptr<sdbus::IProxy> request_proxy;
-  std::function<void(uint32_t,std::map<std::string,sdbus::Variant>)> callback;
+enum PermissionStatus {
+  GRANTED,      // "yes"
+  DENIED,       // "no"
+  ASK,          // "ask"
+  NOT_SET       // No entry exists
 };
 
 class AccessPortal {
 public:
-  enum class PermissionStatus {
-    GRANTED,      // "yes"
-    DENIED,       // "no"
-    ASK,          // "ask"
-    NOT_SET       // No entry exists
-  };
   explicit AccessPortal(PortalManager* portal_manager,asio::io_context& io_context,flutter::EventChannel<flutter::EncodableValue>& event_channel);
 
   ~AccessPortal();
 
+  /**
+   * \brief Check all permissions for app to launch.
+   * \param app Application that needs access to a resource.
+   * \param permissions Permission assigned to app could be 'yes','no' or 'ask'.
+   * \param callback Callback function for async operations.
+   */
+void CheckAllPermissions(const std::string& app,const std::vector<std::string>& permissions,const std::function<void(std::map<std::string,PermissionStatus>)>& callback)const;
 
-  void CheckAllPermissions(const std::string& app_id,const std::vector<std::string>& permissions,std::function<void(std::map<std::string,PermissionStatus>)> callback);
   /**
    * \brief Sets permission for app.
    * \param table Table of resources for apps which could be either a device or a feature.
@@ -63,7 +56,7 @@ public:
    * \param callback Callback function for async operations.
    * \return String of Stored permission.
    */
-  void SetPermission(const std::string& table,const std::string& id,const std::string& app,const std::vector<std::string>& permission,std::function<void(bool ready)> callback);
+  void SetPermission(const std::string& table,const std::string& id,const std::string& app,const std::vector<std::string>& permission,const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Retrieves permission for app.
@@ -73,30 +66,31 @@ public:
    * \param callback Callback function for async operations.
    * \return String of Stored permission.
    */
-  void GetPermission(const std::string& table,const std::string& id,const std::string& app,std::function<void(PermissionStatus status, std::vector<std::string> permissions)> callback);
+  void GetPermission(const std::string& table,const std::string& id,const std::string& app,const std::function<void(PermissionStatus status, std::vector<std::string> permissions)>& callback) const;
 
   /**
    * \brief Delete permission for app.
    * \param table Table of resources for apps which could be either a device or a feature.
    * \param id Identifier for the resource in the table.
    * \param app Application that needs access to a resource.
-   * \param ready_callback Callback function for async operations.
+   * \param callback Callback function for async operations.
    * \return String of Stored permission.
    */
-  void DeletePermission(const std::string& table,const std::string& id,const std::string& app,std::function<void(bool ready)> callback);
+  void DeletePermission(const std::string& table,const std::string& id,const std::string& app,const std::function<void(bool ready)>& callback)const;
 
   /**
    * \brief Retrieves all permissions for a specific resource.
    * \param table Table of resources for apps which could be either a device or a feature.
    * \param id Identifier for the resource in the table.
+   * \param app Application that needs access to a resource
    * \param callback Callback function for async operations.
    * \return Map of Stored permissions to a resource.
    */
   void GetAllPermissions(
     const std::string& table,
     const std::string& id,
-    const std::string& app_id,
-    std::function<void(PermissionStatus status)> callback);
+    const std::string& app,
+    const std::function<void(PermissionStatus status)>& callback)const;
 
   /**
    * \brief Sets an entire resource entry with multiple app permissions at once.
@@ -105,52 +99,36 @@ public:
    * \param permissions Permissions assigned to apps in a resource could be 'yes','no' or 'ask'.
    * \param callback Callback function for async operations.
    */
-  void SetResource(const std::string& table,const std::string& id,const std::map<std::string, std::vector<std::string>>& permissions,std::function<void(bool ready)> callback);
+  void SetResource(const std::string& table,const std::string& id,const std::map<std::string, std::vector<std::string>>& permissions,const std::function<void(bool ready)>& callback)const;
 
   /**
    * \brief Delete an entire resource and ALL associated app permissions.
    * \param table Table of resources for apps which could be either a device or a feature.
    * \param id Identifier for the resource in the table.
-   * \param ready_callback Callback function for async operations.
+   * \param callback Callback function for async operations.
    */
-  void DeleteResource(const std::string& table,const std::string& id,std::function<void(bool ready)> callback);
+  void DeleteResource(const std::string& table,const std::string& id,const std::function<void(bool ready)>& callback)const;
 
   /**
    * \brief Get all device types that have any permissions set.
    * \param table Table of resources for apps which could be either a device or a feature.
    * \param callback Callback function for async operations.
    */
-  void GetAllResource(const std::string& table, std::function<void(bool success, std::vector<std::string> resources)> callback);
+  void GetAllResource(const std::string& table, const std::function<void(bool success, std::vector<std::string> resources)>& callback)const;
 
   /**
    * \brief Storing timestamps of when a resource was last accessed.
    * \param table Table of resources for apps which could be either a device or a feature.
    * \param id Identifier for the resource in the table.
-   * \param timestamp A human-readable descriptions, or storing state information that multiple apps might need to know about the resource.
+   * \param data A human-readable descriptions, or storing state information that multiple apps might need to know about the resource.
    * \param callback Callback function for async operations.
    */
-  void StoreTimestamp(const std::string& table,const std::string& id,const std::string& data,std::function<void(bool ready)> callback);
-
-  std::string ShowAccessDialog(const std::string& app_id,const std::string& parent_window,const AccessDialogOptions& options);
-
-  void CancelAccessRequest(const std::string& handle);
+  void StoreTimestamp(const std::string& table,const std::string& id,const std::string& data,const std::function<void(bool ready)>& callback)const;
 
 private:
-  std::string GenerateHandle(const std::string& app_id);
-
-  void SetupRequestSignalHandler(const std::string& handler);
-
-  void OnPortalResponse(const std::string& handle, uint32_t response_code, const std::map<std::string,sdbus::Variant>& results);
-
-  void SendEvent(const flutter::EncodableMap& event);
-
   PortalManager& portal_manager_;
   asio::io_context& io_context_;
-  //std::shared_ptr<FlatpakShim> shim_;
   flutter::EventChannel<flutter::EncodableValue>* event_channel_;
-  std::unordered_map<std::string,std::unique_ptr<AccessRequest>> requests_;
-  std::mutex requests_mutex_;
-  std::atomic<uint32_t> request_counter_{0};
   plugin_common_sdbus::SessionDBus& session_bus_;
 };
 }

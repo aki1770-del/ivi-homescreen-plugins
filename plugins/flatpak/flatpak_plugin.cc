@@ -16,19 +16,17 @@
 
 #include "flatpak_plugin.h"
 
-#include <filesystem>
 #include <sstream>
 #include <vector>
 
-#include <zlib.h>
 #include <asio/dispatch.hpp>
 #include <asio/post.hpp>
-#include <future>
 
 #include <flutter/plugin_registrar_homescreen.h>
 #include "messages.g.h"
 #include "plugins/common/common.h"
 #include "plugins/common/glib/main_loop.h"
+#include "standard_method_codec.h"
 
 namespace flatpak_plugin {
 
@@ -68,6 +66,8 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
     }
   }
 
+  method_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(registrar_->messenger(),"flatpak_flutter",&flutter::StandardMethodCodec::GetInstance());
+
   shim_ = std::make_shared<FlatpakShim>(this, registrar_->messenger(),
                                         strand_.get());
   portal_manager_ = std::make_shared<PortalManager>(*io_context_);
@@ -94,6 +94,10 @@ FlatpakPlugin::~FlatpakPlugin() {
 void FlatpakPlugin::Init() {
   shim_->SetupTransactionEventChannel(registrar_->messenger());
   shim_->SetupAccessEventChannel(registrar_->messenger(),*strand_,portal_manager_.get());
+  // Setup Method channel to handle responses co
+  method_channel_->SetMethodCallHandler([this](const auto& call,std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+    this->HandleMethodCall(call,std::move(result));
+  });
   spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
 }
 
@@ -324,4 +328,18 @@ ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {
   return FlatpakShim::ApplicationStop(id);
 }
 
+void FlatpakPlugin::HandleMethodCall(
+    const flutter::MethodCall<flutter::EncodableValue>& method,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) const{
+
+  const auto& method_name = method.method_name();
+  spdlog::debug("[FlatpakPlugin] HandleMethodCall {}", method_name);
+
+  if (method_name == "permissionResponse" ||
+               method_name == "checkPermissions" ||
+               method_name == "grantPermission" ||
+               method_name == "revokePermission") {
+    shim_->HandleMethodCall(method, std::move(result));
+  }
+}
 }  // namespace flatpak_plugin

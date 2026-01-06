@@ -24,6 +24,7 @@
 
 #include "flatpak_shim.h"
 #include "messages.g.h"
+#include "method_channel.h"
 #include "plugins/flatpak/cache/cache_manager.h"
 #include "plugins/flatpak/portals/portal_manager.h"
 
@@ -110,7 +111,10 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   std::unique_ptr<CacheManager> cache_manager_;
   std::shared_ptr<PortalManager> portal_manager_;
   std::shared_ptr<FlatpakShim> shim_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> method_channel_;
   flutter::PluginRegistrar* registrar_;
+
+  void HandleMethodCall(const flutter::MethodCall<flutter::EncodableValue>& method, std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)const;
 };
 }  // namespace flatpak_plugin
 
