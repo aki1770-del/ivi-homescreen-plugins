@@ -3680,8 +3680,7 @@ void FlatpakShim::SetupTransactionEventChannel(
 
 void FlatpakShim::SetupAccessEventChannel(
     flutter::BinaryMessenger* messenger,
-    const asio::io_context::strand& strand,
-    PortalManager* portal_manager) {
+    const asio::io_context::strand& strand) {
   if (!messenger) {
     spdlog::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
@@ -3742,8 +3741,7 @@ void FlatpakShim::SetupAccessEventChannel(
               return nullptr;
             }));
 
-    access_portal_ = std::make_unique<AccessPortal>(
-        portal_manager, strand.context(), *access_event_channel_);
+    access_portal_ = std::make_unique<AccessPortal>(strand.context());
     spdlog::info("[FlatpakPlugin] Access portal created and initialized");
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",

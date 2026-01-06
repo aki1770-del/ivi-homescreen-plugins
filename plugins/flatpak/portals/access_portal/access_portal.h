@@ -35,10 +35,7 @@ enum PermissionStatus {
 
 class AccessPortal {
  public:
-  explicit AccessPortal(
-      PortalManager* portal_manager,
-      asio::io_context& io_context,
-      flutter::EventChannel<flutter::EncodableValue>& event_channel);
+  explicit AccessPortal(asio::io_context& io_context);
 
   ~AccessPortal();
 
@@ -112,9 +109,11 @@ class AccessPortal {
   /**
    * \brief Sets an entire resource entry with multiple app permissions at once.
    * \param table Table of resources for apps which could be either a device or
-   * a feature. \param id Identifier for the resource in the table. \param
-   * permissions Permissions assigned to apps in a resource could be 'yes','no'
-   * or 'ask'. \param callback Callback function for async operations.
+   * a feature.
+   * \param id Identifier for the resource in the table.
+   * \param permissions Permissions assigned to apps in a resource could be
+   * 'yes','no' or 'ask'. \param callback Callback function for async
+   * operations.
    */
   void SetResource(
       const std::string& table,
@@ -125,8 +124,9 @@ class AccessPortal {
   /**
    * \brief Delete an entire resource and ALL associated app permissions.
    * \param table Table of resources for apps which could be either a device or
-   * a feature. \param id Identifier for the resource in the table. \param
-   * callback Callback function for async operations.
+   * a feature.
+   * \param id Identifier for the resource in the table.
+   * \param callback Callback function for async operations.
    */
   void DeleteResource(const std::string& table,
                       const std::string& id,
@@ -157,9 +157,7 @@ class AccessPortal {
                       const std::function<void(bool ready)>& callback) const;
 
  private:
-  PortalManager& portal_manager_;
   asio::io_context& io_context_;
-  flutter::EventChannel<flutter::EncodableValue>* event_channel_;
   plugin_common_sdbus::SessionDBus& session_bus_;
 };
 }  // namespace flatpak_plugin

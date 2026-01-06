@@ -24,13 +24,8 @@
 
 namespace flatpak_plugin {
 
-AccessPortal::AccessPortal(
-    PortalManager* portal_manager,
-    asio::io_context& io_context,
-    flutter::EventChannel<flutter::EncodableValue>& event_channel)
-    : portal_manager_(*portal_manager),
-      io_context_(io_context),
-      event_channel_(&event_channel),
+AccessPortal::AccessPortal(asio::io_context& io_context)
+    : io_context_(io_context),
       session_bus_(plugin_common_sdbus::SessionDBus::Instance()) {}
 
 AccessPortal::~AccessPortal() = default;
@@ -370,8 +365,7 @@ void AccessPortal::GetAllPermissions(
             [callback, app, table, id, proxy](
                 std::optional<sdbus::Error> error,
                 const std::map<std::string, std::vector<std::string>>&
-                    permissions,
-                const sdbus::Variant& data) {
+                    permissions) {
               spdlog::debug(
                   "[AccessPortal] Callback received: table={}, id={}, error={}",
                   table, id, error.has_value());

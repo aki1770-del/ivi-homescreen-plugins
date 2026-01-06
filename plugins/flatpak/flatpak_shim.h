@@ -358,12 +358,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \brief Sets up the event channel for Permissions Access events.
    * \param messenger Pointer to the BinaryMessenger used for communication.
    * \param strand Asio strand to execute async operations.
-   * \param portal_manager Pointer to portal manager used for creating access
    * portal with event callback.
    */
   void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,
-                               const asio::io_context::strand& strand,
-                               PortalManager* portal_manager);
+                               const asio::io_context::strand& strand);
 
   /**
    * \brief Handles All methods responses comes from the flutter side.
