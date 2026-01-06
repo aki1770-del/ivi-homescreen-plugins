@@ -28,8 +28,6 @@ AccessPortal::AccessPortal(asio::io_context& io_context)
     : io_context_(io_context),
       session_bus_(plugin_common_sdbus::SessionDBus::Instance()) {}
 
-AccessPortal::~AccessPortal() = default;
-
 void AccessPortal::CheckAllPermissions(
     const std::string& app,
     const std::vector<std::string>& permissions,
@@ -100,45 +98,50 @@ void AccessPortal::GetPermission(
         ->callMethodAsync("GetPermission")
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, id, app)
-        .uponReplyInvoke([this, callback, table, id, app, proxy](
-                             std::optional<sdbus::Error> error,
-                             const std::vector<std::string>& permissions) {
-          asio::post(io_context_, [callback, error, permissions, table, id,
-                                   app]() {
-            if (error) {
-              const std::string error_msg = error->getMessage();
-              if (error_msg.find("No entry") != std::string::npos ||
-                  error_msg.find("not found") != std::string::npos ||
-                  error->getName() ==
-                      "org.freedesktop.DBus.Error.UnknownMethod" ||
-                  error->getName() == "org.freedesktop.portal.Error.NotFound") {
-                spdlog::debug("[AccessPortal] Permission not set for {}/{}/{}",
-                              table, id, app);
-                callback(PermissionStatus::NOT_SET, {});
-                return;
-              }
-              spdlog::error("[AccessPortal] GetPermission failed: {} ({})",
-                            error->getMessage(), error->getName());
-              callback(PermissionStatus::NOT_SET, {});
-              return;
-            }
+        .uponReplyInvoke(
+            [this, callback, table, id, app,
+             proxy](  // proxy captured to extend lifetime
+                std::optional<sdbus::Error>
+                    error,  // NOLINT(performance-unnecessary-value-param)
+                const std::vector<std::string>& permissions) {
+              asio::post(io_context_, [callback, error, permissions, table, id,
+                                       app]() {
+                if (error) {
+                  const std::string error_msg = error->getMessage();
+                  if (error_msg.find("No entry") != std::string::npos ||
+                      error_msg.find("not found") != std::string::npos ||
+                      error->getName() ==
+                          "org.freedesktop.DBus.Error.UnknownMethod" ||
+                      error->getName() ==
+                          "org.freedesktop.portal.Error.NotFound") {
+                    spdlog::debug(
+                        "[AccessPortal] Permission not set for {}/{}/{}", table,
+                        id, app);
+                    callback(PermissionStatus::NOT_SET, {});
+                    return;
+                  }
+                  spdlog::error("[AccessPortal] GetPermission failed: {} ({})",
+                                error->getMessage(), error->getName());
+                  callback(PermissionStatus::NOT_SET, {});
+                  return;
+                }
 
-            // success to retrieve
-            if (permissions.empty()) {
-              callback(PermissionStatus::NOT_SET, {});
-            } else if (permissions[0] == "yes") {
-              callback(PermissionStatus::GRANTED, permissions);
-            } else if (permissions[0] == "no") {
-              callback(PermissionStatus::DENIED, permissions);
-            } else if (permissions[0] == "ask") {
-              callback(PermissionStatus::ASK, permissions);
-            } else {
-              spdlog::warn("[AccessPortal] Unknown permission value: {}",
-                           permissions[0]);
-              callback(PermissionStatus::NOT_SET, permissions);
-            }
-          });
-        });
+                // success to retrieve
+                if (permissions.empty()) {
+                  callback(PermissionStatus::NOT_SET, {});
+                } else if (permissions[0] == "yes") {
+                  callback(PermissionStatus::GRANTED, permissions);
+                } else if (permissions[0] == "no") {
+                  callback(PermissionStatus::DENIED, permissions);
+                } else if (permissions[0] == "ask") {
+                  callback(PermissionStatus::ASK, permissions);
+                } else {
+                  spdlog::warn("[AccessPortal] Unknown permission value: {}",
+                               permissions[0]);
+                  callback(PermissionStatus::NOT_SET, permissions);
+                }
+              });
+            });
   } catch (const std::exception& e) {
     spdlog::error("[AccessPortal] Exception: {}", e.what());
     callback(PermissionStatus::NOT_SET, {});
@@ -165,20 +168,23 @@ void AccessPortal::SetPermission(
         ->callMethodAsync("SetPermission")
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, true, id, app, permission)
-        .uponReplyInvoke([callback, proxy](std::optional<sdbus::Error> error) {
-          spdlog::debug(
-              "[AccessPortal] SetPermission callback received: error={}",
-              error.has_value());
+        .uponReplyInvoke(
+            [callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error) {  // NOLINT(performance-unnecessary-value-param)
+              spdlog::debug(
+                  "[AccessPortal] SetPermission callback received: error={}",
+                  error.has_value());
 
-          if (error) {
-            spdlog::error("[AccessPortal] SetPermission failed: {}",
-                          error->getMessage());
-            callback(false);
-          } else {
-            spdlog::debug("[AccessPortal] SetPermission successful");
-            callback(true);
-          }
-        });
+              if (error) {
+                spdlog::error("[AccessPortal] SetPermission failed: {}",
+                              error->getMessage());
+                callback(false);
+              } else {
+                spdlog::debug("[AccessPortal] SetPermission successful");
+                callback(true);
+              }
+            });
 
     spdlog::debug("[AccessPortal] SetPermission async call started");
 
@@ -208,7 +214,9 @@ void AccessPortal::DeletePermission(
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, id, app)
         .uponReplyInvoke(
-            [this, callback, proxy](std::optional<sdbus::Error> error) {
+            [this, callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
                   spdlog::error("[AccessPortal] DeletePermission failed: {}",
@@ -250,7 +258,9 @@ void AccessPortal::SetResource(
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, true, id, permissions, log)
         .uponReplyInvoke(
-            [this, callback, proxy](std::optional<sdbus::Error> error) {
+            [this, callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
                   spdlog::error("[AccessPortal] Set Resource failed: {}",
@@ -286,7 +296,9 @@ void AccessPortal::DeleteResource(
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, id)
         .uponReplyInvoke(
-            [this, callback, proxy](std::optional<sdbus::Error> error) {
+            [this, callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
                   spdlog::error("[AccessPortal] Delete Resource failed: {}",
@@ -320,21 +332,24 @@ void AccessPortal::GetAllResource(
         ->callMethodAsync("List")
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table)
-        .uponReplyInvoke([this, callback, proxy](
-                             std::optional<sdbus::Error> error,
-                             const std::vector<std::string>& resources) {
-          asio::post(io_context_, [callback, error, resources]() {
-            if (error) {
-              spdlog::error("[AccessPortal] Get all Resource failed: {}",
-                            error->getMessage());
-              callback(false, resources);
-            } else {
-              spdlog::debug("Get all Resource successfully fetched {} resource",
-                            resources.size());
-              callback(true, resources);
-            }
-          });
-        });
+        .uponReplyInvoke(
+            [this, callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error,  // NOLINT(performance-unnecessary-value-param)
+             const std::vector<std::string>& resources) {
+              asio::post(io_context_, [callback, error, resources]() {
+                if (error) {
+                  spdlog::error("[AccessPortal] Get all Resource failed: {}",
+                                error->getMessage());
+                  callback(false, resources);
+                } else {
+                  spdlog::debug(
+                      "Get all Resource successfully fetched {} resource",
+                      resources.size());
+                  callback(true, resources);
+                }
+              });
+            });
 
   } catch (const std::exception& e) {
     spdlog::error("[AccessPortal] Exception: {}", e.what());
@@ -362,10 +377,12 @@ void AccessPortal::GetAllPermissions(
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, id)
         .uponReplyInvoke(
-            [callback, app, table, id, proxy](
-                std::optional<sdbus::Error> error,
-                const std::map<std::string, std::vector<std::string>>&
-                    permissions) {
+            [callback, app, table, id,
+             proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error,  // NOLINT(performance-unnecessary-value-param)
+             const std::map<std::string, std::vector<std::string>>&
+                 permissions) {
               spdlog::debug(
                   "[AccessPortal] Callback received: table={}, id={}, error={}",
                   table, id, error.has_value());
@@ -425,7 +442,9 @@ void AccessPortal::StoreTimestamp(
         .onInterface("org.freedesktop.impl.portal.PermissionStore")
         .withArguments(table, true, id, data)
         .uponReplyInvoke(
-            [this, callback, proxy](std::optional<sdbus::Error> error) {
+            [this, callback, proxy]  // proxy captured to extend lifetime
+            (std::optional<sdbus::Error>
+                 error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
                   spdlog::error("[AccessPortal] StoreTimestamp failed: {}",

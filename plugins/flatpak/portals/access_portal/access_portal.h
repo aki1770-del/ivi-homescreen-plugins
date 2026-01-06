@@ -37,7 +37,7 @@ class AccessPortal {
  public:
   explicit AccessPortal(asio::io_context& io_context);
 
-  ~AccessPortal();
+  ~AccessPortal() = default;
 
   /**
    * \brief Check all permissions for app to launch.
