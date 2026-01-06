@@ -555,9 +555,10 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
   auto messenger = GetTestMessenger();
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto id = "com.visualstudio.code";  // net.lutris.Lutris // com.spotify.Client //
-                                   // com.valvesoftware.Steam // org.telegram.desktop
-shim->SetupAccessEventChannel(messenger,*strand,portal_manager.get());
+  auto id = "com.visualstudio.code";  // net.lutris.Lutris // com.spotify.Client
+                                      // // com.valvesoftware.Steam //
+                                      // org.telegram.desktop
+  shim->SetupAccessEventChannel(messenger, *strand, portal_manager.get());
   shim->ApplicationStart(
       id, *strand, portal_manager,
       [guard](const ErrorOr<bool>& result) { guard->set_value(result); });

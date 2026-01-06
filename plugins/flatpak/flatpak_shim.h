@@ -358,16 +358,22 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \brief Sets up the event channel for Permissions Access events.
    * \param messenger Pointer to the BinaryMessenger used for communication.
    * \param strand Asio strand to execute async operations.
-   * \param portal_manager Pointer to portal manager used for creating access portal with event callback.
+   * \param portal_manager Pointer to portal manager used for creating access
+   * portal with event callback.
    */
-  void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,const asio::io_context::strand& strand,PortalManager* portal_manager);
+  void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,
+                               const asio::io_context::strand& strand,
+                               PortalManager* portal_manager);
 
   /**
    * \brief Handles All methods responses comes from the flutter side.
    * @param method_call A flutter method call for Method channel implementation.
    * @param result A pointer for result implementation.
    */
-  void HandleMethodCall(const flutter::MethodCall<flutter::EncodableValue>& method_call,std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void HandleMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
  private:
   struct sandbox {
     struct application {
@@ -471,7 +477,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       access_event_channel_;
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> access_sink_;
   mutable std::mutex access_sink_mutex_;
-  std::map<std::string,PermissionRequest> active_permissions_;
+  std::map<std::string, PermissionRequest> active_permissions_;
   mutable std::mutex permissions_mutex_;
 
   static std::optional<Application> create_component(
@@ -531,7 +537,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   void SendTransactionEvent(flutter::EncodableMap& event) const;
 
   // flutter streaming callback functions
-  void SendPermissionEvent(const flutter::EncodableMap& event,const std::function<void(bool)>& callback);
+  void SendPermissionEvent(const flutter::EncodableMap& event,
+                           const std::function<void(bool)>& callback);
 
   // callback triggered by "changed" signal
   static void OnProgressChanged(FlatpakTransactionProgress* progress,
@@ -562,15 +569,23 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   bool check_desk_usage(FlatpakInstallation* installation,
                         guint64 estimated_download) const;
 
-  void RequestAppLaunchPermission(const std::string& app_id, FlatpakInstalledRef* installed_ref, const std::function<void(const std::map<std::string,bool>&)>& callback);
+  void RequestAppLaunchPermission(
+      const std::string& app_id,
+      FlatpakInstalledRef* installed_ref,
+      const std::function<void(const std::map<std::string, bool>&)>& callback);
 
-  void HandlePermissionResponse(const std::string& request_id,const std::string& permission,bool granted);
+  void HandlePermissionResponse(const std::string& request_id,
+                                const std::string& permission,
+                                bool granted);
 
   void ShowNextDialog(const std::string& request_id);
 
   static std::string GenerateRequestId();
 
-  void CheckExistingPermissions(const std::string& app_id,const std::vector<std::string>& permissions,const std::function<void(std::map<std::string,bool>)>& callback)const;
+  void CheckExistingPermissions(
+      const std::string& app_id,
+      const std::vector<std::string>& permissions,
+      const std::function<void(std::map<std::string, bool>)>& callback) const;
 };
 
 }  // namespace flatpak_plugin

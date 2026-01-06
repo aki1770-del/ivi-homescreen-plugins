@@ -27,15 +27,18 @@
 
 namespace flatpak_plugin {
 enum PermissionStatus {
-  GRANTED,      // "yes"
-  DENIED,       // "no"
-  ASK,          // "ask"
-  NOT_SET       // No entry exists
+  GRANTED,  // "yes"
+  DENIED,   // "no"
+  ASK,      // "ask"
+  NOT_SET   // No entry exists
 };
 
 class AccessPortal {
-public:
-  explicit AccessPortal(PortalManager* portal_manager,asio::io_context& io_context,flutter::EventChannel<flutter::EncodableValue>& event_channel);
+ public:
+  explicit AccessPortal(
+      PortalManager* portal_manager,
+      asio::io_context& io_context,
+      flutter::EventChannel<flutter::EncodableValue>& event_channel);
 
   ~AccessPortal();
 
@@ -45,91 +48,119 @@ public:
    * \param permissions Permission assigned to app could be 'yes','no' or 'ask'.
    * \param callback Callback function for async operations.
    */
-void CheckAllPermissions(const std::string& app,const std::vector<std::string>& permissions,const std::function<void(std::map<std::string,PermissionStatus>)>& callback)const;
+  void CheckAllPermissions(
+      const std::string& app,
+      const std::vector<std::string>& permissions,
+      const std::function<void(std::map<std::string, PermissionStatus>)>&
+          callback) const;
 
   /**
    * \brief Sets permission for app.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param app Application that needs access to a resource.
-   * \param permission Permission assigned to app could be 'yes','no' or 'ask'.
-   * \param callback Callback function for async operations.
-   * \return String of Stored permission.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param app
+   * Application that needs access to a resource. \param permission Permission
+   * assigned to app could be 'yes','no' or 'ask'. \param callback Callback
+   * function for async operations. \return String of Stored permission.
    */
-  void SetPermission(const std::string& table,const std::string& id,const std::string& app,const std::vector<std::string>& permission,const std::function<void(bool ready)>& callback) const;
+  void SetPermission(const std::string& table,
+                     const std::string& id,
+                     const std::string& app,
+                     const std::vector<std::string>& permission,
+                     const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Retrieves permission for app.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param app Application that needs access to a resource.
-   * \param callback Callback function for async operations.
-   * \return String of Stored permission.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param app
+   * Application that needs access to a resource. \param callback Callback
+   * function for async operations. \return String of Stored permission.
    */
-  void GetPermission(const std::string& table,const std::string& id,const std::string& app,const std::function<void(PermissionStatus status, std::vector<std::string> permissions)>& callback) const;
+  void GetPermission(
+      const std::string& table,
+      const std::string& id,
+      const std::string& app,
+      const std::function<void(PermissionStatus status,
+                               std::vector<std::string> permissions)>& callback)
+      const;
 
   /**
    * \brief Delete permission for app.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param app Application that needs access to a resource.
-   * \param callback Callback function for async operations.
-   * \return String of Stored permission.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param app
+   * Application that needs access to a resource. \param callback Callback
+   * function for async operations. \return String of Stored permission.
    */
-  void DeletePermission(const std::string& table,const std::string& id,const std::string& app,const std::function<void(bool ready)>& callback)const;
+  void DeletePermission(const std::string& table,
+                        const std::string& id,
+                        const std::string& app,
+                        const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Retrieves all permissions for a specific resource.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param app Application that needs access to a resource
-   * \param callback Callback function for async operations.
-   * \return Map of Stored permissions to a resource.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param app
+   * Application that needs access to a resource \param callback Callback
+   * function for async operations. \return Map of Stored permissions to a
+   * resource.
    */
   void GetAllPermissions(
-    const std::string& table,
-    const std::string& id,
-    const std::string& app,
-    const std::function<void(PermissionStatus status)>& callback)const;
+      const std::string& table,
+      const std::string& id,
+      const std::string& app,
+      const std::function<void(PermissionStatus status)>& callback) const;
 
   /**
    * \brief Sets an entire resource entry with multiple app permissions at once.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param permissions Permissions assigned to apps in a resource could be 'yes','no' or 'ask'.
-   * \param callback Callback function for async operations.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param
+   * permissions Permissions assigned to apps in a resource could be 'yes','no'
+   * or 'ask'. \param callback Callback function for async operations.
    */
-  void SetResource(const std::string& table,const std::string& id,const std::map<std::string, std::vector<std::string>>& permissions,const std::function<void(bool ready)>& callback)const;
+  void SetResource(
+      const std::string& table,
+      const std::string& id,
+      const std::map<std::string, std::vector<std::string>>& permissions,
+      const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Delete an entire resource and ALL associated app permissions.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param callback Callback function for async operations.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param
+   * callback Callback function for async operations.
    */
-  void DeleteResource(const std::string& table,const std::string& id,const std::function<void(bool ready)>& callback)const;
+  void DeleteResource(const std::string& table,
+                      const std::string& id,
+                      const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Get all device types that have any permissions set.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param callback Callback function for async operations.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param callback Callback function for async operations.
    */
-  void GetAllResource(const std::string& table, const std::function<void(bool success, std::vector<std::string> resources)>& callback)const;
+  void GetAllResource(
+      const std::string& table,
+      const std::function<void(bool success,
+                               std::vector<std::string> resources)>& callback)
+      const;
 
   /**
    * \brief Storing timestamps of when a resource was last accessed.
-   * \param table Table of resources for apps which could be either a device or a feature.
-   * \param id Identifier for the resource in the table.
-   * \param data A human-readable descriptions, or storing state information that multiple apps might need to know about the resource.
-   * \param callback Callback function for async operations.
+   * \param table Table of resources for apps which could be either a device or
+   * a feature. \param id Identifier for the resource in the table. \param data
+   * A human-readable descriptions, or storing state information that multiple
+   * apps might need to know about the resource. \param callback Callback
+   * function for async operations.
    */
-  void StoreTimestamp(const std::string& table,const std::string& id,const std::string& data,const std::function<void(bool ready)>& callback)const;
+  void StoreTimestamp(const std::string& table,
+                      const std::string& id,
+                      const std::string& data,
+                      const std::function<void(bool ready)>& callback) const;
 
-private:
+ private:
   PortalManager& portal_manager_;
   asio::io_context& io_context_;
   flutter::EventChannel<flutter::EncodableValue>* event_channel_;
   plugin_common_sdbus::SessionDBus& session_bus_;
 };
-}
+}  // namespace flatpak_plugin
 #endif  // IVI_HOMESCREEN_ACCESS_PORTAL_H

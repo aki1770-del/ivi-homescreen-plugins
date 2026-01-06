@@ -1780,8 +1780,8 @@ void FlatpakShim::ApplicationStart(
   auto weak_self = weak_from_this();
   auto self = weak_self.lock();
   if (!self) {
-    completion_callback(ErrorOr<bool>(
-        FlutterError("CANCELLED", "Operation cancelled")));
+    completion_callback(
+        ErrorOr<bool>(FlutterError("CANCELLED", "Operation cancelled")));
     return;
   }
 
@@ -1905,134 +1905,124 @@ void FlatpakShim::ApplicationStart(
   g_object_ref(installed);
   g_object_ref(installation);
 
-    struct LaunchState {
-            FlatpakInstalledRef* installed{};
-            FlatpakInstallation* installation{};
-            std::string app_name;
-            std::string arch;
-            std::string branch;
-            std::shared_ptr<PortalManager> portal_manager;
-            std::function<void(const ErrorOr<bool>&)> callback;
-          asio::io_context::strand* strand{};
+  struct LaunchState {
+    FlatpakInstalledRef* installed{};
+    FlatpakInstallation* installation{};
+    std::string app_name;
+    std::string arch;
+    std::string branch;
+    std::shared_ptr<PortalManager> portal_manager;
+    std::function<void(const ErrorOr<bool>&)> callback;
+    asio::io_context::strand* strand{};
 
-            ~LaunchState() {
-                if (installed) g_object_unref(installed);
-                if (installation) g_object_unref(installation);
-            }
-        };
+    ~LaunchState() {
+      if (installed)
+        g_object_unref(installed);
+      if (installation)
+        g_object_unref(installation);
+    }
+  };
 
-        auto state = std::make_shared<LaunchState>();
-        state->installed = installed;
-        state->installation = installation;
-        state->app_name = found_app_name;
-        state->arch = found_arch;
-        state->branch = found_branch;
-        state->portal_manager = portal_manager;
-        state->callback = completion_callback;
+  auto state = std::make_shared<LaunchState>();
+  state->installed = installed;
+  state->installation = installation;
+  state->app_name = found_app_name;
+  state->arch = found_arch;
+  state->branch = found_branch;
+  state->portal_manager = portal_manager;
+  state->callback = completion_callback;
   state->strand = &strand;
 
-    self->RequestAppLaunchPermission(
-              found_app_name,
-              installed,
-              [weak_self, state](const std::map<std::string, bool>& permissions) {
-                  auto self = weak_self.lock();
-                  if (!self) {
+  self->RequestAppLaunchPermission(
+      found_app_name, installed,
+      [weak_self, state](const std::map<std::string, bool>& permissions) {
+        auto self = weak_self.lock();
+        if (!self) {
+          state->callback(
+              ErrorOr<bool>(FlutterError("CANCELLED", "Operation cancelled")));
+          return;
+        }
+        spdlog::info("[FlatpakPlugin] Permissions granted: {}",
+                     permissions.size());
+        self->check_runtime(
+            state->installed, state->installation, *(state->strand),
+            [weak_self, state](const ErrorOr<bool>& runtime_result) {
+              auto self = weak_self.lock();
+              if (!self) {
+                state->callback(ErrorOr<bool>(
+                    FlutterError("CANCELLED", "Operation cancelled")));
+                return;
+              }
+
+              if (runtime_result.has_error()) {
+                state->callback(runtime_result);
+                return;
+              }
+
+              if (!runtime_result.value()) {
+                state->callback(ErrorOr<bool>(
+                    FlutterError("RUNTIME_ERROR", "Runtime not available")));
+                return;
+              }
+
+              // Create sandbox
+              flatpak_plugin::FlatpakShim::create_sandbox(
+                  state->installed, *(state->strand),
+                  [weak_self, state](bool sandbox_success) {
+                    auto self = weak_self.lock();
+                    if (!self) {
                       state->callback(ErrorOr<bool>(
                           FlutterError("CANCELLED", "Operation cancelled")));
                       return;
-                  }
-                spdlog::info("[FlatpakPlugin] Permissions granted: {}",
-                            permissions.size());
-                self->check_runtime(
-                                state->installed, state->installation, *(state->strand),
-                                [weak_self, state](const ErrorOr<bool>& runtime_result) {
-                        auto self = weak_self.lock();
-                        if (!self) {
-                            state->callback(ErrorOr<bool>(
-                                FlutterError("CANCELLED", "Operation cancelled")));
-                            return;
-                        }
+                    }
 
-                        if (runtime_result.has_error()) {
-                            state->callback(runtime_result);
-                            return;
-                        }
+                    if (!sandbox_success) {
+                      state->callback(ErrorOr<bool>(FlutterError(
+                          "START_FAILED", "Failed to create sandbox")));
+                      return;
+                    }
 
-                        if (!runtime_result.value()) {
-                            state->callback(ErrorOr<bool>(
-                                FlutterError("RUNTIME_ERROR",
-                                           "Runtime not available")));
-                            return;
-                        }
+                    // Launch application
+                    GError* error = nullptr;
+                    FlatpakInstance* instance = nullptr;
+                    flatpak_installation_launch_full(
+                        state->installation, FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP,
+                        state->app_name.c_str(), state->arch.c_str(),
+                        state->branch.c_str(), nullptr, &instance, nullptr,
+                        &error);
 
-                        // Create sandbox
-                        flatpak_plugin::FlatpakShim::create_sandbox(
-                            state->installed, *(state->strand),
-                            [weak_self, state](bool sandbox_success) {
-                                auto self = weak_self.lock();
-                                if (!self) {
-                                    state->callback(ErrorOr<bool>(
-                                        FlutterError("CANCELLED",
-                                                   "Operation cancelled")));
-                                    return;
-                                }
+                    if (error) {
+                      spdlog::error("[FlatpakShim] Failed to launch: {}",
+                                    error->message);
+                      g_clear_error(&error);
+                      state->callback(ErrorOr<bool>(
+                          FlutterError("START_FAILED", "Failed to launch")));
+                      return;
+                    }
 
-                                if (!sandbox_success) {
-                                    state->callback(ErrorOr<bool>(
-                                        FlutterError("START_FAILED",
-                                                   "Failed to create sandbox")));
-                                    return;
-                                }
+                    if (instance) {
+                      pid_t pid = flatpak_instance_get_pid(instance);
+                      spdlog::info("[FlatpakShim] Launched: {} (PID: {})",
+                                   state->app_name, pid);
 
-                                // Launch application
-                                GError* error = nullptr;
-                                FlatpakInstance* instance = nullptr;
-                                flatpak_installation_launch_full(
-                                    state->installation,
-                                    FLATPAK_LAUNCH_FLAGS_DO_NOT_REAP,
-                                    state->app_name.c_str(),
-                                    state->arch.c_str(),
-                                    state->branch.c_str(),
-                                    nullptr, &instance, nullptr, &error);
+                      auto app_session = std::make_shared<MonitorSession>(
+                          state->strand, state->app_name, pid,
+                          state->portal_manager, instance);
 
-                                if (error) {
-                                    spdlog::error(
-                                        "[FlatpakShim] Failed to launch: {}",
-                                        error->message);
-                                    g_clear_error(&error);
-                                    state->callback(ErrorOr<bool>(
-                                        FlutterError("START_FAILED",
-                                                   "Failed to launch")));
-                                    return;
-                                }
+                      flatpak_plugin::FlatpakShim::active_sessions_
+                          [state->app_name] = app_session;
 
-                                if (instance) {
-                                    pid_t pid = flatpak_instance_get_pid(instance);
-                                    spdlog::info(
-                                        "[FlatpakShim] Launched: {} (PID: {})",
-                                        state->app_name, pid);
+                      flatpak_plugin::FlatpakShim::monitor_app(app_session);
+                      state->callback(ErrorOr<bool>(true));
+                      return;
+                    }
 
-                                    auto app_session =
-                                        std::make_shared<MonitorSession>(
-                                            state->strand, state->app_name,
-                                            pid, state->portal_manager, instance);
-
-
-                                    flatpak_plugin::FlatpakShim::active_sessions_[state->app_name] =
-                                        app_session;
-
-                                    flatpak_plugin::FlatpakShim::monitor_app(app_session);
-                                    state->callback(ErrorOr<bool>(true));
-                                    return;
-                                }
-
-                                state->callback(ErrorOr<bool>(
-                                    FlutterError("START_FAILED",
-                                               "Failed to get instance")));
-                            },
-                            state->portal_manager.get());
-                    });
+                    state->callback(ErrorOr<bool>(FlutterError(
+                        "START_FAILED", "Failed to get instance")));
+                  },
+                  state->portal_manager.get());
             });
+      });
 }
 
 ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
@@ -3688,7 +3678,10 @@ void FlatpakShim::SetupTransactionEventChannel(
   }
 }
 
-void FlatpakShim::SetupAccessEventChannel(flutter::BinaryMessenger* messenger,const asio::io_context::strand& strand,PortalManager* portal_manager) {
+void FlatpakShim::SetupAccessEventChannel(
+    flutter::BinaryMessenger* messenger,
+    const asio::io_context::strand& strand,
+    PortalManager* portal_manager) {
   if (!messenger) {
     spdlog::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
@@ -3749,7 +3742,8 @@ void FlatpakShim::SetupAccessEventChannel(flutter::BinaryMessenger* messenger,co
               return nullptr;
             }));
 
-    access_portal_ = std::make_unique<AccessPortal>(portal_manager,strand.context(),*access_event_channel_);
+    access_portal_ = std::make_unique<AccessPortal>(
+        portal_manager, strand.context(), *access_event_channel_);
     spdlog::info("[FlatpakPlugin] Access portal created and initialized");
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
@@ -3790,7 +3784,9 @@ void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
   }
 }
 
-void FlatpakShim::SendPermissionEvent(const flutter::EncodableMap& event,const std::function<void(bool)>& callback) {
+void FlatpakShim::SendPermissionEvent(
+    const flutter::EncodableMap& event,
+    const std::function<void(bool)>& callback) {
   if (!access_sink_) {
     spdlog::error(
         "[FlatpakPlugin] Cannot send event - sink is null. "
@@ -3805,13 +3801,15 @@ void FlatpakShim::SendPermissionEvent(const flutter::EncodableMap& event,const s
         HandlePermissionResponse(*request_id, *permission, false);
       }
     }
-    if (callback) callback(false);
+    if (callback)
+      callback(false);
     return;
   }
 
   try {
     access_sink_->Success(flutter::EncodableValue(event));
-    if (callback) callback(true);
+    if (callback)
+      callback(true);
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception sending event: {}", e.what());
     if (event.count(flutter::EncodableValue("request_id"))) {
@@ -3824,10 +3822,10 @@ void FlatpakShim::SendPermissionEvent(const flutter::EncodableMap& event,const s
         HandlePermissionResponse(*request_id, *permission, false);
       }
     }
-    if (callback) callback(false);
+    if (callback)
+      callback(false);
   }
 }
-
 
 void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
                                     gpointer user_data) {
@@ -4202,8 +4200,10 @@ bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
 }
 
 std::string FlatpakShim::GenerateRequestId() {
- auto now = std::chrono::system_clock::now();
-  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+  auto now = std::chrono::system_clock::now();
+  auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch())
+                .count();
   return "req_" + std::to_string(ms);
 }
 
@@ -4217,115 +4217,117 @@ void FlatpakShim::CheckExistingPermissions(
   }
 
   access_portal_->CheckAllPermissions(
-      app_id,
-      permissions,
-      [callback](const std::map<std::string, flatpak_plugin::PermissionStatus>& statuses) {
-          std::map<std::string, bool> results;
-          for (const auto& [perm, status] : statuses) {
-              switch (status) {
-                case flatpak_plugin::PermissionStatus::GRANTED:
-                  results[perm] = true;
-                  break;
-                case flatpak_plugin::PermissionStatus::DENIED:
-                  results[perm] = false;
-                  break;
-                case flatpak_plugin::PermissionStatus::ASK:
-                case flatpak_plugin::PermissionStatus::NOT_SET:
-                  // Don't add to results
-                  break;
+      app_id, permissions,
+      [callback](const std::map<std::string, flatpak_plugin::PermissionStatus>&
+                     statuses) {
+        std::map<std::string, bool> results;
+        for (const auto& [perm, status] : statuses) {
+          switch (status) {
+            case flatpak_plugin::PermissionStatus::GRANTED:
+              results[perm] = true;
+              break;
+            case flatpak_plugin::PermissionStatus::DENIED:
+              results[perm] = false;
+              break;
+            case flatpak_plugin::PermissionStatus::ASK:
+            case flatpak_plugin::PermissionStatus::NOT_SET:
+              // Don't add to results
+              break;
           }
-      }
-      callback(results);
-  });
+        }
+        callback(results);
+      });
 }
 
 void FlatpakShim::ShowNextDialog(const std::string& request_id) {
   flutter::EncodableMap event;
 
-    std::string app_id;
-    std::string current_permission;
-    size_t permission_index;
-    size_t total_requests;
-    bool should_continue = false;
+  std::string app_id;
+  std::string current_permission;
+  size_t permission_index;
+  size_t total_requests;
+  bool should_continue = false;
 
-    {
-        std::lock_guard<std::mutex> lock(permissions_mutex_);
-        auto it = active_permissions_.find(request_id);
-        if (it == active_permissions_.end()) {
-            spdlog::error("[FlatpakPlugin] Failed to retrieve {} request for permission",
-                         request_id);
-            return;
-        }
-
-        PermissionRequest& request = it->second;
-
-        // Check if all permissions processed
-        if (request.permission_index >= request.requests.size()) {
-            spdlog::debug("[FlatpakPlugin] All Permissions processed for {}",
-                         request.app_id);
-            auto callback = request.callback;
-            auto result = request.result;
-            active_permissions_.erase(it);
-
-            lock.~lock_guard();
-            callback(result);
-            return;
-        }
-
-        // Get current permission info
-        app_id = request.app_id;
-        current_permission = request.requests[request.permission_index];
-        permission_index = request.permission_index;
-        total_requests = request.requests.size();
-        should_continue = true;
+  {
+    std::lock_guard<std::mutex> lock(permissions_mutex_);
+    auto it = active_permissions_.find(request_id);
+    if (it == active_permissions_.end()) {
+      spdlog::error(
+          "[FlatpakPlugin] Failed to retrieve {} request for permission",
+          request_id);
+      return;
     }
 
-    if (!should_continue) return;
+    PermissionRequest& request = it->second;
 
-    event[flutter::EncodableValue("type")] =
-        flutter::EncodableValue("permission_dialog");
-    event[flutter::EncodableValue("request_id")] =
-        flutter::EncodableValue(request_id);
-    event[flutter::EncodableValue("app_id")] =
-        flutter::EncodableValue(app_id);
-    event[flutter::EncodableValue("permission")] =
-        flutter::EncodableValue(current_permission);
-    event[flutter::EncodableValue("progress")] =
-        flutter::EncodableValue(static_cast<int>(permission_index + 1));
-    event[flutter::EncodableValue("total")] =
-        flutter::EncodableValue(static_cast<int>(total_requests));
-    event[flutter::EncodableValue("timestamp")] =
-        flutter::EncodableValue(
-            std::chrono::system_clock::now().time_since_epoch().count());
+    // Check if all permissions processed
+    if (request.permission_index >= request.requests.size()) {
+      spdlog::debug("[FlatpakPlugin] All Permissions processed for {}",
+                    request.app_id);
+      auto callback = request.callback;
+      auto result = request.result;
+      active_permissions_.erase(it);
 
-    spdlog::debug("[FlatpakPlugin] Showing permission Dialog : {} {}/{}",
-                 current_permission, permission_index + 1, total_requests);
+      lock.~lock_guard();
+      callback(result);
+      return;
+    }
 
-    SendPermissionEvent(event, [weak_self = weak_from_this(), request_id]
-                        (bool success) {
+    // Get current permission info
+    app_id = request.app_id;
+    current_permission = request.requests[request.permission_index];
+    permission_index = request.permission_index;
+    total_requests = request.requests.size();
+    should_continue = true;
+  }
+
+  if (!should_continue)
+    return;
+
+  event[flutter::EncodableValue("type")] =
+      flutter::EncodableValue("permission_dialog");
+  event[flutter::EncodableValue("request_id")] =
+      flutter::EncodableValue(request_id);
+  event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(app_id);
+  event[flutter::EncodableValue("permission")] =
+      flutter::EncodableValue(current_permission);
+  event[flutter::EncodableValue("progress")] =
+      flutter::EncodableValue(static_cast<int>(permission_index + 1));
+  event[flutter::EncodableValue("total")] =
+      flutter::EncodableValue(static_cast<int>(total_requests));
+  event[flutter::EncodableValue("timestamp")] = flutter::EncodableValue(
+      std::chrono::system_clock::now().time_since_epoch().count());
+
+  spdlog::debug("[FlatpakPlugin] Showing permission Dialog : {} {}/{}",
+                current_permission, permission_index + 1, total_requests);
+
+  SendPermissionEvent(
+      event, [weak_self = weak_from_this(), request_id](bool success) {
         if (!success) {
-            auto self = weak_self.lock();
-            if (!self) return;
+          auto self = weak_self.lock();
+          if (!self)
+            return;
 
-            spdlog::error("[FlatpakPlugin] Failed to show dialog");
+          spdlog::error("[FlatpakPlugin] Failed to show dialog");
 
-            std::lock_guard<std::mutex> lock(self->permissions_mutex_);
-            auto it = self->active_permissions_.find(request_id);
-            if (it != self->active_permissions_.end()) {
-                auto callback = it->second.callback;
-                self->active_permissions_.erase(it);
+          std::lock_guard<std::mutex> lock(self->permissions_mutex_);
+          auto it = self->active_permissions_.find(request_id);
+          if (it != self->active_permissions_.end()) {
+            auto callback = it->second.callback;
+            self->active_permissions_.erase(it);
 
-                lock.~lock_guard();
-                callback({});
-            }
+            lock.~lock_guard();
+            callback({});
+          }
         }
-    });
+      });
 }
 
 void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
                                            const std::string& permission,
                                            bool granted) {
- spdlog::debug("[FlatpakPlugin] Permission response : {} -> {}" , permission,granted? "granted" : "denied");
+  spdlog::debug("[FlatpakPlugin] Permission response : {} -> {}", permission,
+                granted ? "granted" : "denied");
   std::string table = "devices";
   if (permission == "location") {
     table = "location";
@@ -4338,34 +4340,34 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
   // Retrieve app id from requests
   std::string app_id;
   {
-   std::lock_guard<std::mutex> lock(permissions_mutex_);
-   auto it = active_permissions_.find(request_id);
-   if (it != active_permissions_.end()) {
-     app_id = it->second.app_id;
-     it->second.result[permission] = granted;
-     it->second.permission_index++;
-   }
+    std::lock_guard<std::mutex> lock(permissions_mutex_);
+    auto it = active_permissions_.find(request_id);
+    if (it != active_permissions_.end()) {
+      app_id = it->second.app_id;
+      it->second.result[permission] = granted;
+      it->second.permission_index++;
+    }
   }
 
   if (!app_id.empty()) {
     access_portal_->SetPermission(
-            table, permission, app_id,
-            {granted ? "yes" : "no"},
-            [weak_self = weak_from_this(), request_id, permission, granted]
-            (bool success) {
-                auto self = weak_self.lock();
-                if (!self) return;
+        table, permission, app_id, {granted ? "yes" : "no"},
+        [weak_self = weak_from_this(), request_id, permission,
+         granted](bool success) {
+          auto self = weak_self.lock();
+          if (!self)
+            return;
 
-                if (success) {
-                    spdlog::debug("[FlatpakPlugin] Stored: {} -> {}",
-                                permission, granted ? "granted" : "denied");
-                } else {
-                    spdlog::error("[FlatpakPlugin] Failed to store permission");
-                }
+          if (success) {
+            spdlog::debug("[FlatpakPlugin] Stored: {} -> {}", permission,
+                          granted ? "granted" : "denied");
+          } else {
+            spdlog::error("[FlatpakPlugin] Failed to store permission");
+          }
 
-                // Show next dialog
-                self->ShowNextDialog(request_id);
-            });
+          // Show next dialog
+          self->ShowNextDialog(request_id);
+        });
   }
 }
 
@@ -4382,7 +4384,7 @@ void FlatpakShim::RequestAppLaunchPermission(
   const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
   std::vector<std::string> requested_permissions;
 
-  for (const auto& dev: sandbox.context.devices) {
+  for (const auto& dev : sandbox.context.devices) {
     if (dev == "all") {
       requested_permissions.emplace_back("microphone");
       requested_permissions.emplace_back("speakers");
@@ -4391,9 +4393,10 @@ void FlatpakShim::RequestAppLaunchPermission(
     }
   }
 
-  for (const auto& sock: sandbox.context.sockets) {
+  for (const auto& sock : sandbox.context.sockets) {
     if (sock == "pulseaudio") {
-      auto it = std::find(requested_permissions.begin(),requested_permissions.end(),"microphone");
+      auto it = std::find(requested_permissions.begin(),
+                          requested_permissions.end(), "microphone");
       if (it == requested_permissions.end()) {
         requested_permissions.emplace_back("microphone");
         requested_permissions.emplace_back("speakers");
@@ -4401,18 +4404,16 @@ void FlatpakShim::RequestAppLaunchPermission(
       break;
     }
   }
-  for (const auto& bus: sandbox.session_bus) {
+  for (const auto& bus : sandbox.session_bus) {
     if (bus == "org.freedesktop.Notifications") {
       requested_permissions.emplace_back("notifications");
-    }
-    else if (bus == "org.freedesktop.portal.Usb") {
+    } else if (bus == "org.freedesktop.portal.Usb") {
       requested_permissions.emplace_back("usb");
-    }
-    else if (bus == "org.freedesktop.portal.Location") {
+    } else if (bus == "org.freedesktop.portal.Location") {
       requested_permissions.emplace_back("location");
-    }
-    else if (bus == "org.freedesktop.portal.Camera") {
-      auto it = std::find(requested_permissions.begin(),requested_permissions.end(),"camera");
+    } else if (bus == "org.freedesktop.portal.Camera") {
+      auto it = std::find(requested_permissions.begin(),
+                          requested_permissions.end(), "camera");
       if (it == requested_permissions.end()) {
         requested_permissions.emplace_back("camera");
       }
@@ -4420,115 +4421,121 @@ void FlatpakShim::RequestAppLaunchPermission(
   }
 
   if (requested_permissions.empty()) {
-    spdlog::info("[FlatpakPlugin] No permissions needed for app : {}",app_id);
+    spdlog::info("[FlatpakPlugin] No permissions needed for app : {}", app_id);
     callback({});
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Check Existing permissions for app : {}",app_id);
+  spdlog::info("[FlatpakPlugin] Check Existing permissions for app : {}",
+               app_id);
 
   CheckExistingPermissions(
-        app_id,
-        requested_permissions,
-        [weak_self = weak_from_this(), app_id, requested_permissions, callback]
-        (std::map<std::string, bool> permissions) {
-            auto self = weak_self.lock();
-            if (!self) {
-                callback({});
-                return;
-            }
+      app_id, requested_permissions,
+      [weak_self = weak_from_this(), app_id, requested_permissions,
+       callback](std::map<std::string, bool> permissions) {
+        auto self = weak_self.lock();
+        if (!self) {
+          callback({});
+          return;
+        }
 
-            std::vector<std::string> permissions_to_ask;
-            std::map<std::string, bool> final_results = permissions;
+        std::vector<std::string> permissions_to_ask;
+        std::map<std::string, bool> final_results = permissions;
 
-            for (const auto& perm: requested_permissions) {
-                if (permissions.find(perm) == permissions.end()) {
-                    permissions_to_ask.emplace_back(perm);
-                }
-            }
+        for (const auto& perm : requested_permissions) {
+          if (permissions.find(perm) == permissions.end()) {
+            permissions_to_ask.emplace_back(perm);
+          }
+        }
 
-            if (permissions_to_ask.empty()) {
-                spdlog::info("[FlatpakPlugin] No permissions needed to ask for app : {}",
-                           app_id);
-                callback(final_results);
-                return;
-            }
+        if (permissions_to_ask.empty()) {
+          spdlog::info(
+              "[FlatpakPlugin] No permissions needed to ask for app : {}",
+              app_id);
+          callback(final_results);
+          return;
+        }
 
-            std::string request_id = flatpak_plugin::FlatpakShim::GenerateRequestId();
+        std::string request_id =
+            flatpak_plugin::FlatpakShim::GenerateRequestId();
 
-            PermissionRequest request;
-            request.app_id = app_id;
-            request.result = final_results;
-            request.permission_index = 0;
-            request.requests = permissions_to_ask;
-            request.callback = callback;
+        PermissionRequest request;
+        request.app_id = app_id;
+        request.result = final_results;
+        request.permission_index = 0;
+        request.requests = permissions_to_ask;
+        request.callback = callback;
 
-            {
-                std::lock_guard<std::mutex> lock(self->permissions_mutex_);
-                self->active_permissions_[request_id] = std::move(request);
-            }
+        {
+          std::lock_guard<std::mutex> lock(self->permissions_mutex_);
+          self->active_permissions_[request_id] = std::move(request);
+        }
 
-            spdlog::info("[FlatpakPlugin] Starting Permissions dialog for {} permission",
-                       permissions_to_ask.size());
-            self->ShowNextDialog(request_id);
-        });
+        spdlog::info(
+            "[FlatpakPlugin] Starting Permissions dialog for {} permission",
+            permissions_to_ask.size());
+        self->ShowNextDialog(request_id);
+      });
 }
 
 void FlatpakShim::HandleMethodCall(
     const flutter::MethodCall<flutter::EncodableValue>& method_call,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   asio::post(*strand_, [weak_self = weak_from_this(),
-                          method_name = method_call.method_name(),
-                          arguments = method_call.arguments() ?
-                              *method_call.arguments() : flutter::EncodableValue(),
-                          result = std::move(result)]() mutable {
+                        method_name = method_call.method_name(),
+                        arguments = method_call.arguments()
+                                        ? *method_call.arguments()
+                                        : flutter::EncodableValue(),
+                        result = std::move(result)]() mutable {
     auto self = weak_self.lock();
     if (!self) {
-        result->Error("CANCELLED", "Operation cancelled");
-        return;
+      result->Error("CANCELLED", "Operation cancelled");
+      return;
     }
     const auto* args = std::get_if<flutter::EncodableMap>(&arguments);
 
-  if (method_name == "permissionResponse") {
-    if (!args) {
-      result->Error("INVALID_ARGUMENT","argument is not map");
-      return;
-    }
-    auto request_id_it = args->find(flutter::EncodableValue("request_id"));
-    auto permission_it = args->find(flutter::EncodableValue("permission"));
-    auto granted_it = args->find(flutter::EncodableValue("granted"));
-    if (request_id_it == args->end() || permission_it == args->end() || granted_it == args->end()) {
-      result->Error("MISSING_FIELDS","request_id ,permission or granted is missing");
-      return;
-    }
+    if (method_name == "permissionResponse") {
+      if (!args) {
+        result->Error("INVALID_ARGUMENT", "argument is not map");
+        return;
+      }
+      auto request_id_it = args->find(flutter::EncodableValue("request_id"));
+      auto permission_it = args->find(flutter::EncodableValue("permission"));
+      auto granted_it = args->find(flutter::EncodableValue("granted"));
+      if (request_id_it == args->end() || permission_it == args->end() ||
+          granted_it == args->end()) {
+        result->Error("MISSING_FIELDS",
+                      "request_id ,permission or granted is missing");
+        return;
+      }
 
-    auto* request_id = std::get_if<std::string>(&request_id_it->second);
-    auto* permission = std::get_if<std::string>(&permission_it->second);
-    auto* granted = std::get_if<bool>(&granted_it->second);
+      auto* request_id = std::get_if<std::string>(&request_id_it->second);
+      auto* permission = std::get_if<std::string>(&permission_it->second);
+      auto* granted = std::get_if<bool>(&granted_it->second);
 
-    if (!request_id || !permission || !granted) {
-      result->Error("INVALID_TYPES","invalid arguments types");
+      if (!request_id || !permission || !granted) {
+        result->Error("INVALID_TYPES", "invalid arguments types");
+        return;
+      }
+      self->HandlePermissionResponse(*request_id, *permission, *granted);
+      result->Success();
       return;
     }
-    self->HandlePermissionResponse(*request_id,*permission,*granted);
-    result->Success();
-    return;
-  }
     // TODO: Handle other methods.
     if (method_name == "checkPermissions") {
-            result->NotImplemented();
-            return;
-        }
+      result->NotImplemented();
+      return;
+    }
 
-        if (method_name == "grantPermission") {
-            result->NotImplemented();
-            return;
-        }
+    if (method_name == "grantPermission") {
+      result->NotImplemented();
+      return;
+    }
 
-        if (method_name == "revokePermission") {
-            result->NotImplemented();
-            return;
-        }
+    if (method_name == "revokePermission") {
+      result->NotImplemented();
+      return;
+    }
     result->NotImplemented();
   });
 }
