@@ -41,13 +41,14 @@ class PortalManager {
                    ResultCallback&& callback,
                    Args&&... args);
 
+  PortalProxy& GetPortalProxy();
+
  private:
   asio::io_context& io_context_;
   std::unique_ptr<PortalProxy> portal_proxy_;
   std::map<std::string, PortalContext> app_context_;
   std::mutex app_mutex_;
 
-  PortalProxy& GetPortalProxy();
   PortalContext& get_app_context(const std::string& app_id);
 };
 }  // namespace flatpak_plugin

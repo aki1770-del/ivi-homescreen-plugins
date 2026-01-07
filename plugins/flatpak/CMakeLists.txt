@@ -30,6 +30,8 @@ add_library(plugin_flatpak STATIC
         screenshot.cc
         portals/portal_manager.cc
         portals/portal_proxy.cc
+        portals/access_portal/access_portal.cc
+        portals/access_portal/access_portal.h
 )
 target_include_directories(plugin_flatpak PRIVATE include)
 target_compile_options(plugin_flatpak PRIVATE

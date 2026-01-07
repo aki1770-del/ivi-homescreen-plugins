@@ -1,5 +1,6 @@
 /*
  * Copyright 2020-2025 Toyota Connected North America
+ * Copyright 2025 Ahmed Wafdy
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +34,7 @@
 #include "component.h"
 #include "messages.g.h"
 #include "plugins/flatpak/portals/portal_manager.h"
+#include "portals/access_portal/access_portal.h"
 
 namespace flatpak_plugin {
 class FlatpakPlugin;
@@ -227,6 +229,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \param id Id of the application to start application.
    * \param strand Asio strand to execute async operations.
    * \param portal_manager Ptr to portal manager to execute portal operations.
+   * \param completion_callback Callback function for async operations.
    * \return An ErrorOr object containing the EncodableList or an
    * error.
    */
@@ -268,7 +271,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    * \brief Search for app ID  in all remotes.
    * \param installation Installation that contains the App.
    * \param app_id Application id.
-   * \return A Pair of two strings contains remote name and application ref.
+   * \return A Pair of two strings contains a remote name and application ref.
    */
   static std::pair<std::string, std::string> find_app_in_remotes(
       FlatpakInstallation* installation,
@@ -351,6 +354,24 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
    */
   void SetupTransactionEventChannel(flutter::BinaryMessenger* messenger);
 
+  /**
+   * \brief Sets up the event channel for Permissions Access events.
+   * \param messenger Pointer to the BinaryMessenger used for communication.
+   * \param strand Asio strand to execute async operations.
+   * portal with event callback.
+   */
+  void SetupAccessEventChannel(flutter::BinaryMessenger* messenger,
+                               const asio::io_context::strand& strand);
+
+  /**
+   * \brief Handles All methods responses comes from the flutter side.
+   * @param method_call A flutter method call for Method channel implementation.
+   * @param result A pointer for result implementation.
+   */
+  void HandleMethodCall(
+      const flutter::MethodCall<flutter::EncodableValue>& method_call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
  private:
   struct sandbox {
     struct application {
@@ -410,6 +431,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
     }
   };
 
+  struct PermissionRequest {
+    std::string app_id;
+    std::vector<std::string> requests;
+    std::map<std::string, bool> result;
+    size_t permission_index = 0;
+    std::function<void(const std::map<std::string, bool>&)> callback;
+    std::chrono::steady_clock::time_point created_at;
+  };
+
   template <typename T>
   struct GObjectGuard {
     T* obj;
@@ -438,6 +468,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       event_channel_;
   std::shared_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
   mutable std::mutex event_sink_mutex_;
+
+  // Event channel for streaming permissions access to the flutter widget
+  std::unique_ptr<AccessPortal> access_portal_;
+  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
+      access_event_channel_;
+  std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> access_sink_;
+  mutable std::mutex access_sink_mutex_;
+  std::map<std::string, PermissionRequest> active_permissions_;
+  mutable std::mutex permissions_mutex_;
 
   static std::optional<Application> create_component(
       FlatpakRemoteRef* app_ref,
@@ -495,6 +534,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   // flutter streaming callback functions
   void SendTransactionEvent(flutter::EncodableMap& event) const;
 
+  // flutter streaming callback functions
+  void SendPermissionEvent(const flutter::EncodableMap& event,
+                           const std::function<void(bool)>& callback);
+
   // callback triggered by "changed" signal
   static void OnProgressChanged(FlatpakTransactionProgress* progress,
                                 gpointer user_data);
@@ -523,6 +566,24 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   bool check_desk_usage(FlatpakInstallation* installation,
                         guint64 estimated_download) const;
+
+  void RequestAppLaunchPermission(
+      const std::string& app_id,
+      FlatpakInstalledRef* installed_ref,
+      const std::function<void(const std::map<std::string, bool>&)>& callback);
+
+  void HandlePermissionResponse(const std::string& request_id,
+                                const std::string& permission,
+                                bool granted);
+
+  void ShowNextDialog(const std::string& request_id);
+
+  static std::string GenerateRequestId();
+
+  void CheckExistingPermissions(
+      const std::string& app_id,
+      const std::vector<std::string>& permissions,
+      const std::function<void(std::map<std::string, bool>)>& callback) const;
 };
 
 }  // namespace flatpak_plugin
