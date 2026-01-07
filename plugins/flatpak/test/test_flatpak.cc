@@ -563,10 +563,10 @@ TEST_F(FlatpakPluginTest, RunAppTest) {
       id, *strand, portal_manager,
       [guard](const ErrorOr<bool>& result) { guard->set_value(result); });
 
-  // auto status = future.wait_for(std::chrono::minutes(2));
-  //
-  // ASSERT_NE(status, std::future_status::timeout)
-  //     << "Installation timed out after 2 minutes";
+  auto status = future.wait_for(std::chrono::minutes(2));
+
+  ASSERT_NE(status, std::future_status::timeout)
+      << "Installation timed out after 2 minutes";
 
   auto result = future.get();
 
