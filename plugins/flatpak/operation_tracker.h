@@ -27,6 +27,8 @@
 
 namespace flatpak_plugin {
 
+struct FlatpakShim;
+
 class OperationTracker {
 public:
   struct OperationInfo {
