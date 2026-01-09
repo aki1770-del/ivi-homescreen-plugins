@@ -52,12 +52,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   explicit FlatpakShim(FlatpakPlugin* plugin = nullptr,
                        flutter::BinaryMessenger* messenger = nullptr,
                        asio::io_context::strand* strand = nullptr)
-  : plugin_(plugin), messenger_(messenger), strand_(strand),operation_tracker_(std::make_unique<OperationTracker>(
-        strand_->context(),
-        [this](const flutter::EncodableMap& event) {
-          this->SendTransactionEvent(const_cast<flutter::EncodableMap&>(event));
-        }
-    )) {}
+      : plugin_(plugin),
+        messenger_(messenger),
+        strand_(strand),
+        operation_tracker_(std::make_unique<OperationTracker>(
+            strand_->context(),
+            [this](const flutter::EncodableMap& event) {
+              this->SendTransactionEvent(
+                  const_cast<flutter::EncodableMap&>(event));
+            })) {}
 
   ~FlatpakShim() {
     plugin_ = nullptr;
@@ -559,10 +562,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   // callback when transaction operation completed
   static void OnOperationComplete(FlatpakTransaction* transaction,
-                                      FlatpakTransactionOperation* operation,
-                                      const char* commit,
-                                      FlatpakTransactionResult result,
-                                      gpointer user_data);
+                                  FlatpakTransactionOperation* operation,
+                                  const char* commit,
+                                  FlatpakTransactionResult result,
+                                  gpointer user_data);
 
   // callback when transaction operation reports an error
   static gboolean OnOperationError(FlatpakTransaction* transaction,
