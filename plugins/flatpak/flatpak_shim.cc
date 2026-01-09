@@ -964,6 +964,7 @@ void FlatpakShim::ApplicationInstall(
 
   spdlog::info("[FlatpakPlugin] Starting TWO-PHASE installation for: {}", id);
 
+  operation_tracker_->TrackOperationStart(id,"install");
   FlatpakTransaction* transaction =
       flatpak_transaction_new_for_installation(installation, nullptr, &error);
 
@@ -1055,7 +1056,7 @@ void FlatpakShim::ApplicationInstall(
 
   // run transaction in a detached thread
   std::thread([self, transaction_raw, callback, ref_name, remote_name,
-               strand_ptr = strand_, installation_raw, found_ref_raw]() {
+               strand_ptr = strand_, installation_raw, found_ref_raw,id]() {
     pthread_setname_np(pthread_self(), "flatpak-install");
 
     GError* error = nullptr;
@@ -1077,7 +1078,9 @@ void FlatpakShim::ApplicationInstall(
     if (!success) {
       spdlog::error("[FlatpakPlugin] Phase 1 (dependencies) failed");
       asio::post(*strand_ptr, [self, callback, err_msg, transaction_raw,
-                               found_ref_raw, installation_raw]() {
+                               found_ref_raw, installation_raw,id]() {
+        self->operation_tracker_->SendOperationFinish(id,"install",false);
+
         callback(ErrorOr<bool>(FlutterError(
             "INSTALL_FAILED", "Dependency installation failed: " + err_msg)));
         g_object_unref(transaction_raw);
@@ -1208,7 +1211,8 @@ void FlatpakShim::ApplicationInstall(
 
     if (!phase2_success) {
       asio::post(*strand_ptr, [self, callback, phase2_err_msg, transaction_raw,
-                               found_ref_raw, installation_raw]() {
+                               found_ref_raw, installation_raw,id]() {
+        self->operation_tracker_->SendOperationFinish(id,"install",false);
         callback(ErrorOr<bool>(FlutterError(
             "INSTALL_FAILED", "App installation failed: " + phase2_err_msg)));
         g_object_unref(transaction_raw);
@@ -1248,16 +1252,18 @@ void FlatpakShim::ApplicationInstall(
 
     asio::post(*strand_ptr, [self, callback, verified, ref_name,
                              transaction_raw, found_ref_raw,
-                             installation_raw]() {
+                             installation_raw,id]() {
       if (verified) {
         spdlog::info(
             "[FlatpakPlugin] Application '{}' successfully installed and "
             "verified",
             ref_name);
+        self->operation_tracker_->SendOperationFinish(id,"install",true);
         callback(ErrorOr<bool>(true));
       } else {
         spdlog::error(
             "[FlatpakPlugin] Installation completed but verification failed");
+        self->operation_tracker_->SendOperationFinish(id,"install",false);
         callback(ErrorOr<bool>(
             FlutterError("INSTALL_VERIFICATION_FAILED",
                          "Installation completed but app not found")));
@@ -3981,31 +3987,67 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
   const char* ref = flatpak_transaction_operation_get_ref(operation);
   auto type = flatpak_transaction_operation_get_operation_type(operation);
 
-  std::string type_str =
-      (type == FLATPAK_TRANSACTION_OPERATION_INSTALL) ? "install" : "other";
+  std::string type_str;
+  switch (type) {
+    case FLATPAK_TRANSACTION_OPERATION_INSTALL:
+      type_str = "install";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_UPDATE:
+      type_str = "update";
+      break;
+    case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
+      type_str = "uninstall";
+      break;
+    default:
+      type_str = "other";
+      break;
+  }
+
+  std::string ref_str = ref ? std::string(ref) : std::string("");
 
   if (ref) {
     spdlog::info(
         "[FlatpakPlugin] Operation completed: {} {} (result: {})", type_str,
-        std::string(ref),
+        ref_str,
         result == FLATPAK_TYPE_TRANSACTION_RESULT ? "SUCCESS" : "FAILED");
+  }
+
+  std::string app_id;
+  auto active_ops = handler->operation_tracker_->GetActiveOperations();
+
+  for (const auto& [id, op_info] : active_ops) {
+    if (ref_str.find(id) != std::string::npos || op_info.op_type == type_str) {
+      app_id = id;
+      handler->operation_tracker_->TrackOperationComplete(app_id, ref_str);
+      break;
+    }
   }
 
   if (handler->strand_) {
     asio::post(
         *handler->strand_,
-        [handler, ref = ref ? std::string(ref) : std::string(""),
-         commit = commit ? std::string(commit) : std::string(""), result]() {
+        [handler, ref_str,
+         commit = commit ? std::string(commit) : std::string(""),
+         result, type_str, app_id]() {
           try {
             flutter::EncodableMap OperationCompleteMap;
             OperationCompleteMap[flutter::EncodableValue("type")] =
                 flutter::EncodableValue("operation_complete");
             OperationCompleteMap[flutter::EncodableValue("operation_ref")] =
-                flutter::EncodableValue(ref);
+                flutter::EncodableValue(ref_str);
             OperationCompleteMap[flutter::EncodableValue("commit")] =
                 flutter::EncodableValue(commit);
             OperationCompleteMap[flutter::EncodableValue("success")] =
                 flutter::EncodableValue(static_cast<int32_t>(result));
+            OperationCompleteMap[flutter::EncodableValue("operation_type")] =
+                flutter::EncodableValue(type_str);
+
+            // Determine if this is the main app
+            bool is_main_app = ref_str.find("app/") == 0 &&
+                              !app_id.empty() &&
+                              ref_str.find(app_id) != std::string::npos;
+            OperationCompleteMap[flutter::EncodableValue("is_main_app")] =
+                flutter::EncodableValue(is_main_app);
 
             handler->SendTransactionEvent(OperationCompleteMap);
           } catch (const std::exception& e) {
@@ -4067,6 +4109,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
 
   spdlog::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
 
+  std::string app_id;
   flutter::EncodableList ops_list;
   for (GList* l = operations; l != nullptr; l = l->next) {
     auto* op = static_cast<FlatpakTransactionOperation*>(l->data);
@@ -4097,8 +4140,17 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     spdlog::info("[FlatpakPlugin] - Operation: {} {}", type_str, ref_str);
 
     std::string kind = "unknown";
+    bool is_main_app{false};
     if (ref_str.find("app/") == 0) {
       kind = "app";
+      is_main_app = true;
+
+      // extract app to pass
+      size_t first_slash = ref_str.find('/') + 1;
+      size_t second_slash = ref_str.find('/', first_slash);
+      if (second_slash != std::string::npos) {
+        app_id = ref_str.substr(first_slash, second_slash - first_slash);
+      }
     } else if (ref_str.find("runtime/") == 0) {
       kind = "runtime";
     }
@@ -4111,8 +4163,11 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     ops_list.emplace_back(op_map);
   }
 
+  if (app_id.empty()) {
+    handler->operation_tracker_->UpdateTotalOperations(app_id,total_ops);
+  }
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler, total_ops,
+    asio::post(*handler->strand_, [handler, app_id,total_ops,
                                    ops_list = std::move(ops_list)]() {
       try {
         flutter::EncodableMap ready_event;
@@ -4122,7 +4177,8 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
             flutter::EncodableValue(total_ops);
         ready_event[flutter::EncodableValue("operations")] =
             flutter::EncodableValue(ops_list);
-
+        ready_event[flutter::EncodableValue("main_app_id")] =
+                    flutter::EncodableValue(app_id);
         handler->SendTransactionEvent(ready_event);
       } catch (const std::exception& e) {
         spdlog::error("[FlatpakPlugin] Error sending ready event: {}",
