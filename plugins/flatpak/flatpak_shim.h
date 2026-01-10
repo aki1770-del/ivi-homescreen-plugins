@@ -52,15 +52,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   explicit FlatpakShim(FlatpakPlugin* plugin = nullptr,
                        flutter::BinaryMessenger* messenger = nullptr,
                        asio::io_context::strand* strand = nullptr)
-      : plugin_(plugin),
-        messenger_(messenger),
-        strand_(strand),
-        operation_tracker_(std::make_unique<OperationTracker>(
-            strand_->context(),
-            [this](const flutter::EncodableMap& event) {
-              this->SendTransactionEvent(
-                  const_cast<flutter::EncodableMap&>(event));
-            })) {}
+      : plugin_(plugin), messenger_(messenger), strand_(strand) {
+    if (strand_) {
+      operation_tracker_ = std::make_unique<OperationTracker>(
+          strand_->context(), [this](const flutter::EncodableMap& event) {
+            this->SendTransactionEvent(
+                const_cast<flutter::EncodableMap&>(event));
+          });
+    }
+  }
 
   ~FlatpakShim() {
     plugin_ = nullptr;

@@ -4138,10 +4138,8 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     spdlog::info("[FlatpakPlugin] - Operation: {} {}", type_str, ref_str);
 
     std::string kind = "unknown";
-    bool is_main_app{false};
     if (ref_str.find("app/") == 0) {
       kind = "app";
-      is_main_app = true;
 
       // extract app to pass
       size_t first_slash = ref_str.find('/') + 1;
