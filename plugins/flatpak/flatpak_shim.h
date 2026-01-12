@@ -33,11 +33,13 @@
 #include "asio/steady_timer.hpp"
 #include "component.h"
 #include "messages.g.h"
+#include "operation_tracker.h"
 #include "plugins/flatpak/portals/portal_manager.h"
 #include "portals/access_portal/access_portal.h"
 
 namespace flatpak_plugin {
 class FlatpakPlugin;
+class OperationTracker;
 
 /**
  * \brief A utility class providing various helper functions for interacting
@@ -50,7 +52,15 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   explicit FlatpakShim(FlatpakPlugin* plugin = nullptr,
                        flutter::BinaryMessenger* messenger = nullptr,
                        asio::io_context::strand* strand = nullptr)
-      : plugin_(plugin), messenger_(messenger), strand_(strand) {}
+      : plugin_(plugin), messenger_(messenger), strand_(strand) {
+    if (strand_) {
+      operation_tracker_ = std::make_unique<OperationTracker>(
+          strand_->context(), [this](const flutter::EncodableMap& event) {
+            this->SendTransactionEvent(
+                const_cast<flutter::EncodableMap&>(event));
+          });
+    }
+  }
 
   ~FlatpakShim() {
     plugin_ = nullptr;
@@ -462,6 +472,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   FlatpakPlugin* plugin_;
   flutter::BinaryMessenger* messenger_;
   asio::io_context::strand* strand_;
+
+  std::unique_ptr<OperationTracker> operation_tracker_;
 
   // Event channel for streaming transaction progress to Flutter
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>

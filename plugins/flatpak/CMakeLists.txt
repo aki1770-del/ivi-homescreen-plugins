@@ -32,6 +32,8 @@ add_library(plugin_flatpak STATIC
         portals/portal_proxy.cc
         portals/access_portal/access_portal.cc
         portals/access_portal/access_portal.h
+        operation_tracker.cc
+        operation_tracker.h
 )
 target_include_directories(plugin_flatpak PRIVATE include)
 target_compile_options(plugin_flatpak PRIVATE
