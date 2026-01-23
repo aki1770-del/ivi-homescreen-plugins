@@ -1,0 +1,33 @@
+name: "file_selector"
+
+on:
+  pull_request:
+    paths:
+      # in plugins/[config stuff]
+      - "plugins/.clang-*"
+      - "plugins/CMakeLists.txt"
+      - "plugins/*.cmake"
+      - "plugins/*.h"
+      - "plugins/*.cpp"
+      - "plugins/*.cc"
+      - "plugins/*.c"
+      - "plugins/*.cc.in"
+      # plugin path
+      - "plugins/common/**"
+      - "plugins/file_selector/**"
+      # patches
+      - "patches/**/*.patch"
+      # workflow definition itself
+      - ".github/workflows/file_selector.yaml"
+      - ".github/workflows/_plugin_cpp-ci.yaml"
+      - ".github/actions/homescreen-build/**"
+  push:
+    branches:
+      - main
+
+jobs:
+  file_selector:
+    uses: ./.github/workflows/_plugin_cpp-ci.yaml
+    with:
+      name: "file_selector"
+      

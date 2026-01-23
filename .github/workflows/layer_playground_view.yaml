@@ -1,0 +1,33 @@
+name: "layer_playground_view"
+
+on:
+  pull_request:
+    paths:
+      # in plugins/[config stuff]
+      - "plugins/.clang-*"
+      - "plugins/CMakeLists.txt"
+      - "plugins/*.cmake"
+      - "plugins/*.h"
+      - "plugins/*.cpp"
+      - "plugins/*.cc"
+      - "plugins/*.c"
+      - "plugins/*.cc.in"
+      # plugin path
+      - "plugins/common/**"
+      - "plugins/layer_playground_view/**"
+      # patches
+      - "patches/**/*.patch"
+      # workflow definition itself
+      - ".github/workflows/layer_playground_view.yaml"
+      - ".github/workflows/_plugin_cpp-ci.yaml"
+      - ".github/actions/homescreen-build/**"
+  push:
+    branches:
+      - main
+
+jobs:
+  layer_playground_view:
+    uses: ./.github/workflows/_plugin_cpp-ci.yaml
+    with:
+      name: "layer_playground_view"
+      

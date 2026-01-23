@@ -1,0 +1,234 @@
+name: "ivi-homescreen plugin build"
+description: "Sets up an ivi-homescreen build environment with plugin support"
+
+inputs:
+  name:
+    description: "The name of the plugin to build"
+    required: true
+  libcamera-enable:
+    description: "Whether to enable libcamera support"
+    required: false
+    default: "false"
+  libcamera-version:
+    description: "The version of libcamera to use"
+    required: false
+  clang-version:
+    description: "The version of Clang/LLVM to use"
+    required: false
+    default: "18"
+  apt-packages:
+    description: "Additional apt packages to install (space-separated)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+  # Fetch repos
+  - name: Fetch `ivi-homescreen`
+    uses: actions/checkout@v5
+    with:
+      repository: toyota-connected/ivi-homescreen
+      path: ivi-homescreen
+      ref: v2.0
+      fetch-depth: 1
+      submodules: true
+      persist-credentials: false
+  - name: Fetch `ivi-homescreen-plugins`
+    uses: actions/checkout@v5
+    if: ${{ github.event.repository.name != 'ivi-homescreen-plugins' }}
+    with:
+      repository: toyota-connected/ivi-homescreen-plugins
+      path: ivi-homescreen-plugins
+      ref: v2.0
+      fetch-depth: 1
+      submodules: true
+      persist-credentials: false
+  - name: Fetch source
+    uses: actions/checkout@v5
+    with:
+      path: plugins_source
+      submodules: 'true'
+      fetch-depth: 1
+      persist-credentials: false
+  - name: Check repo hashes
+    id: check-hashes
+    shell: bash
+    run: |
+      echo "Checking repository hashes..."
+      REPO_DIRS=( "ivi-homescreen" "plugins_source" )
+      if [ ${{ github.event.repository.name }} != 'ivi-homescreen-plugins' ]; then
+        REPO_DIRS+=( "ivi-homescreen-plugins" )
+      fi
+
+      TOTAL_HASH=""
+
+      for dir in "${REPO_DIRS[@]}"; do
+        if [ -d "$dir" ]; then
+          echo "  Repository: $dir"
+          cd $dir
+          HASH=$(git rev-parse HEAD)
+          echo "  Current hash: $HASH"
+          echo "${dir}_hash=$HASH" >> $GITHUB_OUTPUT
+          TOTAL_HASH+=$HASH
+          cd ..
+        else
+          echo "  Repository directory $dir does not exist!"
+          exit 1
+        fi
+      done
+
+      echo "total_hash=$TOTAL_HASH" >> $GITHUB_OUTPUT
+  
+
+  # TODO: cache OS dependencies!
+  - name: Install OS dependencies
+    shell: bash
+    run: |
+      # Disable man-db (massive speed-up!)
+      sudo apt-get remove --purge man-db -yq
+
+      # Purge old LLVM
+      sudo apt-get purge llvm* -yq
+
+      # Install LLVM apt repo key
+      wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+      # Add LLVM apt repo
+      RELEASE_NAME=$(lsb_release -sc 2> /dev/null || echo "noble")
+      echo "deb http://apt.llvm.org/${RELEASE_NAME}/ llvm-toolchain-${RELEASE_NAME}-${{ inputs.clang-version }} main" | sudo tee /etc/apt/sources.list.d/llvm.list
+
+      # Update and install dependencies
+      sudo apt-get update -yq
+      sudo apt-get install -yq \
+        ${{ inputs.apt-packages }} \
+        ninja-build \
+        \
+        libwayland-dev wayland-protocols libxkbcommon-dev \
+        \
+        mesa-common-dev libegl1-mesa-dev libgles2-mesa-dev mesa-utils \
+        \
+        libsystemd-dev \
+        \
+        libcurl4-openssl-dev \
+        libevent-dev \
+        libglfw3-dev \
+        libicu-dev \
+        libsecret-1-dev \
+        libsdl2-dev \
+        libuv1-dev \
+        \
+        libgstreamer1.0-dev libunwind-18-dev \
+        libgstreamer-plugins-base1.0-dev \
+        libgstreamer-plugins-bad1.0-dev \
+        libavformat-dev libavutil-dev \
+        \
+        libjpeg-turbo8-dev libturbojpeg0-dev libjpeg-dev \
+        libpng-dev libwebp-dev \
+        \
+        libflatpak-dev libxml2-dev zlib1g-dev \
+        \
+        libpipewire-0.3-dev \
+        \
+        clang-18 clang-tidy-18 llvm-18 lldb-18 lld-18 libc++-dev libc++abi-dev libc++1 libc++abi1
+
+      # Configure gstreamer
+      pkg-config --modversion gstreamer-1.0 gstreamer-audio-1.0
+
+  - name: Install python dependencies
+    shell: bash
+    run: |
+      pip3 install --user absl-py jinja2 ply meson
+
+  - name: Show versions
+    shell: bash
+    run: |
+      cmake --version
+      gcc --version
+      clang --version
+
+  # Libcamera
+  - name: Cache restore - libcamera
+    id: cache-libcamera
+    if: ${{ inputs.libcamera-enable == 'true' }}
+    uses: actions/cache/restore@v4
+    with:
+      key: ${{ runner.os }}-libcamera-${{ inputs.libcamera-version }}-buildscript_${{ hashFiles('plugins_source/.github/actions/homescreen-build/action.yml') }}-llvm${{ inputs.clang-version }}
+      path: |
+        ${{github.workspace}}/libcamera/buildDir/staging/release/*
+  - name: Build libcamera
+    if: ${{ inputs.libcamera-enable == 'true' && steps.cache-libcamera.outputs.cache-hit != 'true' }}
+    working-directory: ${{github.workspace}}
+    shell: bash
+    run: |
+      git clone -b master https://git.libcamera.org/libcamera/libcamera.git
+      cd libcamera && git checkout v${{ inputs.libcamera-version }}
+      LIBCAMERA_STAGING=$PWD/buildDir/staging/release
+      CC=/usr/bin/clang CXX=/usr/bin/clang++ \
+      meson setup buildDir -Dqcam="disabled" -Dlc-compliance="disabled" -Dcam="disabled" -Dgstreamer="disabled" --prefix $LIBCAMERA_STAGING
+      ninja -C buildDir install
+      ls -laR $LIBCAMERA_STAGING
+  - name: Cache save - libcamera
+    if: ${{ inputs.libcamera-enable == 'true' && steps.cache-libcamera.outputs.cache-hit != 'true' }}
+    uses: actions/cache/save@v4
+    with:
+      key: ${{ steps.cache-libcamera.outputs.cache-primary-key }}
+      path: |
+        ${{github.workspace}}/libcamera/buildDir/staging/release/*
+
+  # ivi-homescreen config
+  - name: Cache restore - config
+    uses: actions/cache/restore@v3
+    id: cache-config
+    with:
+      key: ${{ runner.os }}-config-${{ inputs.name }}-${{ steps.check-hashes.outputs.total_hash }}-buildscript_${{ hashFiles('plugins_source/.github/actions/homescreen-build/action.yml') }}-llvm${{ inputs.clang-version }}
+      path: |
+        ${{github.workspace}}/build
+  - name: Configure
+    if: steps.cache-config.outputs.cache-hit != 'true'
+    shell: bash
+    run: |
+      mkdir -p ${{github.workspace}}/build
+
+      # If is ivi-homescreen-plugins, set PLUGINS_DIR to plugins_source, else set to ivi-homescreen-plugins/plugins + EXT_PLUGINS_DIRS to plugins_source
+      if [ "${{ github.event.repository.name }}" = "ivi-homescreen-plugins" ]; then
+        PLUGINS_DIR=${{github.workspace}}/plugins_source/plugins
+        EXT_PLUGINS_DIRS=""
+      else
+        PLUGINS_DIR=${{github.workspace}}/ivi-homescreen-plugins/plugins
+        EXT_PLUGINS_DIRS=${{github.workspace}}/plugins_source/plugins
+      fi
+
+      PLUGIN_NAME_UPPERCASE=$(echo "${{ inputs.name }}" | tr '[:lower:]_' '[:upper:]_')
+      PLUGIN_FLAGS="-D BUILD_PLUGIN_${PLUGIN_NAME_UPPERCASE}=ON"
+
+      PKG_CONFIG_PATH=${{github.workspace}}/libcamera/buildDir/staging/release/lib/x86_64-linux-gnu/pkgconfig \
+      CC=/usr/bin/clang CXX=/usr/bin/clang++ cmake -GNinja \
+        -S ${{github.workspace}}/ivi-homescreen \
+        -B ${{github.workspace}}/build \
+        -D LLVM_CONFIG=/usr/bin/llvm-config \
+        -D ENABLE_STATIC_LINK=ON \
+        -D ENABLE_LTO=ON \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_STAGING_PREFIX=${{github.workspace}}/build/staging/usr/local \
+        -D BUILD_NUMBER=${GITHUB_RUN_ID} \
+        -D CMAKE_VERBOSE_MAKEFILE=ON \
+        -D ENABLE_DLT=OFF \
+        -D BUILD_CRASH_HANDLER=OFF \
+        \
+        -D PLUGINS_DIR=${PLUGINS_DIR} \
+        -D EXT_PLUGINS_DIRS=${EXT_PLUGINS_DIRS} \
+        \
+        -D DEBUG_PLATFORM_MESSAGES=OFF \
+        \
+        ${PLUGIN_FLAGS} \
+        \
+        -D BUILD_WATCHDOG=OFF \
+        -D BUILD_SYSTEMD_WATCHDOG=OFF \
+        -D CMAKE_EXPORT_COMPILE_COMMANDS=ON
+  - name: Cache save - config
+    if: steps.cache-config.outputs.cache-hit != 'true'
+    uses: actions/cache/save@v4
+    with:
+      key: ${{ steps.cache-config.outputs.cache-primary-key }}
+      path: |
+        ${{github.workspace}}/build

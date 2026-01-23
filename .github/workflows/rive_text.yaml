@@ -1,0 +1,33 @@
+name: "rive_text"
+
+on:
+  pull_request:
+    paths:
+      # in plugins/[config stuff]
+      - "plugins/.clang-*"
+      - "plugins/CMakeLists.txt"
+      - "plugins/*.cmake"
+      - "plugins/*.h"
+      - "plugins/*.cpp"
+      - "plugins/*.cc"
+      - "plugins/*.c"
+      - "plugins/*.cc.in"
+      # plugin path
+      - "plugins/common/**"
+      - "plugins/rive_text/**"
+      # patches
+      - "patches/**/*.patch"
+      # workflow definition itself
+      - ".github/workflows/rive_text.yaml"
+      - ".github/workflows/_plugin_cpp-ci.yaml"
+      - ".github/actions/homescreen-build/**"
+  push:
+    branches:
+      - main
+
+jobs:
+  rive_text:
+    uses: ./.github/workflows/_plugin_cpp-ci.yaml
+    with:
+      name: "rive_text"
+      
