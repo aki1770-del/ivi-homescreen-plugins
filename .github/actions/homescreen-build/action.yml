@@ -134,6 +134,30 @@ runs:
       # Configure gstreamer
       pkg-config --modversion gstreamer-1.0 gstreamer-audio-1.0
 
+      # HACK: fix libunwind-18-dev not providing a proper pkg-config file
+      #  - see https://github.com/llvm/llvm-project/issues/53458
+      #  - Create a minimal pkg-config file that points to libunwind-18:
+      sudo tee /usr/lib/pkgconfig/libunwind.pc <<'EOF'
+      prefix=/usr
+      exec_prefix=${prefix}
+      libdir=/usr/lib/x86_64-linux-gnu
+      includedir=/usr/include/libunwind
+
+      Name: libunwind
+      Description: libunwind
+      Version: 1.6.2
+      Libs: -lunwind
+      Cflags: -I${includedir}
+      EOF
+
+      pkg-config --modversion libunwind
+      pkg-config --cflags libunwind
+
+      # This works because:
+      # - GStreamer only checks for presence
+      # - ABI is already correct
+      # - No runtime impact
+
   - name: Install python dependencies
     shell: bash
     run: |
