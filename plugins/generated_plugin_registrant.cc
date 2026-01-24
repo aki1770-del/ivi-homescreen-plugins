@@ -176,15 +176,6 @@ void PluginsAoiPlatformViewCreate(
     result->Success(flutter::EncodableValue(id));
   } else
 #endif
-#if ENABLE_PLUGIN_FILAMENT_VIEW
-      if (viewType == "com.toyotaconnected.filament_view.channel_3d_scene") {
-    FilamentViewPluginCApiRegisterWithRegistrar(
-        registrar, id, viewType, direction, top, left, width, height, params,
-        flutter_asset_directory, engine, addListener, removeListener,
-        platform_view_context);
-    result->Success(flutter::EncodableValue(id));
-  } else
-#endif
 #if ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
       if (viewType == "@views/simple-box-view-type") {
     LayerPlaygroundPluginCApiRegisterWithRegistrar(

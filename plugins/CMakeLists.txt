@@ -125,8 +125,6 @@ PLUGIN_OPTION(webrtc "Include Webrtc plugin" OFF)
 
 # Platform View Plugins
 
-PLUGIN_OPTION(filament_view "Include Filament View plugin" OFF)
-
 PLUGIN_OPTION(layer_playground_view "Include Layer Playground View plugin" OFF)
 
 PLUGIN_OPTION(nav_render_view "Include Navigation Render View plugin" OFF)
