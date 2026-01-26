@@ -16,15 +16,15 @@
 
 #ifndef PIGEON_MESSAGES_G_H_
 #define PIGEON_MESSAGES_G_H_
-#include <flutter/basic_message_channel.h>
-#include <flutter/binary_messenger.h>
-#include <flutter/encodable_value.h>
-#include <flutter/standard_message_codec.h>
 
 #include <map>
 #include <optional>
 #include <string>
 #include <utility>
+
+#include <flutter/binary_messenger.h>
+#include <flutter/encodable_value.h>
+#include <flutter/standard_message_codec.h>
 
 namespace google_sign_in_plugin {
 
@@ -57,7 +57,7 @@ class FlutterError {
 template <class T>
 class ErrorOr {
  public:
-  ErrorOr(const T& rhs) : v_(rhs) {}
+  explicit ErrorOr(const T& rhs) : v_(rhs) {}
   ErrorOr(const T&& rhs) : v_(std::move(rhs)) {}
   ErrorOr(const FlutterError& rhs) : v_(rhs) {}
   ErrorOr(const FlutterError&& rhs) : v_(std::move(rhs)) {}
@@ -82,7 +82,7 @@ class ErrorOr {
 enum class SignInType {
   // Default configuration.
   kStandard = 0,
-  // Recommended configuration for game sign in.
+  // Recommended configuration for game sign-in.
   kGames = 1
 };
 
@@ -218,14 +218,14 @@ class GoogleSignInApi {
   GoogleSignInApi(const GoogleSignInApi&) = delete;
   GoogleSignInApi& operator=(const GoogleSignInApi&) = delete;
   virtual ~GoogleSignInApi() = default;
-  // Initializes a sign in request with the given parameters.
+  // Initializes a sign-in request with the given parameters.
   virtual std::optional<FlutterError> Init(const InitParams& params) = 0;
-  // Starts a silent sign in.
+  // Starts a silent sign-in.
   virtual void SignInSilently(
       std::function<void(ErrorOr<UserData> reply)> result) = 0;
-  // Starts a sign in with user interaction.
+  // Starts a sign-in with user interaction.
   virtual void SignIn(std::function<void(ErrorOr<UserData> reply)> result) = 0;
-  // Requests the access token for the current sign in.
+  // Requests the access token for the current sign-in.
   virtual void GetAccessToken(
       const std::string& email,
       bool should_recover_auth,
@@ -239,7 +239,7 @@ class GoogleSignInApi {
   // Returns whether the user is currently signed in.
   virtual ErrorOr<bool> IsSignedIn() = 0;
   // Clears the authentication caching for the given token, requiring a
-  // new sign in.
+  // new sign-in.
   virtual void ClearAuthCache(
       const std::string& token,
       std::function<void(std::optional<FlutterError> reply)> result) = 0;
