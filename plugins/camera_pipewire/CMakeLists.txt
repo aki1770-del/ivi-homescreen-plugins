@@ -15,6 +15,7 @@
 #
 find_package(PkgConfig REQUIRED)
 
+pkg_check_modules(GLIB IMPORTED_TARGET REQUIRED glib-2.0)
 pkg_check_modules(PIPEWIRE IMPORTED_TARGET REQUIRED libpipewire-0.3)
 pkg_check_modules(JPEG IMPORTED_TARGET REQUIRED libjpeg)
 
@@ -33,6 +34,7 @@ target_include_directories(plugin_camera_pipewire PUBLIC
 )
 
 target_link_libraries(plugin_camera_pipewire PUBLIC
+        PkgConfig::GLIB
         PkgConfig::PIPEWIRE
         PkgConfig::JPEG
         flutter
