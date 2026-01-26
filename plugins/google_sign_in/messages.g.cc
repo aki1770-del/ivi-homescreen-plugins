@@ -54,16 +54,14 @@ InitParams::InitParams(EncodableList scopes,
                        const std::string* hosted_domain,
                        const std::string* client_id,
                        const std::string* server_client_id,
-                       bool force_code_for_refresh_token)
+                       const bool force_code_for_refresh_token)
     : scopes_(std::move(scopes)),
       sign_in_type_(sign_in_type),
-      hosted_domain_(hosted_domain ? std::optional<std::string>(*hosted_domain)
+      hosted_domain_(hosted_domain ? std::optional(*hosted_domain)
                                    : std::nullopt),
-      client_id_(client_id ? std::optional<std::string>(*client_id)
-                           : std::nullopt),
-      server_client_id_(server_client_id
-                            ? std::optional<std::string>(*server_client_id)
-                            : std::nullopt),
+      client_id_(client_id ? std::optional(*client_id) : std::nullopt),
+      server_client_id_(server_client_id ? std::optional(*server_client_id)
+                                         : std::nullopt),
       force_code_for_refresh_token_(force_code_for_refresh_token) {}
 
 const EncodableList& InitParams::scopes() const {
@@ -148,16 +146,15 @@ InitParams InitParams::FromEncodableList(const EncodableList& list) {
       std::get<EncodableList>(list[0]),
       std::any_cast<const SignInType&>(std::get<CustomEncodableValue>(list[1])),
       std::get<bool>(list[5]));
-  auto& encodable_hosted_domain = list[2];
-  if (!encodable_hosted_domain.IsNull()) {
+  if (auto& encodable_hosted_domain = list[2];
+      !encodable_hosted_domain.IsNull()) {
     decoded.set_hosted_domain(std::get<std::string>(encodable_hosted_domain));
   }
-  auto& encodable_client_id = list[3];
-  if (!encodable_client_id.IsNull()) {
+  if (auto& encodable_client_id = list[3]; !encodable_client_id.IsNull()) {
     decoded.set_client_id(std::get<std::string>(encodable_client_id));
   }
-  auto& encodable_server_client_id = list[4];
-  if (!encodable_server_client_id.IsNull()) {
+  if (auto& encodable_server_client_id = list[4];
+      !encodable_server_client_id.IsNull()) {
     decoded.set_server_client_id(
         std::get<std::string>(encodable_server_client_id));
   }
@@ -180,9 +177,8 @@ UserData::UserData(const std::string* display_name,
       id_(std::move(id)),
       photo_url_(photo_url ? std::optional(*photo_url) : std::nullopt),
       id_token_(id_token ? std::optional(*id_token) : std::nullopt),
-      server_auth_code_(server_auth_code
-                            ? std::optional<std::string>(*server_auth_code)
-                            : std::nullopt) {}
+      server_auth_code_(server_auth_code ? std::optional(*server_auth_code)
+                                         : std::nullopt) {}
 
 const std::string* UserData::display_name() const {
   return display_name_ ? &(*display_name_) : nullptr;
@@ -268,20 +264,18 @@ EncodableList UserData::ToEncodableList() const {
 UserData UserData::FromEncodableList(const EncodableList& list) {
   UserData decoded(std::get<std::string>(list[1]),
                    std::get<std::string>(list[2]));
-  auto& encodable_display_name = list[0];
-  if (!encodable_display_name.IsNull()) {
+  if (auto& encodable_display_name = list[0];
+      !encodable_display_name.IsNull()) {
     decoded.set_display_name(std::get<std::string>(encodable_display_name));
   }
-  auto& encodable_photo_url = list[3];
-  if (!encodable_photo_url.IsNull()) {
+  if (auto& encodable_photo_url = list[3]; !encodable_photo_url.IsNull()) {
     decoded.set_photo_url(std::get<std::string>(encodable_photo_url));
   }
-  auto& encodable_id_token = list[4];
-  if (!encodable_id_token.IsNull()) {
+  if (auto& encodable_id_token = list[4]; !encodable_id_token.IsNull()) {
     decoded.set_id_token(std::get<std::string>(encodable_id_token));
   }
-  auto& encodable_server_auth_code = list[5];
-  if (!encodable_server_auth_code.IsNull()) {
+  if (auto& encodable_server_auth_code = list[5];
+      !encodable_server_auth_code.IsNull()) {
     decoded.set_server_auth_code(
         std::get<std::string>(encodable_server_auth_code));
   }
@@ -298,10 +292,8 @@ EncodableValue PigeonInternalCodecSerializer::ReadValueOfType(
       const auto& encodable_enum_arg = ReadValue(stream);
       const int64_t enum_arg_value =
           encodable_enum_arg.IsNull() ? 0 : encodable_enum_arg.LongValue();
-      return encodable_enum_arg.IsNull()
-                 ? EncodableValue()
-                 : CustomEncodableValue(
-                       static_cast<SignInType>(enum_arg_value));
+      return encodable_enum_arg.IsNull() ? EncodableValue()
+                                         : CustomEncodableValue(enum_arg_value);
     }
     case 130: {
       return CustomEncodableValue(InitParams::FromEncodableList(
@@ -323,14 +315,15 @@ void PigeonInternalCodecSerializer::WriteValue(
           std::get_if<CustomEncodableValue>(&value)) {
     if (custom_value->type() == typeid(SignInType)) {
       stream->WriteByte(129);
-      WriteValue(EncodableValue(static_cast<int>(
-                     std::any_cast<SignInType>(*custom_value))),
-                 stream);
+      StandardCodecSerializer::WriteValue(
+          EncodableValue(
+              static_cast<int>(std::any_cast<SignInType>(*custom_value))),
+          stream);
       return;
     }
     if (custom_value->type() == typeid(InitParams)) {
       stream->WriteByte(130);
-      WriteValue(
+      StandardCodecSerializer::WriteValue(
           EncodableValue(
               std::any_cast<InitParams>(*custom_value).ToEncodableList()),
           stream);
@@ -338,13 +331,14 @@ void PigeonInternalCodecSerializer::WriteValue(
     }
     if (custom_value->type() == typeid(UserData)) {
       stream->WriteByte(131);
-      WriteValue(EncodableValue(
-                     std::any_cast<UserData>(*custom_value).ToEncodableList()),
-                 stream);
+      StandardCodecSerializer::WriteValue(
+          EncodableValue(
+              std::any_cast<UserData>(*custom_value).ToEncodableList()),
+          stream);
       return;
     }
   }
-  flutter::StandardCodecSerializer::WriteValue(value, stream);
+  StandardCodecSerializer::WriteValue(value, stream);
 }
 
 /// The codec used by GoogleSignInApi.
@@ -357,7 +351,7 @@ const flutter::StandardMessageCodec& GoogleSignInApi::GetCodec() {
 // `binary_messenger`.
 void GoogleSignInApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                             GoogleSignInApi* api) {
-  GoogleSignInApi::SetUp(binary_messenger, api, "");
+  SetUp(binary_messenger, api, "");
 }
 
 void GoogleSignInApi::SetUp(flutter::BinaryMessenger* binary_messenger,
