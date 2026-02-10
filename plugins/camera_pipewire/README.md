@@ -10,7 +10,7 @@ This file contains the development plan for the Camera Plugin project.
 This camera plugin provides the following functions in the functional unit test case:
 
 Enumerates available camera devices
-            .
+.
 
         Displays a live preview from the selected camera
             .

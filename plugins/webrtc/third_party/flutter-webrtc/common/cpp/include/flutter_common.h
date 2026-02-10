@@ -42,8 +42,7 @@ inline const T GetValue(EncodableValue val) {
   return std::get<T>(val);
 }
 
-inline EncodableValue findEncodableValue(const EncodableMap& map,
-                                         const std::string& key) {
+inline EncodableValue findEncodableValue(const EncodableMap& map, const std::string& key) {
   auto it = map.find(EncodableValue(key));
   if (it != map.end())
     return it->second;
@@ -92,16 +91,14 @@ inline double findDouble(const EncodableMap& map, const std::string& key) {
   return 0.0;
 }
 
-inline std::optional<double> maybeFindDouble(const EncodableMap& map,
-                                             const std::string& key) {
+inline std::optional<double> maybeFindDouble(const EncodableMap& map, const std::string& key) {
   auto it = map.find(EncodableValue(key));
   if (it != map.end() && TypeIs<double>(it->second))
     return GetValue<double>(it->second);
   return std::nullopt;
 }
 
-inline std::vector<uint8_t> findVector(const EncodableMap& map,
-                                       const std::string& key) {
+inline std::vector<uint8_t> findVector(const EncodableMap& map, const std::string& key) {
   auto it = map.find(EncodableValue(key));
   if (it != map.end() && TypeIs<std::vector<uint8_t>>(it->second))
     return GetValue<std::vector<uint8_t>>(it->second);
@@ -147,8 +144,7 @@ class MethodCallProxy {
 
 class MethodResultProxy {
  public:
-  static std::unique_ptr<MethodResultProxy> Create(
-      std::unique_ptr<MethodResult> method_result);
+  static std::unique_ptr<MethodResultProxy> Create(std::unique_ptr<MethodResult> method_result);
 
   virtual ~MethodResultProxy() = default;
 
@@ -164,17 +160,15 @@ class MethodResultProxy {
                      const EncodableValue& error_details) = 0;
 
   // Reports an error with a default error code and no details.
-  virtual void Error(const std::string& error_code,
-                     const std::string& error_message) = 0;
+  virtual void Error(const std::string& error_code, const std::string& error_message) = 0;
 
   virtual void NotImplemented() = 0;
 };
 
 class EventChannelProxy {
  public:
-  static std::unique_ptr<EventChannelProxy> Create(
-      BinaryMessenger* messenger,
-      const std::string& channelName);
+  static std::unique_ptr<EventChannelProxy> Create(BinaryMessenger* messenger,
+                                                   const std::string& channelName);
 
   virtual ~EventChannelProxy() = default;
 

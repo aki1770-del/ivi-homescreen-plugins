@@ -368,7 +368,7 @@ TEST_F(FlatpakPluginTest, ApplicationUninstallTest) {
 
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "com.stremio.Stremio";
+  auto app_id = "org.telegram.desktop";
 
   shim->ApplicationUninstall(app_id, [guard](const ErrorOr<bool>& result) {
     guard->set_value(result);
@@ -709,7 +709,7 @@ TEST_F(FlatpakPluginTest, ApplicationUpdateTest) {
 
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "us.zoom.Zoom";
+  auto app_id = "org.videolan.VLC";
 
   shim->ApplicationUpdate(app_id, [guard](const ErrorOr<bool>& result) {
     guard->set_value(result);

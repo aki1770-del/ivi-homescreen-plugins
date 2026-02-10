@@ -75,7 +75,8 @@ void FlutterVideoRenderer::OnFrame(scoped_refptr<RTCVideoFrame> frame) {
     params[EncodableValue("height")] = EncodableValue((int32_t)frame->height());
     event_channel_->Success(EncodableValue(params), true);
 
-    last_frame_size_ = {static_cast<size_t>(frame->width()), static_cast<size_t>(frame->height())};
+    last_frame_size_ = {static_cast<size_t>(frame->width()),
+                        static_cast<size_t>(frame->height())};
   }
   mutex_.lock();
   frame_ = frame;

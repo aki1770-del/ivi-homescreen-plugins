@@ -95,7 +95,7 @@ FlatpakPlugin::~FlatpakPlugin() {
 }
 
 void FlatpakPlugin::Init() {
-  shim_->SetupTransactionEventChannel(registrar_->messenger());
+  // shim_->SetupTransactionEventChannel(registrar_->messenger());
   shim_->SetupAccessEventChannel(registrar_->messenger(), *strand_);
   // Setup Method channel to handle responses co
   method_channel_->SetMethodCallHandler(

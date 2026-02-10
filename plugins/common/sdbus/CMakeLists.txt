@@ -15,9 +15,9 @@
 #
 
 # Ensure CMP0079 is NEW so linking to targets created in other directories is allowed
-if(POLICY CMP0079)
+if (POLICY CMP0079)
     cmake_policy(SET CMP0079 NEW)
-endif()
+endif ()
 
 set(SDBUSCPP_BUILD_CODEGEN OFF)
 set(SDBUSCPP_INSTALL OFF)

@@ -152,7 +152,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: clang-tidy-results
-          path:  ${{github.workspace}}/plugins_source/plugins/tidy-results-*
+          path: ${{github.workspace}}/plugins_source/plugins/tidy-results-*
 
   build:
     permissions:
@@ -214,8 +214,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: c-cpp
-          build-mode: manual
+          - language: c-cpp
+            build-mode: manual
         # CodeQL supports the following values keywords for 'language': 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'swift'
         # Use `c-cpp` to analyze code written in C, C++ or both
         # Use 'java-kotlin' to analyze code written in Java, Kotlin or both

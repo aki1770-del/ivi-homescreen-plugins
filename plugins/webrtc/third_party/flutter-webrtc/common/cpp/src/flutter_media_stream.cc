@@ -360,8 +360,7 @@ void FlutterMediaStream::GetSources(std::unique_ptr<MethodResultProxy> result) {
 
   const auto nb_video_devices = base_->video_device_->NumberOfDevices();
   for (uint32_t i = 0; i < nb_video_devices; i++) {
-    base_->video_device_->GetDeviceName(i, strNameUTF8,
-                                        128, strGuidUTF8, 128);
+    base_->video_device_->GetDeviceName(i, strNameUTF8, 128, strGuidUTF8, 128);
     EncodableMap video;
     video[EncodableValue("label")] = EncodableValue(std::string(strNameUTF8));
     video[EncodableValue("deviceId")] =

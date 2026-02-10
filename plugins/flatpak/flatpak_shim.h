@@ -57,7 +57,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       operation_tracker_ = std::make_unique<OperationTracker>(
           strand_->context(), [this](const flutter::EncodableMap& event) {
             this->SendTransactionEvent(
-                const_cast<flutter::EncodableMap&>(event));
+                "operation_tracker", const_cast<flutter::EncodableMap&>(event));
           });
     }
   }
@@ -361,8 +361,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   /**
    * \brief Sets up the event channel for transaction events.
    * \param messenger Pointer to the BinaryMessenger used for communication.
+   * \param id Id of the application.
    */
-  void SetupTransactionEventChannel(flutter::BinaryMessenger* messenger);
+  void SetupTransactionEventChannel(const std::string& id,
+                                    flutter::BinaryMessenger* messenger);
 
   /**
    * \brief Sets up the event channel for Permissions Access events.
@@ -476,9 +478,12 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   std::unique_ptr<OperationTracker> operation_tracker_;
 
   // Event channel for streaming transaction progress to Flutter
-  std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
-      event_channel_;
-  std::shared_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
+  std::map<std::string,
+           std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>>
+      transactions_event_channels_;
+  std::map<std::string,
+           std::shared_ptr<flutter::EventSink<flutter::EncodableValue>>>
+      transactions_event_sinks_;
   mutable std::mutex event_sink_mutex_;
 
   // Event channel for streaming permissions access to the flutter widget
@@ -544,7 +549,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       const std::function<void(ErrorOr<bool>)>& complete_callback);
 
   // flutter streaming callback functions
-  void SendTransactionEvent(flutter::EncodableMap& event) const;
+  void SendTransactionEvent(const std::string& id,
+                            flutter::EncodableMap& event) const;
 
   // flutter streaming callback functions
   void SendPermissionEvent(const flutter::EncodableMap& event,
@@ -596,6 +602,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       const std::string& app_id,
       const std::vector<std::string>& permissions,
       const std::function<void(std::map<std::string, bool>)>& callback) const;
+
+  void RemoveTransactionEvent(const std::string& id);
 };
 
 }  // namespace flatpak_plugin

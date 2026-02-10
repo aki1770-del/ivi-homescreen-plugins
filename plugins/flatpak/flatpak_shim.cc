@@ -51,6 +51,14 @@ std::mutex FlatpakShim::monitor_mutex_;
 std::map<std::string, std::shared_ptr<FlatpakShim::MonitorSession>>
     FlatpakShim::active_sessions_;
 
+static gchar* g_strdup_std_string(const std::string& str) {
+  return g_strdup(str.c_str());
+}
+
+static void g_free_notify(gpointer data) {
+  g_free(data);
+}
+
 std::optional<std::string> FlatpakShim::getOptionalAttribute(
     const xmlNode* node,
     const char* attrName) {
@@ -981,6 +989,9 @@ void FlatpakShim::ApplicationInstall(
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
 
+  SetupTransactionEventChannel(id, messenger_);
+  gchar* transaction_id = g_strdup(id.c_str());
+
   // Install only dependencies
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_disable_dependencies(transaction, FALSE);
@@ -990,12 +1001,15 @@ void FlatpakShim::ApplicationInstall(
   flatpak_transaction_set_no_pull(transaction, FALSE);
   flatpak_transaction_set_no_deploy(transaction, FALSE);
 
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
+                         transaction_id, g_free);
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
   g_signal_connect(transaction, "operation-done",
                    G_CALLBACK(OnOperationComplete), this);
   g_signal_connect(transaction, "operation-error", G_CALLBACK(OnOperationError),
                    this);
+  g_signal_connect(transaction, "ready", G_CALLBACK(OnTransactionReady), this);
 
   gboolean install = flatpak_transaction_add_install(
       transaction, remote_name.c_str(), ref_name.c_str(), nullptr, &error);
@@ -1022,7 +1036,7 @@ void FlatpakShim::ApplicationInstall(
   start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
   start_event[flutter::EncodableValue("ref")] =
       flutter::EncodableValue(ref_name);
-  SendTransactionEvent(start_event);
+  SendTransactionEvent(id, start_event);
 
   guint64 estimated_download{0};
   guint64 estimated_installed{0};
@@ -1056,7 +1070,8 @@ void FlatpakShim::ApplicationInstall(
 
   // run transaction in a detached thread
   std::thread([self, transaction_raw, callback, ref_name, remote_name,
-               strand_ptr = strand_, installation_raw, found_ref_raw, id]() {
+               strand_ptr = strand_, installation_raw, found_ref_raw, id,
+               transaction_id]() {
     pthread_setname_np(pthread_self(), "flatpak-install");
 
     GError* error = nullptr;
@@ -1162,6 +1177,8 @@ void FlatpakShim::ApplicationInstall(
       });
       return;
     }
+    g_object_set_data_full(G_OBJECT(phase2_transaction), "transaction_id",
+                           transaction_id, g_free);
     flatpak_transaction_set_no_interaction(phase2_transaction, TRUE);
     flatpak_transaction_set_disable_dependencies(phase2_transaction, TRUE);
     flatpak_transaction_set_disable_related(phase2_transaction, TRUE);
@@ -1269,6 +1286,7 @@ void FlatpakShim::ApplicationInstall(
                          "Installation completed but app not found")));
       }
 
+      self->RemoveTransactionEvent(id);
       g_object_unref(transaction_raw);
       g_object_unref(installation_raw);
       g_object_unref(found_ref_raw);
@@ -1415,10 +1433,16 @@ void FlatpakShim::ApplicationUninstall(
   }
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
+
+  SetupTransactionEventChannel(id, messenger_);
+  gchar* transaction_id = g_strdup(id.c_str());
+
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_disable_dependencies(transaction, FALSE);
   flatpak_transaction_set_disable_related(transaction, FALSE);
   flatpak_transaction_set_disable_prune(transaction, FALSE);
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
+                         transaction_id, g_free);
 
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
@@ -1474,7 +1498,7 @@ void FlatpakShim::ApplicationUninstall(
   start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
   start_event[flutter::EncodableValue("ref")] =
       flutter::EncodableValue(found_app_name);
-  SendTransactionEvent(start_event);
+  SendTransactionEvent(id, start_event);
 
   // transfer ownership to thread
   auto transaction_raw = transaction_guard.release();
@@ -1483,7 +1507,7 @@ void FlatpakShim::ApplicationUninstall(
   auto self = shared_from_this();
 
   std::thread([self, transaction_raw, installation_raw, found_app_name,
-               strand_ptr = strand_, found_ref_raw, callback]() {
+               strand_ptr = strand_, found_ref_raw, callback, id]() {
     pthread_setname_np(pthread_self(), "flatpak-uninstall");
 
     GError* error = nullptr;
@@ -1508,6 +1532,8 @@ void FlatpakShim::ApplicationUninstall(
       spdlog::error("[FlatpakPlugin] Uninstall {} transaction failed",
                     found_app_name);
     }
+
+    self->RemoveTransactionEvent(id);
 
     // Cleanup GObjects
     g_object_unref(transaction_raw);
@@ -1671,11 +1697,17 @@ void FlatpakShim::ApplicationUpdate(
   }
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
+
+  SetupTransactionEventChannel(id, messenger_);
+  gchar* transaction_id = g_strdup(id.c_str());
+
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_disable_dependencies(transaction, FALSE);
   flatpak_transaction_set_disable_related(transaction, FALSE);
   flatpak_transaction_set_disable_prune(transaction, FALSE);
 
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
+                         transaction_id, g_free);
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
   g_signal_connect(transaction, "operation-done",
@@ -1714,7 +1746,7 @@ void FlatpakShim::ApplicationUpdate(
   start_event[flutter::EncodableValue("app_id")] = flutter::EncodableValue(id);
   start_event[flutter::EncodableValue("ref")] =
       flutter::EncodableValue(found_app_name);
-  SendTransactionEvent(start_event);
+  SendTransactionEvent(id, start_event);
 
   // transfer ownership to thread
   auto transaction_raw = transaction_guard.release();
@@ -1723,7 +1755,7 @@ void FlatpakShim::ApplicationUpdate(
   auto self = shared_from_this();
 
   std::thread([self, transaction_raw, installation_raw, found_app_name,
-               strand_ptr = strand_, found_ref_raw, callback]() {
+               strand_ptr = strand_, found_ref_raw, callback, id]() {
     pthread_setname_np(pthread_self(), "flatpak-update");
 
     GError* error = nullptr;
@@ -1747,6 +1779,8 @@ void FlatpakShim::ApplicationUpdate(
       spdlog::error("[FlatpakPlugin] update {} transaction failed",
                     found_app_name);
     }
+
+    self->RemoveTransactionEvent(id);
 
     // Cleanup GObjects
     g_object_unref(transaction_raw);
@@ -3617,66 +3651,72 @@ void FlatpakShim::install_extensions(
 }
 
 void FlatpakShim::SetupTransactionEventChannel(
+    const std::string& id,
     flutter::BinaryMessenger* messenger) {
+  std::lock_guard<std::mutex> lock(event_sink_mutex_);
   if (!messenger) {
     spdlog::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
     return;
   }
-
-  if (event_channel_) {
-    spdlog::error(
-        "[FlatpakPlugin] Event channel already exists, "
-        "re-registering stream handler");
+  // check for exists channels first
+  if (transactions_event_channels_.find(id) !=
+      transactions_event_channels_.end()) {
+    spdlog::error("[FlatpakPlugin] Messenger channel is already in use : {}",
+                  id);
     return;
   }
+
   try {
-    event_channel_ =
+    std::string channel_name = "flutter.io/flatpakPlugin/flatpakEvents/" + id;
+    auto event_channel =
         std::make_unique<flutter::EventChannel<flutter::EncodableValue>>(
-            messenger, "flutter.io/flatpakPlugin/flatpakEvents",
+            messenger, channel_name,
             &flutter::StandardMethodCodec::GetInstance());
 
-    spdlog::info(
-        "[FlatpakPlugin] Channel name: "
-        "flutter.io/flatpakPlugin/flatpakEvents");
+    spdlog::info("[FlatpakPlugin] Channel name: {}", channel_name);
 
-    event_channel_->SetStreamHandler(
-        std::make_unique<
-            flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
-            // onListen callback
-            [this](
-                const flutter::EncodableValue* /* arguments */,
-                std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
-                    events)
-                -> std::unique_ptr<
-                    flutter::StreamHandlerError<flutter::EncodableValue>> {
-              {
-                std::lock_guard<std::mutex> lock(event_sink_mutex_);
-                event_sink_ = std::move(events);
-                spdlog::info("[FlatpakPlugin] Event sink connected");
-              }
+    event_channel->SetStreamHandler(std::make_unique<
+                                    flutter::StreamHandlerFunctions<
+                                        flutter::EncodableValue>>(
+        // onListen callback
+        [this, id](
+            const flutter::EncodableValue* /* arguments */,
+            std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
+                events)
+            -> std::unique_ptr<
+                flutter::StreamHandlerError<flutter::EncodableValue>> {
+          {
+            std::lock_guard<std::mutex> lock(event_sink_mutex_);
+            transactions_event_sinks_[id] = std::move(events);
+            spdlog::info(
+                "[FlatpakPlugin] Event sink connected for transaction:{}", id);
+          }
 
-              // Send connection confirmation event
-              flutter::EncodableMap test_event;
-              test_event[flutter::EncodableValue("type")] =
-                  flutter::EncodableValue("connection_established");
-              test_event[flutter::EncodableValue("message")] =
-                  flutter::EncodableValue("Event channel ready");
-              SendTransactionEvent(test_event);
+          // Send connection confirmation event
+          flutter::EncodableMap test_event;
+          test_event[flutter::EncodableValue("type")] =
+              flutter::EncodableValue("connection_established");
+          test_event[flutter::EncodableValue("message")] =
+              flutter::EncodableValue("Event channel ready");
+          SendTransactionEvent(id, test_event);
 
-              return nullptr;
-            },
-            // onCancel callback
-            [this](const flutter::EncodableValue* /* arguments */)
-                -> std::unique_ptr<
-                    flutter::StreamHandlerError<flutter::EncodableValue>> {
-              {
-                std::lock_guard<std::mutex> lock(event_sink_mutex_);
-                event_sink_ = nullptr;
-                spdlog::info("[FlatpakPlugin] Event sink disconnected");
-              }
-              return nullptr;
-            }));
+          return nullptr;
+        },
+        // onCancel callback
+        [this, id](const flutter::EncodableValue* /* arguments */)
+            -> std::unique_ptr<
+                flutter::StreamHandlerError<flutter::EncodableValue>> {
+          {
+            std::lock_guard<std::mutex> lock(event_sink_mutex_);
+            transactions_event_sinks_.erase(id);
+            spdlog::info(
+                "[FlatpakPlugin] Event sink disconnected for transaction: {}",
+                id);
+          }
+          return nullptr;
+        }));
+    transactions_event_channels_[id] = std::move(event_channel);
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
                   e.what());
@@ -3724,15 +3764,6 @@ void FlatpakShim::SetupAccessEventChannel(
                 access_sink_ = std::move(events);
                 spdlog::info("[FlatpakPlugin] Event sink connected");
               }
-
-              // Send connection confirmation event
-              flutter::EncodableMap test_event;
-              test_event[flutter::EncodableValue("type")] =
-                  flutter::EncodableValue("connection_established");
-              test_event[flutter::EncodableValue("message")] =
-                  flutter::EncodableValue("Event channel ready");
-              SendTransactionEvent(test_event);
-
               return nullptr;
             },
             // onCancel callback
@@ -3756,25 +3787,20 @@ void FlatpakShim::SetupAccessEventChannel(
   }
 }
 
-void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
+void FlatpakShim::SendTransactionEvent(const std::string& id,
+                                       flutter::EncodableMap& event) const {
   std::lock_guard<std::mutex> lock(event_sink_mutex_);
 
-  if (!event_sink_) {
-    spdlog::error(
-        "[FlatpakPlugin] Cannot send event - sink is null. "
-        "Flutter may not be listening yet.");
-    if (event.find(flutter::EncodableValue("type")) != event.end()) {
-      auto type_value = event[flutter::EncodableValue("type")];
-      if (std::holds_alternative<std::string>(type_value)) {
-        spdlog::error("[FlatpakPlugin] Lost event type: {}",
-                      std::get<std::string>(type_value));
-      }
-    }
+  auto it = transactions_event_sinks_.find(id);
+  if (it != transactions_event_sinks_.end() || !it->second) {
+    spdlog::error("[FlatpakPlugin] Cannot send event for transaction: {}", id);
     return;
   }
 
   try {
-    event_sink_->Success(flutter::EncodableValue(event));
+    event[flutter::EncodableValue("transaction_id")] =
+        flutter::EncodableValue(id);
+    it->second->Success(flutter::EncodableValue(event));
 
     if (event.find(flutter::EncodableValue("type")) != event.end()) {
       auto type_value = event[flutter::EncodableValue("type")];
@@ -3786,6 +3812,14 @@ void FlatpakShim::SendTransactionEvent(flutter::EncodableMap& event) const {
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception sending event: {}", e.what());
   }
+}
+
+void FlatpakShim::RemoveTransactionEvent(const std::string& id) {
+  std::lock_guard<std::mutex> lock(event_sink_mutex_);
+
+  transactions_event_sinks_.erase(id);
+  transactions_event_channels_.erase(id);
+  spdlog::debug("[FlatpakPlugin] Channel cl: {}", id);
 }
 
 void FlatpakShim::SendPermissionEvent(
@@ -3834,6 +3868,8 @@ void FlatpakShim::SendPermissionEvent(
 void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
                                     gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
+  const char* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(progress), "transaction_id"));
 
   auto is_estimating = flatpak_transaction_progress_get_is_estimating(progress);
   auto percentage = flatpak_transaction_progress_get_progress(progress);
@@ -3874,7 +3910,7 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
   }
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler, percentage, is_estimating,
+    asio::post(*handler->strand_, [id, handler, percentage, is_estimating,
                                    status = status ? std::string(status)
                                                    : std::string(""),
                                    bytes_transfered, start_time]() {
@@ -3906,7 +3942,7 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
           }
         }
 
-        handler->SendTransactionEvent(ProgressMap);
+        handler->SendTransactionEvent(id, ProgressMap);
       } catch (const std::exception& e) {
         spdlog::error("[FlatpakPlugin] Error sending progress event: {}",
                       e.what());
@@ -3915,13 +3951,17 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
   }
 }
 
-void FlatpakShim::OnNewOperation(FlatpakTransaction* /* transaction */,
+void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
                                  FlatpakTransactionOperation* operation,
                                  FlatpakTransactionProgress* progress,
                                  gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
+  const char* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(transaction), "transaction_id"));
 
   if (progress) {
+    g_object_set_data_full(G_OBJECT(progress), "transaction_id", g_strdup(id),
+                           g_free);
     g_signal_connect(progress, "changed", G_CALLBACK(OnProgressChanged),
                      handler);
   }
@@ -3933,7 +3973,7 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* /* transaction */,
   if (handler->strand_) {
     asio::post(
         *handler->strand_,
-        [handler,
+        [id, handler,
          operation_ref =
              operation_ref ? std::string(operation_ref) : std::string(""),
          operation_type]() {
@@ -3968,7 +4008,7 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* /* transaction */,
             OperationMap[flutter::EncodableValue("operation_type")] =
                 flutter::EncodableValue(operation_type_str);
 
-            handler->SendTransactionEvent(OperationMap);
+            handler->SendTransactionEvent(id, OperationMap);
           } catch (const std::exception& e) {
             spdlog::error("[FlatpakPlugin] Error sending operation event: {}",
                           e.what());
@@ -3977,12 +4017,14 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* /* transaction */,
   }
 }
 
-void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
+void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
                                       FlatpakTransactionOperation* operation,
                                       const char* commit,
                                       FlatpakTransactionResult result,
                                       gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
+  const char* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(transaction), "transaction_id"));
 
   const char* ref = flatpak_transaction_operation_get_ref(operation);
   auto type = flatpak_transaction_operation_get_operation_type(operation);
@@ -4024,7 +4066,7 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
   }
 
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler, ref_str,
+    asio::post(*handler->strand_, [id, handler, ref_str,
                                    commit = commit ? std::string(commit)
                                                    : std::string(""),
                                    result, type_str, app_id]() {
@@ -4047,7 +4089,7 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
         OperationCompleteMap[flutter::EncodableValue("is_main_app")] =
             flutter::EncodableValue(is_main_app);
 
-        handler->SendTransactionEvent(OperationCompleteMap);
+        handler->SendTransactionEvent(id, OperationCompleteMap);
       } catch (const std::exception& e) {
         spdlog::error("[FlatpakPlugin] Error sending complete event: {}",
                       e.what());
@@ -4057,19 +4099,21 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* /* transaction */,
 }
 
 gboolean FlatpakShim::OnOperationError(
-    FlatpakTransaction* /* transaction */,
+    FlatpakTransaction* transaction,
     FlatpakTransactionOperation* operation,
     const GError* error,
     FlatpakTransactionErrorDetails error_details,
     gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
+  const char* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(transaction), "transaction_id"));
 
   auto operation_ref = flatpak_transaction_operation_get_ref(operation);
 
   if (handler->strand_) {
     asio::post(
         *handler->strand_,
-        [handler,
+        [id, handler,
          operation_ref =
              operation_ref ? std::string(operation_ref) : std::string(""),
          error_message = error ? std::string(error->message) : std::string(""),
@@ -4087,7 +4131,7 @@ gboolean FlatpakShim::OnOperationError(
                     !(error_details &
                       FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL));
 
-            handler->SendTransactionEvent(OperationErrorMap);
+            handler->SendTransactionEvent(id, OperationErrorMap);
           } catch (const std::exception& e) {
             spdlog::error("[FlatpakPlugin] Error sending error event: {}",
                           e.what());
@@ -4101,6 +4145,8 @@ gboolean FlatpakShim::OnOperationError(
 gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
                                          gpointer user_data) {
   auto* handler = static_cast<FlatpakShim*>(user_data);
+  const char* id = static_cast<const char*>(
+      g_object_get_data(G_OBJECT(transaction), "transaction_id"));
 
   GList* operations = flatpak_transaction_get_operations(transaction);
   int total_ops = static_cast<int>(g_list_length(operations));
@@ -4163,7 +4209,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     handler->operation_tracker_->UpdateTotalOperations(app_id, total_ops);
   }
   if (handler->strand_) {
-    asio::post(*handler->strand_, [handler, app_id, total_ops,
+    asio::post(*handler->strand_, [id, handler, app_id, total_ops,
                                    ops_list = std::move(ops_list)]() {
       try {
         flutter::EncodableMap ready_event;
@@ -4175,7 +4221,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
             flutter::EncodableValue(ops_list);
         ready_event[flutter::EncodableValue("main_app_id")] =
             flutter::EncodableValue(app_id);
-        handler->SendTransactionEvent(ready_event);
+        handler->SendTransactionEvent(id, ready_event);
       } catch (const std::exception& e) {
         spdlog::error("[FlatpakPlugin] Error sending ready event: {}",
                       e.what());
@@ -4243,7 +4289,7 @@ bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
                            1024) +
             " MB");
 
-    SendTransactionEvent(disk_usage_event);
+    SendTransactionEvent("disk_usage", disk_usage_event);
     return false;
   }
   return true;

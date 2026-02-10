@@ -8,19 +8,17 @@ namespace flutter_webrtc_plugin {
 
 class FlutterPeerConnectionObserver : public RTCPeerConnectionObserver {
  public:
-  FlutterPeerConnectionObserver(
-      FlutterWebRTCBase* base,
-      const scoped_refptr<RTCPeerConnection>& peerconnection,
-      BinaryMessenger* messenger,
-      const std::string& channel_name,
-      std::string& peerConnectionId);
+  FlutterPeerConnectionObserver(FlutterWebRTCBase* base,
+                                const scoped_refptr<RTCPeerConnection>& peerconnection,
+                                BinaryMessenger* messenger,
+                                const std::string& channel_name,
+                                std::string& peerConnectionId);
 
   virtual void OnSignalingState(RTCSignalingState state) override;
   virtual void OnPeerConnectionState(RTCPeerConnectionState state) override;
   virtual void OnIceGatheringState(RTCIceGatheringState state) override;
   virtual void OnIceConnectionState(RTCIceConnectionState state) override;
-  virtual void OnIceCandidate(
-      scoped_refptr<RTCIceCandidate> candidate) override;
+  virtual void OnIceCandidate(scoped_refptr<RTCIceCandidate> candidate) override;
   virtual void OnAddStream(scoped_refptr<RTCMediaStream> stream) override;
   virtual void OnRemoveStream(scoped_refptr<RTCMediaStream> stream) override;
 
@@ -28,8 +26,7 @@ class FlutterPeerConnectionObserver : public RTCPeerConnectionObserver {
   virtual void OnAddTrack(vector<scoped_refptr<RTCMediaStream>> streams,
                           scoped_refptr<RTCRtpReceiver> receiver) override;
   virtual void OnRemoveTrack(scoped_refptr<RTCRtpReceiver> receiver) override;
-  virtual void OnDataChannel(
-      scoped_refptr<RTCDataChannel> data_channel) override;
+  virtual void OnDataChannel(scoped_refptr<RTCDataChannel> data_channel) override;
   virtual void OnRenegotiationNeeded() override;
 
   scoped_refptr<RTCMediaStream> MediaStreamForId(const std::string& id);
@@ -58,10 +55,9 @@ class FlutterPeerConnection {
                               const std::string& uuid,
                               std::unique_ptr<MethodResultProxy> result);
 
-  static void RTCPeerConnectionDispose(
-      RTCPeerConnection* pc,
-      const std::string& uuid,
-      std::unique_ptr<MethodResultProxy> result);
+  static void RTCPeerConnectionDispose(RTCPeerConnection* pc,
+                                       const std::string& uuid,
+                                       std::unique_ptr<MethodResultProxy> result);
 
   void CreateOffer(const EncodableMap& constraints,
                    RTCPeerConnection* pc,
@@ -79,8 +75,7 @@ class FlutterPeerConnection {
                                    RTCPeerConnection* pc,
                                    std::unique_ptr<MethodResultProxy> result);
 
-  static void GetLocalDescription(RTCPeerConnection* pc,
-                                  std::unique_ptr<MethodResultProxy> result);
+  static void GetLocalDescription(RTCPeerConnection* pc, std::unique_ptr<MethodResultProxy> result);
 
   static void GetRemoteDescription(RTCPeerConnection* pc,
                                    std::unique_ptr<MethodResultProxy> result);
@@ -88,11 +83,10 @@ class FlutterPeerConnection {
   static scoped_refptr<RTCRtpTransceiverInit> mapToRtpTransceiverInit(
       const EncodableMap& transceiverInit);
 
-  static RTCRtpTransceiverDirection stringToTransceiverDirection(
-      const std::string& direction);
+  static RTCRtpTransceiverDirection stringToTransceiverDirection(const std::string& direction);
 
-  static libwebrtc::scoped_refptr<libwebrtc::RTCRtpEncodingParameters>
-  mapToEncoding(const EncodableMap& parameters);
+  static libwebrtc::scoped_refptr<libwebrtc::RTCRtpEncodingParameters> mapToEncoding(
+      const EncodableMap& parameters);
 
   void AddTransceiver(RTCPeerConnection* pc,
                       const std::string& trackId,
@@ -100,11 +94,9 @@ class FlutterPeerConnection {
                       const EncodableMap& transceiverInit,
                       std::unique_ptr<MethodResultProxy> result);
 
-  static void GetTransceivers(RTCPeerConnection* pc,
-                              std::unique_ptr<MethodResultProxy> result);
+  static void GetTransceivers(RTCPeerConnection* pc, std::unique_ptr<MethodResultProxy> result);
 
-  static void GetReceivers(RTCPeerConnection* pc,
-                           std::unique_ptr<MethodResultProxy> result);
+  static void GetReceivers(RTCPeerConnection* pc, std::unique_ptr<MethodResultProxy> result);
 
   void RtpSenderSetTrack(RTCPeerConnection* pc,
                          RTCMediaTrack* track,
@@ -134,10 +126,9 @@ class FlutterPeerConnection {
                                  const std::string& transceiverId,
                                  std::unique_ptr<MethodResultProxy> result);
 
-  static void RtpTransceiverGetCurrentDirection(
-      RTCPeerConnection* pc,
-      const std::string& transceiverId,
-      std::unique_ptr<MethodResultProxy> result);
+  static void RtpTransceiverGetCurrentDirection(RTCPeerConnection* pc,
+                                                const std::string& transceiverId,
+                                                std::unique_ptr<MethodResultProxy> result);
 
   static void SetConfiguration(RTCPeerConnection* pc,
                                const EncodableMap& configuration,
@@ -147,24 +138,20 @@ class FlutterPeerConnection {
                            std::string path,
                            std::unique_ptr<MethodResultProxy> result);
 
-  static scoped_refptr<RTCRtpTransceiver> getRtpTransceiverById(
-      RTCPeerConnection* pc,
-      const std::string& id);
+  static scoped_refptr<RTCRtpTransceiver> getRtpTransceiverById(RTCPeerConnection* pc,
+                                                                const std::string& id);
 
-  static void RtpTransceiverSetDirection(
-      RTCPeerConnection* pc,
-      const std::string& transceiverId,
-      const std::string& direction,
-      std::unique_ptr<MethodResultProxy> result);
+  static void RtpTransceiverSetDirection(RTCPeerConnection* pc,
+                                         const std::string& transceiverId,
+                                         const std::string& direction,
+                                         std::unique_ptr<MethodResultProxy> result);
 
-  static void RtpTransceiverSetCodecPreferences(
-      RTCPeerConnection* pc,
-      const std::string& transceiverId,
-      const EncodableList& codecs,
-      std::unique_ptr<MethodResultProxy> result);
+  static void RtpTransceiverSetCodecPreferences(RTCPeerConnection* pc,
+                                                const std::string& transceiverId,
+                                                const EncodableList& codecs,
+                                                std::unique_ptr<MethodResultProxy> result);
 
-  static void GetSenders(RTCPeerConnection* pc,
-                         std::unique_ptr<MethodResultProxy> result);
+  static void GetSenders(RTCPeerConnection* pc, std::unique_ptr<MethodResultProxy> result);
 
   static void AddIceCandidate(RTCIceCandidate* candidate,
                               RTCPeerConnection* pc,
@@ -178,10 +165,9 @@ class FlutterPeerConnection {
                                   const scoped_refptr<RTCMediaTrack>& track,
                                   std::unique_ptr<MethodResultProxy> result);
 
-  static void MediaStreamRemoveTrack(
-      const scoped_refptr<RTCMediaStream>& stream,
-      const scoped_refptr<RTCMediaTrack>& track,
-      std::unique_ptr<MethodResultProxy> result);
+  static void MediaStreamRemoveTrack(const scoped_refptr<RTCMediaStream>& stream,
+                                     const scoped_refptr<RTCMediaTrack>& track,
+                                     std::unique_ptr<MethodResultProxy> result);
 
   static void AddTrack(RTCPeerConnection* pc,
                        const scoped_refptr<RTCMediaTrack>& track,
