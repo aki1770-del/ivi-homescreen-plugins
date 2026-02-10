@@ -9,15 +9,19 @@
 
 namespace flutter_webrtc_plugin {
 
-class FlutterScreenCapture : public MediaListObserver, public DesktopCapturerObserver {
+class FlutterScreenCapture : public MediaListObserver,
+                             public DesktopCapturerObserver {
  public:
   FlutterScreenCapture(FlutterWebRTCBase* base);
 
-  void GetDisplayMedia(const EncodableMap& constraints, std::unique_ptr<MethodResultProxy> result);
+  void GetDisplayMedia(const EncodableMap& constraints,
+                       std::unique_ptr<MethodResultProxy> result);
 
-  void GetDesktopSources(const EncodableList& types, std::unique_ptr<MethodResultProxy> result);
+  void GetDesktopSources(const EncodableList& types,
+                         std::unique_ptr<MethodResultProxy> result);
 
-  void UpdateDesktopSources(const EncodableList& types, std::unique_ptr<MethodResultProxy> result);
+  void UpdateDesktopSources(const EncodableList& types,
+                            std::unique_ptr<MethodResultProxy> result);
 
   void GetDesktopSourceThumbnail(const std::string& source_id,
                                  int width,
@@ -31,7 +35,8 @@ class FlutterScreenCapture : public MediaListObserver, public DesktopCapturerObs
 
   void OnMediaSourceNameChanged(scoped_refptr<MediaSource> source) override;
 
-  void OnMediaSourceThumbnailChanged(scoped_refptr<MediaSource> source) override;
+  void OnMediaSourceThumbnailChanged(
+      scoped_refptr<MediaSource> source) override;
 
   void OnStart(scoped_refptr<RTCDesktopCapturer> capturer) override;
 

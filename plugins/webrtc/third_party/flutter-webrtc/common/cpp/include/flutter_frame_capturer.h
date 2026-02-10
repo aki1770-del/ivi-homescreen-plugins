@@ -13,7 +13,8 @@ namespace flutter_webrtc_plugin {
 
 using namespace libwebrtc;
 
-class FlutterFrameCapturer : public RTCVideoRenderer<scoped_refptr<RTCVideoFrame>> {
+class FlutterFrameCapturer
+    : public RTCVideoRenderer<scoped_refptr<RTCVideoFrame>> {
  public:
   FlutterFrameCapturer(RTCVideoTrack* track, std::string path);
 

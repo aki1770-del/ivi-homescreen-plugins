@@ -54,20 +54,25 @@ class FlutterWebRTCBase {
 
   void RemoveMediaTrackForId(const std::string& id);
 
-  FlutterPeerConnectionObserver* PeerConnectionObserversForId(const std::string& id);
+  FlutterPeerConnectionObserver* PeerConnectionObserversForId(
+      const std::string& id);
 
   void RemovePeerConnectionObserversForId(const std::string& id);
 
-  scoped_refptr<RTCMediaStream> MediaStreamForId(const std::string& id,
-                                                 const std::string& ownerTag = std::string());
+  scoped_refptr<RTCMediaStream> MediaStreamForId(
+      const std::string& id,
+      const std::string& ownerTag = std::string());
 
   void RemoveStreamForId(const std::string& id);
 
-  static bool ParseConstraints(const EncodableMap& constraints, RTCConfiguration* configuration);
+  static bool ParseConstraints(const EncodableMap& constraints,
+                               RTCConfiguration* configuration);
 
-  scoped_refptr<RTCMediaConstraints> ParseMediaConstraints(const EncodableMap& constraints);
+  scoped_refptr<RTCMediaConstraints> ParseMediaConstraints(
+      const EncodableMap& constraints);
 
-  bool ParseRTCConfiguration(const EncodableMap& map, RTCConfiguration& configuration);
+  bool ParseRTCConfiguration(const EncodableMap& map,
+                             RTCConfiguration& configuration);
 
   scoped_refptr<RTCMediaTrack> MediaTracksForId(const std::string& id);
 
@@ -75,19 +80,22 @@ class FlutterWebRTCBase {
 
   EventChannelProxy* event_channel();
 
-  static libwebrtc::scoped_refptr<libwebrtc::RTCRtpSender> GetRtpSenderById(RTCPeerConnection* pc,
-                                                                            std::string id);
+  static libwebrtc::scoped_refptr<libwebrtc::RTCRtpSender> GetRtpSenderById(
+      RTCPeerConnection* pc,
+      std::string id);
 
   static libwebrtc::scoped_refptr<libwebrtc::RTCRtpReceiver> GetRtpReceiverById(
       RTCPeerConnection* pc,
       std::string id);
 
  private:
-  void ParseConstraints(const EncodableMap& src,
-                        const scoped_refptr<RTCMediaConstraints>& mediaConstraints,
-                        ParseConstraintType type = kMandatory);
+  void ParseConstraints(
+      const EncodableMap& src,
+      const scoped_refptr<RTCMediaConstraints>& mediaConstraints,
+      ParseConstraintType type = kMandatory);
 
-  static bool CreateIceServers(const EncodableList& iceServersArray, IceServer* ice_servers);
+  static bool CreateIceServers(const EncodableList& iceServersArray,
+                               IceServer* ice_servers);
 
  protected:
   scoped_refptr<RTCPeerConnectionFactory> factory_;
@@ -101,8 +109,10 @@ class FlutterWebRTCBase {
   std::map<std::string, scoped_refptr<RTCMediaTrack>> local_tracks_;
   std::map<std::string, scoped_refptr<RTCVideoCapturer>> video_capturers_;
   std::map<int64_t, std::shared_ptr<FlutterVideoRenderer>> renders_;
-  std::map<std::string, std::shared_ptr<FlutterRTCDataChannelObserver>> data_channel_observers_;
-  std::map<std::string, std::shared_ptr<FlutterPeerConnectionObserver>> peerconnection_observers_;
+  std::map<std::string, std::shared_ptr<FlutterRTCDataChannelObserver>>
+      data_channel_observers_;
+  std::map<std::string, std::shared_ptr<FlutterPeerConnectionObserver>>
+      peerconnection_observers_;
   mutable std::mutex mutex_;
 
   void lock() { mutex_.lock(); }

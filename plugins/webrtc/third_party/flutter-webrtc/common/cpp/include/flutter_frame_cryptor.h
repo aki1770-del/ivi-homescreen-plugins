@@ -10,12 +10,14 @@ namespace flutter_webrtc_plugin {
 
 class FlutterFrameCryptorObserver : public libwebrtc::RTCFrameCryptorObserver {
  public:
-  FlutterFrameCryptorObserver(BinaryMessenger* messenger, const std::string& channelName)
+  FlutterFrameCryptorObserver(BinaryMessenger* messenger,
+                              const std::string& channelName)
       : event_channel_(EventChannelProxy::Create(messenger, channelName)) {
     (void)messenger;
   }
-  void OnFrameCryptionStateChanged(string participant_id,
-                                   libwebrtc::RTCFrameCryptionState state) override;
+  void OnFrameCryptionStateChanged(
+      string participant_id,
+      libwebrtc::RTCFrameCryptionState state) override;
 
  private:
   std::unique_ptr<EventChannelProxy> event_channel_;
@@ -27,12 +29,14 @@ class FlutterFrameCryptor {
 
   // Since this takes ownership of result, ownership will be passed back to
   // 'outResult' if this function fails
-  bool HandleFrameCryptorMethodCall(const MethodCallProxy& method_call,
-                                    std::unique_ptr<MethodResultProxy> result,
-                                    std::unique_ptr<MethodResultProxy>* outResult);
+  bool HandleFrameCryptorMethodCall(
+      const MethodCallProxy& method_call,
+      std::unique_ptr<MethodResultProxy> result,
+      std::unique_ptr<MethodResultProxy>* outResult);
 
-  void FrameCryptorFactoryCreateFrameCryptor(const EncodableMap& constraints,
-                                             std::unique_ptr<MethodResultProxy> result);
+  void FrameCryptorFactoryCreateFrameCryptor(
+      const EncodableMap& constraints,
+      std::unique_ptr<MethodResultProxy> result);
 
   void FrameCryptorSetKeyIndex(const EncodableMap& constraints,
                                std::unique_ptr<MethodResultProxy> result);
@@ -49,8 +53,9 @@ class FlutterFrameCryptor {
   void FrameCryptorDispose(const EncodableMap& constraints,
                            std::unique_ptr<MethodResultProxy> result);
 
-  void FrameCryptorFactoryCreateKeyProvider(const EncodableMap& constraints,
-                                            std::unique_ptr<MethodResultProxy> result);
+  void FrameCryptorFactoryCreateKeyProvider(
+      const EncodableMap& constraints,
+      std::unique_ptr<MethodResultProxy> result);
 
   void KeyProviderSetSharedKey(const EncodableMap& constraints,
                                std::unique_ptr<MethodResultProxy> result);
@@ -91,8 +96,10 @@ class FlutterFrameCryptor {
 
  private:
   FlutterWebRTCBase* base_;
-  std::map<std::string, scoped_refptr<libwebrtc::RTCFrameCryptor>> frame_cryptors_;
-  std::map<std::string, scoped_refptr<FlutterFrameCryptorObserver>> frame_cryptor_observers_;
+  std::map<std::string, scoped_refptr<libwebrtc::RTCFrameCryptor>>
+      frame_cryptors_;
+  std::map<std::string, scoped_refptr<FlutterFrameCryptorObserver>>
+      frame_cryptor_observers_;
   std::map<std::string, scoped_refptr<libwebrtc::KeyProvider>> key_providers_;
 };
 
