@@ -96,6 +96,11 @@ class FlatpakPlugin final : public flutter::Plugin, public FlatpakApi {
   // Stop application with given id.
   ErrorOr<bool> ApplicationStop(const std::string& id) override;
 
+  // Setup event channel to use before flatpak events.
+  void SetupEventChannel(
+      const std::string& app_id,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+
   // Disallow copy and assign.
   FlatpakPlugin(const FlatpakPlugin&) = delete;
 

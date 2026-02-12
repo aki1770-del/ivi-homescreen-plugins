@@ -51,14 +51,6 @@ std::mutex FlatpakShim::monitor_mutex_;
 std::map<std::string, std::shared_ptr<FlatpakShim::MonitorSession>>
     FlatpakShim::active_sessions_;
 
-static gchar* g_strdup_std_string(const std::string& str) {
-  return g_strdup(str.c_str());
-}
-
-static void g_free_notify(gpointer data) {
-  g_free(data);
-}
-
 std::optional<std::string> FlatpakShim::getOptionalAttribute(
     const xmlNode* node,
     const char* attrName) {
@@ -989,8 +981,7 @@ void FlatpakShim::ApplicationInstall(
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
 
-  SetupTransactionEventChannel(id, messenger_);
-  gchar* transaction_id = g_strdup(id.c_str());
+  gchar* tid = g_strdup(id.c_str());
 
   // Install only dependencies
   flatpak_transaction_set_no_interaction(transaction, TRUE);
@@ -1001,8 +992,7 @@ void FlatpakShim::ApplicationInstall(
   flatpak_transaction_set_no_pull(transaction, FALSE);
   flatpak_transaction_set_no_deploy(transaction, FALSE);
 
-  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
-                         transaction_id, g_free);
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id", tid, g_free);
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
   g_signal_connect(transaction, "operation-done",
@@ -1070,8 +1060,7 @@ void FlatpakShim::ApplicationInstall(
 
   // run transaction in a detached thread
   std::thread([self, transaction_raw, callback, ref_name, remote_name,
-               strand_ptr = strand_, installation_raw, found_ref_raw, id,
-               transaction_id]() {
+               strand_ptr = strand_, installation_raw, found_ref_raw, id]() {
     pthread_setname_np(pthread_self(), "flatpak-install");
 
     GError* error = nullptr;
@@ -1141,7 +1130,18 @@ void FlatpakShim::ApplicationInstall(
     if (app_already_installed) {
       spdlog::info("[FlatpakPlugin] Installation complete after Phase 1");
       asio::post(*strand_ptr, [self, callback, ref_name, transaction_raw,
-                               found_ref_raw, installation_raw]() {
+                               found_ref_raw, installation_raw, id]() {
+        self->operation_tracker_->SendOperationFinish(id, "install", true);
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("install_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Installation completed successfully");
+        complete_event[flutter::EncodableValue("ref")] =
+            flutter::EncodableValue(ref_name);
+        self->SendTransactionEvent(id, complete_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         spdlog::info("[FlatpakPlugin] Application '{}' successfully installed",
                      ref_name);
         callback(ErrorOr<bool>(true));
@@ -1178,7 +1178,7 @@ void FlatpakShim::ApplicationInstall(
       return;
     }
     g_object_set_data_full(G_OBJECT(phase2_transaction), "transaction_id",
-                           transaction_id, g_free);
+                           g_strdup(id.c_str()), g_free);
     flatpak_transaction_set_no_interaction(phase2_transaction, TRUE);
     flatpak_transaction_set_disable_dependencies(phase2_transaction, TRUE);
     flatpak_transaction_set_disable_related(phase2_transaction, TRUE);
@@ -1276,11 +1276,29 @@ void FlatpakShim::ApplicationInstall(
             "verified",
             ref_name);
         self->operation_tracker_->SendOperationFinish(id, "install", true);
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("install_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Installation completed and verified");
+        complete_event[flutter::EncodableValue("ref")] =
+            flutter::EncodableValue(ref_name);
+        self->SendTransactionEvent(id, complete_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         callback(ErrorOr<bool>(true));
       } else {
         spdlog::error(
             "[FlatpakPlugin] Installation completed but verification failed");
         self->operation_tracker_->SendOperationFinish(id, "install", false);
+        flutter::EncodableMap failed_event;
+        failed_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("install_failed");
+        failed_event[flutter::EncodableValue("error")] =
+            flutter::EncodableValue("Installation completed but app not found");
+        self->SendTransactionEvent(id, failed_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         callback(ErrorOr<bool>(
             FlutterError("INSTALL_VERIFICATION_FAILED",
                          "Installation completed but app not found")));
@@ -1434,15 +1452,13 @@ void FlatpakShim::ApplicationUninstall(
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
 
-  SetupTransactionEventChannel(id, messenger_);
-  gchar* transaction_id = g_strdup(id.c_str());
+  gchar* tid = g_strdup(id.c_str());
 
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_disable_dependencies(transaction, FALSE);
   flatpak_transaction_set_disable_related(transaction, FALSE);
   flatpak_transaction_set_disable_prune(transaction, FALSE);
-  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
-                         transaction_id, g_free);
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id", tid, g_free);
 
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
@@ -1533,21 +1549,36 @@ void FlatpakShim::ApplicationUninstall(
                     found_app_name);
     }
 
-    self->RemoveTransactionEvent(id);
-
     // Cleanup GObjects
     g_object_unref(transaction_raw);
     g_object_unref(installation_raw);
     g_object_unref(found_ref_raw);
 
     // Post result back to original strand
-    asio::post(*strand_ptr, [self, callback, success, err_msg]() {
+    asio::post(*strand_ptr, [self, callback, success, err_msg, id]() {
       if (success) {
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("uninstall_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Uninstallation completed successfully");
+        self->SendTransactionEvent(id, complete_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         callback(ErrorOr<bool>(true));
       } else {
+        flutter::EncodableMap failed_event;
+        failed_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("uninstall_failed");
+        failed_event[flutter::EncodableValue("error")] =
+            flutter::EncodableValue("Uninstall failed: " + err_msg);
+        self->SendTransactionEvent(id, failed_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         callback(ErrorOr<bool>(
             FlutterError("UNINSTALL_FAILED", "Uninstall failed: " + err_msg)));
       }
+      self->RemoveTransactionEvent(id);
     });
   }).detach();
 }
@@ -1698,16 +1729,14 @@ void FlatpakShim::ApplicationUpdate(
 
   GObjectGuard<FlatpakTransaction> transaction_guard(transaction);
 
-  SetupTransactionEventChannel(id, messenger_);
-  gchar* transaction_id = g_strdup(id.c_str());
+  gchar* tid = g_strdup(id.c_str());
 
   flatpak_transaction_set_no_interaction(transaction, TRUE);
   flatpak_transaction_set_disable_dependencies(transaction, FALSE);
   flatpak_transaction_set_disable_related(transaction, FALSE);
   flatpak_transaction_set_disable_prune(transaction, FALSE);
 
-  g_object_set_data_full(G_OBJECT(transaction), "transaction_id",
-                         transaction_id, g_free);
+  g_object_set_data_full(G_OBJECT(transaction), "transaction_id", tid, g_free);
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
   g_signal_connect(transaction, "operation-done",
@@ -1780,21 +1809,35 @@ void FlatpakShim::ApplicationUpdate(
                     found_app_name);
     }
 
-    self->RemoveTransactionEvent(id);
-
     // Cleanup GObjects
     g_object_unref(transaction_raw);
     g_object_unref(installation_raw);
     g_object_unref(found_ref_raw);
 
     // Post result back to original strand
-    asio::post(*strand_ptr, [self, callback, success, err_msg]() {
+    asio::post(*strand_ptr, [self, callback, success, err_msg, id]() {
       if (success) {
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("update_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Update completed successfully");
+        self->SendTransactionEvent(id, complete_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
         callback(ErrorOr<bool>(true));
       } else {
+        flutter::EncodableMap failed_event;
+        failed_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("update_failed");
+        failed_event[flutter::EncodableValue("error")] =
+            flutter::EncodableValue("Update failed: " + err_msg);
+        self->SendTransactionEvent(id, failed_event);
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         callback(ErrorOr<bool>(
             FlutterError("UPDATE_FAILED", "update failed: " + err_msg)));
       }
+      self->RemoveTransactionEvent(id);
     });
   }).detach();
 }
@@ -3792,7 +3835,7 @@ void FlatpakShim::SendTransactionEvent(const std::string& id,
   std::lock_guard<std::mutex> lock(event_sink_mutex_);
 
   auto it = transactions_event_sinks_.find(id);
-  if (it != transactions_event_sinks_.end() || !it->second) {
+  if (it == transactions_event_sinks_.end() || !it->second) {
     spdlog::error("[FlatpakPlugin] Cannot send event for transaction: {}", id);
     return;
   }
