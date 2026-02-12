@@ -1175,7 +1175,7 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.push_back(EncodableValue());
+                    wrapped.emplace_back(EncodableValue());
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
