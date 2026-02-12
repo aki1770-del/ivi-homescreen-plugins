@@ -1139,7 +1139,7 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                 return;
               }
               EncodableList wrapped;
-              wrapped.push_back(EncodableValue(std::move(output).TakeValue()));
+              wrapped.emplace_back(EncodableValue(std::move(output).TakeValue()));
               reply(EncodableValue(std::move(wrapped)));
             } catch (const std::exception& exception) {
               reply(WrapError(exception.what()));
@@ -1175,7 +1175,7 @@ void FlatpakApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                       return;
                     }
                     EncodableList wrapped;
-                    wrapped.emplace_back(EncodableValue());
+                    wrapped.emplace_back();
                     reply(EncodableValue(std::move(wrapped)));
                   });
             } catch (const std::exception& exception) {
