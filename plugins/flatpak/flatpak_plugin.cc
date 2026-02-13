@@ -95,7 +95,6 @@ FlatpakPlugin::~FlatpakPlugin() {
 }
 
 void FlatpakPlugin::Init() {
-  shim_->SetupTransactionEventChannel(registrar_->messenger());
   shim_->SetupAccessEventChannel(registrar_->messenger(), *strand_);
   // Setup Method channel to handle responses co
   method_channel_->SetMethodCallHandler(
@@ -330,6 +329,24 @@ void FlatpakPlugin::ApplicationStart(
 
 ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {
   return FlatpakShim::ApplicationStop(id);
+}
+
+void FlatpakPlugin::SetupEventChannel(
+    const std::string& app_id,
+    std::function<void(std::optional<FlutterError> reply)> result) {
+  spdlog::info("[FlatpakPlugin] Setting up channel for :{}", app_id);
+
+  try {
+    shim_->SetupTransactionEventChannel(app_id, registrar_->messenger());
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    spdlog::info("[FlatpakPlugin] Event channel ready for: {}", app_id);
+
+    result(std::nullopt);
+  } catch (const std::exception& e) {
+    spdlog::error("Cannot setup channel :{}", e.what());
+    result(FlutterError("CHANNEL_SETUP_FAILED", e.what(),
+                        flutter::EncodableValue()));
+  }
 }
 
 void FlatpakPlugin::HandleMethodCall(
