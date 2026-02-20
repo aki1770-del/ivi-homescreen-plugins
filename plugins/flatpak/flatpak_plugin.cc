@@ -102,6 +102,8 @@ void FlatpakPlugin::Init() {
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) { this->HandleMethodCall(call, std::move(result)); });
   spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
+
+  // shim_->update_appstream();
 }
 
 // Get Flatpak Version

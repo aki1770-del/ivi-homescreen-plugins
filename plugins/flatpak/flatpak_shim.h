@@ -114,6 +114,11 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
       const std::filesystem::path& timestamp_filepath);
 
   /**
+   * \brief Updates the AppStream repo for all remotes.
+   */
+  void update_appstream();
+
+  /**
    * \brief Formats a time value into an ISO 8601 string.
    * \param raw_time The raw time value to format.
    * \param buffer The buffer to store the formatted string.
