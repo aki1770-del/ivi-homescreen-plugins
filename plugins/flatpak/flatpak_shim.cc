@@ -222,45 +222,54 @@ std::time_t FlatpakShim::get_appstream_timestamp(
     return std::time(nullptr);
   }
 }
-
 void FlatpakShim::update_appstream() {
-
   GError* error = nullptr;
+
   auto installation = flatpak_installation_new_user(nullptr, &error);
-  if (error) {
+  if (!installation) {
     spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
                   error->message);
     g_clear_error(&error);
-    return ;
+    return;
   }
+
   auto remotes = get_remotes(installation);
   if (!remotes) {
     spdlog::error("[FlatpakPlugin] Failed to fetch any remotes");
-    g_clear_error(&error);
     g_object_unref(installation);
     return;
   }
+
+  const auto arch = flatpak_get_default_arch();
+
   for (guint i = 0; i < remotes->len; i++) {
     const auto remote =
-        static_cast<FlatpakRemoteRef*>(g_ptr_array_index(remotes, i));
+        static_cast<FlatpakRemote*>(g_ptr_array_index(remotes, i));
 
-    const auto remote_name = flatpak_remote_ref_get_remote_name(remote);
-    const auto arch = flatpak_get_default_arch();
-    gboolean changed{false};
-    flatpak_installation_update_appstream_sync(installation,remote_name,arch,&changed,nullptr,&error);
+    if (flatpak_remote_get_disabled(remote))
+      continue;
+
+    const auto remote_name = flatpak_remote_get_name(remote);
+    gboolean changed = FALSE;
+
+    flatpak_installation_update_appstream_sync(installation, remote_name, arch,
+                                               &changed, nullptr, &error);
+
     if (error) {
-      spdlog::error("[FlatpakPlugin] Can't update AppStream repo for {}",remote_name);
+      spdlog::error("[FlatpakPlugin] Can't update AppStream for {}",
+                    remote_name);
       g_clear_error(&error);
       continue;
     }
+
     if (changed) {
-      spdlog::debug("[FlatpakPlugin] AppStream Updated for {}",remote_name);
+      spdlog::debug("[FlatpakPlugin] AppStream updated for {}", remote_name);
     }
   }
+
   g_ptr_array_unref(remotes);
   g_object_unref(installation);
   spdlog::debug("[FlatpakPlugin] Background AppStream sync finished.");
-
 }
 
 void FlatpakShim::format_time_iso8601(const time_t raw_time,

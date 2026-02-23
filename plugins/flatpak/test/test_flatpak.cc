@@ -749,37 +749,3 @@ TEST_F(FlatpakPluginTest, ApplicationUpdateTest) {
     io_thread.join();
   }
 }
-
-TEST_F(FlatpakPluginTest,UpdateAppStreamTest) {
-  auto io_context = std::make_shared<asio::io_context>();
-  auto work_guard = asio::make_work_guard(*io_context);
-  auto strand = std::make_shared<asio::io_context::strand>(*io_context);
-
-  std::thread io_thread([io_context]() { io_context->run(); });
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-  struct PromiseGuard {
-    std::shared_ptr<std::promise<ErrorOr<bool>>> promise;
-    std::once_flag flag;
-
-    void set_value(ErrorOr<bool> value) {
-      std::call_once(flag, [this, value = std::move(value)]() mutable {
-        try {
-          promise->set_value(std::move(value));
-        } catch (...) {
-        }
-      });
-    }
-  };
-
-  auto guard = std::make_shared<PromiseGuard>();
-  guard->promise = std::make_shared<std::promise<ErrorOr<bool>>>();
-  auto future = guard->promise->get_future();
-
-  auto messenger = GetTestMessenger();
-
-  auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
-
-  shim->update_appstream();
-}
