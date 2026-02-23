@@ -222,6 +222,7 @@ std::time_t FlatpakShim::get_appstream_timestamp(
     return std::time(nullptr);
   }
 }
+
 void FlatpakShim::update_appstream() {
   GError* error = nullptr;
 

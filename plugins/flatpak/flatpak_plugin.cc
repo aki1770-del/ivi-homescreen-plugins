@@ -103,7 +103,7 @@ void FlatpakPlugin::Init() {
                  result) { this->HandleMethodCall(call, std::move(result)); });
   spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
 
-  shim_->update_appstream();
+  flatpak_plugin::FlatpakShim::update_appstream();
 }
 
 // Get Flatpak Version

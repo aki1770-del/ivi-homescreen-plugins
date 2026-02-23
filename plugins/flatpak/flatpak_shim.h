@@ -116,7 +116,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   /**
    * \brief Updates the AppStream repo for all remotes.
    */
-  void update_appstream();
+  static void update_appstream();
 
   /**
    * \brief Formats a time value into an ISO 8601 string.
