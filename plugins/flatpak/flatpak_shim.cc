@@ -1903,12 +1903,6 @@ void FlatpakShim::ApplicationStart(
     return;
   }
 
-  if (is_app_running(id)) {
-    completion_callback(ErrorOr<bool>(
-        FlutterError("APP_RUNNING", "Application already running")));
-    return;
-  }
-
   spdlog::debug("[FlatpakPlugin] Starting application: {}", id);
   auto weak_self = weak_from_this();
   auto self = weak_self.lock();
@@ -2030,6 +2024,12 @@ void FlatpakShim::ApplicationStart(
     return;
   }
 
+  if (is_app_running(found_app_name)) {
+    completion_callback(ErrorOr<bool>(
+        FlutterError("APP_RUNNING", "Application already running")));
+    return;
+  }
+
   spdlog::info(
       "[FlatpakPlugin] Would start application: {} (name: {}, arch: {}, "
       "branch: {})",
@@ -2141,10 +2141,12 @@ void FlatpakShim::ApplicationStart(
                       auto app_session = std::make_shared<MonitorSession>(
                           state->strand, state->app_name, pid,
                           state->portal_manager, instance);
-
-                      flatpak_plugin::FlatpakShim::active_sessions_
-                          [state->app_name] = app_session;
-
+                      {
+                        std::lock_guard<std::mutex> lock(
+                            FlatpakShim::monitor_mutex_);
+                        flatpak_plugin::FlatpakShim::active_sessions_
+                            [state->app_name] = app_session;
+                      }
                       flatpak_plugin::FlatpakShim::monitor_app(app_session);
                       state->callback(ErrorOr<bool>(true));
                       return;
@@ -3203,29 +3205,40 @@ std::map<std::string, std::string> FlatpakShim::extract_metadataSections(
   return values;
 }
 
+FlatpakInstance* FlatpakShim::find_running_instance(const std::string& app_id) {
+  auto instances = flatpak_instance_get_all();
+  if (!instances)
+    return nullptr;
+
+  for (guint i = 0; i < instances->len; ++i) {
+    auto* instance =
+        static_cast<FlatpakInstance*>(g_ptr_array_index(instances, i));
+    const char* instance_app_id = flatpak_instance_get_app(instance);
+    if (!instance_app_id)
+      return nullptr;
+
+    if (app_id == instance_app_id && flatpak_instance_is_running(instance)) {
+      g_object_ref(instance);
+      return instance;
+    }
+  }
+  return nullptr;
+}
+
 void FlatpakShim::monitor_app(const std::shared_ptr<MonitorSession>& session) {
   if (!session || session->cancelled) {
     return;
   }
 
-  if (!session->instance) {
-    spdlog::error("[FlatpakPlugin] No instance running for app: {}",
-                  session->name);
+  FlatpakInstance* live = find_running_instance(session->name);
+  if (!live) {
+    spdlog::info("[FlatpakPlugin] App {} stopped", session->name);
     cleanup_app(session);
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] Monitoring App {}", session->name);
-
-  if (!flatpak_instance_is_running(session->instance)) {
-    spdlog::info("[FlatpakPlugin] Instance {} is no longer running",
-                 session->name);
-    cleanup_app(session);
-    return;
-  }
-
-  spdlog::debug("[FlatpakPlugin] Instance {} still running", session->name);
-  check_app(session);
+  g_object_unref(live);
+  schedule_next_check(session);
 }
 
 void FlatpakShim::cleanup_app(const std::shared_ptr<MonitorSession>& session) {
@@ -3234,7 +3247,11 @@ void FlatpakShim::cleanup_app(const std::shared_ptr<MonitorSession>& session) {
   }
   session->cancelled = true;
 
-  spdlog::info("[FlatpakPlugin] Cleaning up App {}", session->name);
+  bool expected = false;
+  if (!session->cancelled.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
   if (session->timer) {
     session->timer->cancel();
   }
@@ -3256,7 +3273,8 @@ void FlatpakShim::cleanup_app(const std::shared_ptr<MonitorSession>& session) {
   spdlog::info("[FlatpakPlugin] Cleaning up App {} completed", session->name);
 }
 
-void FlatpakShim::check_app(const std::shared_ptr<MonitorSession>& session) {
+void FlatpakShim::schedule_next_check(
+    const std::shared_ptr<MonitorSession>& session) {
   if (!session || session->cancelled) {
     return;
   }
@@ -3309,26 +3327,45 @@ void FlatpakShim::check_app(const std::shared_ptr<MonitorSession>& session) {
 }
 
 void FlatpakShim::stop_all_monitoring() {
-  std::lock_guard<std::mutex> lock(monitor_mutex_);
+  std::vector<std::shared_ptr<MonitorSession>> to_cleanup;
+  {
+    std::lock_guard<std::mutex> lock(monitor_mutex_);
 
-  spdlog::info("[FlatpakPlugin] Stopping {} active monitors",
-               active_sessions_.size());
-
-  for (auto& [app_id, session] : active_sessions_) {
-    if (session) {
-      session->cancelled = true;
-      if (session->timer) {
-        session->timer->cancel();
-      }
+    spdlog::info("[FlatpakPlugin] Stopping {} active monitors",
+                 active_sessions_.size());
+    to_cleanup.reserve(active_sessions_.size());
+    for (auto& [_, session] : active_sessions_) {
+      if (session)
+        to_cleanup.push_back(session);
     }
   }
 
-  active_sessions_.clear();
+  for (auto& session : to_cleanup) {
+    cleanup_app(session);
+  }
 }
 
 bool FlatpakShim::is_app_running(const std::string& app_name) {
   std::lock_guard<std::mutex> lock(monitor_mutex_);
-  return active_sessions_.find(app_name) != active_sessions_.end();
+  auto it = active_sessions_.find(app_name);
+  if (it == active_sessions_.end()) {
+    return false;
+  }
+
+  FlatpakInstance* live = find_running_instance(app_name);
+  if (!live) {
+    spdlog::error("[FlatpakPlugin] is_app_running: stale session for {} — ",
+                  app_name);
+    if (it->second) {
+      it->second->cancelled.store(true);
+      if (it->second->timer)
+        it->second->timer->cancel();
+    }
+    active_sessions_.erase(it);
+    return false;
+  }
+  g_object_unref(live);
+  return true;
 }
 
 void FlatpakShim::check_runtime(
@@ -4517,14 +4554,6 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
                                            bool granted) {
   spdlog::debug("[FlatpakPlugin] Permission response : {} -> {}", permission,
                 granted ? "granted" : "denied");
-  std::string table = "devices";
-  if (permission == "location") {
-    table = "location";
-  } else if (permission == "notifications") {
-    table = "notifications";
-  } else if (permission == "background") {
-    table = "background";
-  }
 
   // Retrieve app id from requests
   std::string app_id;
@@ -4539,8 +4568,20 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
   }
 
   if (!app_id.empty()) {
+    std::string table = "devices";
+    std::string resource_id = permission;
+    if (permission == "location") {
+      table = "location";
+    } else if (permission == "notifications") {
+      table = "notifications";
+    } else if (permission == "background") {
+      table = "background";
+      resource_id = app_id;
+      granted = false;
+    }
+
     access_portal_->SetPermission(
-        table, permission, app_id, {granted ? "yes" : "no"},
+        table, resource_id, app_id, {granted ? "yes" : "no"},
         [weak_self = weak_from_this(), request_id, permission,
          granted](bool success) {
           auto self = weak_self.lock();

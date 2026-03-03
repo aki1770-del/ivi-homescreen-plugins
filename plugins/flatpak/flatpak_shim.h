@@ -425,7 +425,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
     std::shared_ptr<asio::steady_timer> timer;
     std::weak_ptr<PortalManager> portal_manager;
     FlatpakInstance* instance;
-    bool cancelled{false};
+    std::atomic<bool> cancelled{false};
     asio::io_context::strand* strand;
 
     MonitorSession(asio::io_context::strand* strand_ptr,
@@ -445,6 +445,17 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
         g_object_unref(instance);
         instance = nullptr;
       }
+    }
+
+    MonitorSession(const MonitorSession&) = delete;
+    MonitorSession& operator=(const MonitorSession&) = delete;
+
+    [[nodiscard]] bool is_still_running() const {
+      if (!instance)
+        return false;
+      if (!flatpak_instance_is_running(instance))
+        return false;
+      return flatpak_instance_get_pid(instance) == pid;
     }
   };
 
@@ -529,7 +540,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   static void cleanup_app(const std::shared_ptr<MonitorSession>& session);
 
-  static void check_app(const std::shared_ptr<MonitorSession>& session);
+  static void schedule_next_check(
+      const std::shared_ptr<MonitorSession>& session);
+
+  static FlatpakInstance* find_running_instance(const std::string& app_id);
 
   void check_runtime(FlatpakInstalledRef* installed_ref,
                      FlatpakInstallation* installation,
