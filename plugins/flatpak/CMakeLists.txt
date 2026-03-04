@@ -30,8 +30,8 @@ add_library(plugin_flatpak STATIC
         screenshot.cc
         portals/portal_manager.cc
         portals/portal_proxy.cc
-        portals/access_portal/access_portal.cc
-        portals/access_portal/access_portal.h
+        portals/permissions_portal/permissions_portal.cc
+        portals/permissions_portal/permissions_portal.h
         operation_tracker.cc
         operation_tracker.h
 )

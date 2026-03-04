@@ -35,7 +35,7 @@
 #include "messages.g.h"
 #include "operation_tracker.h"
 #include "plugins/flatpak/portals/portal_manager.h"
-#include "portals/access_portal/access_portal.h"
+#include "portals/permissions_portal/permissions_portal.h"
 
 namespace flatpak_plugin {
 class FlatpakPlugin;
@@ -59,6 +59,9 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
             this->SendTransactionEvent(
                 "operation_tracker", const_cast<flutter::EncodableMap&>(event));
           });
+
+      permissions_portal_ =
+          std::make_unique<PermissionsPortal>(strand->context());
     }
   }
 
@@ -503,7 +506,7 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   mutable std::mutex event_sink_mutex_;
 
   // Event channel for streaming permissions access to the flutter widget
-  std::unique_ptr<AccessPortal> access_portal_;
+  std::unique_ptr<PermissionsPortal> permissions_portal_;
   std::unique_ptr<flutter::EventChannel<flutter::EncodableValue>>
       access_event_channel_;
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> access_sink_;

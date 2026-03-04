@@ -217,8 +217,8 @@ std::time_t FlatpakShim::get_appstream_timestamp(
             std::chrono::system_clock::now());
     return std::chrono::system_clock::to_time_t(sctp);
   } catch (const std::exception& e) {
-    spdlog::warn("[FlatpakPlugin] Failed to get timestamp for {}: {}",
-                 timestamp_filepath.string(), e.what());
+    spdlog::error("[FlatpakPlugin] Failed to get timestamp for {}: {}",
+                  timestamp_filepath.string(), e.what());
     return std::time(nullptr);
   }
 }
@@ -370,7 +370,7 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
           static_cast<FlatpakRemote*>(g_ptr_array_index(remotes, j));
 
       if (!remote) {
-        spdlog::warn("[FlatpakPlugin] Null remote at index {}", j);
+        spdlog::error("[FlatpakPlugin] Null remote at index {}", j);
         continue;
       }
 
@@ -380,7 +380,7 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
 
         // Validate required fields before creating a Remote object
         if (!name || !url) {
-          spdlog::warn(
+          spdlog::error(
               "[FlatpakPlugin] Skipping remote with missing name or URL");
           continue;
         }
@@ -800,8 +800,8 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
     auto existing_remote = flatpak_installation_get_remote_by_name(
         installation, configuration.name().c_str(), nullptr, nullptr);
     if (existing_remote) {
-      spdlog::warn("[FlatpakPlugin] Remote '{}' already exists",
-                   configuration.name());
+      spdlog::error("[FlatpakPlugin] Remote '{}' already exists",
+                    configuration.name());
       g_object_unref(installation);
       g_object_unref(existing_remote);
       return ErrorOr<bool>(
@@ -1383,6 +1383,7 @@ void FlatpakShim::ApplicationUninstall(
     g_clear_error(&error);
     callback(ErrorOr<bool>(
         FlutterError("UNINSTALL_ERROR", "Failed to get user installation")));
+    return;
   }
 
   auto refs =
@@ -1394,6 +1395,7 @@ void FlatpakShim::ApplicationUninstall(
     g_object_unref(installation);
     callback(ErrorOr<bool>(
         FlutterError("UNINSTALL_ERROR", "Failed to get installed apps")));
+    return;
   }
 
   bool app_found = false;
@@ -1606,29 +1608,38 @@ void FlatpakShim::ApplicationUninstall(
 
     // Post result back to original strand
     asio::post(*strand_ptr, [self, callback, success, err_msg, id]() {
-      if (success) {
-        flutter::EncodableMap complete_event;
-        complete_event[flutter::EncodableValue("type")] =
-            flutter::EncodableValue("uninstall_complete");
-        complete_event[flutter::EncodableValue("message")] =
-            flutter::EncodableValue("Uninstallation completed successfully");
-        self->SendTransactionEvent(id, complete_event);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-        callback(ErrorOr<bool>(true));
-      } else {
+      if (!success) {
         flutter::EncodableMap failed_event;
         failed_event[flutter::EncodableValue("type")] =
             flutter::EncodableValue("uninstall_failed");
         failed_event[flutter::EncodableValue("error")] =
             flutter::EncodableValue("Uninstall failed: " + err_msg);
         self->SendTransactionEvent(id, failed_event);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
+        self->RemoveTransactionEvent(id);
         callback(ErrorOr<bool>(
             FlutterError("UNINSTALL_FAILED", "Uninstall failed: " + err_msg)));
+        return;
       }
-      self->RemoveTransactionEvent(id);
+
+      self->permissions_portal_->RemoveAllAppPermissions(id, [self, callback,
+                                                              id](bool ok) {
+        if (!ok) {
+          // Uninstall succeeded but permissions cleanup failed
+          spdlog::error(
+              "[FlatpakPlugin] Permissions cleanup failed for {}, "
+              "app was uninstalled successfully",
+              id);
+        }
+
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("uninstall_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Uninstallation completed successfully");
+        self->SendTransactionEvent(id, complete_event);
+        self->RemoveTransactionEvent(id);
+        callback(ErrorOr<bool>(true));
+      });
     });
   }).detach();
 }
@@ -2021,12 +2032,6 @@ void FlatpakShim::ApplicationStart(
     g_object_unref(installation);
     completion_callback(
         ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
-    return;
-  }
-
-  if (is_app_running(found_app_name)) {
-    completion_callback(ErrorOr<bool>(
-        FlutterError("APP_RUNNING", "Application already running")));
     return;
   }
 
@@ -3343,6 +3348,8 @@ void FlatpakShim::stop_all_monitoring() {
   for (auto& session : to_cleanup) {
     cleanup_app(session);
   }
+
+  active_sessions_.clear();
 }
 
 bool FlatpakShim::is_app_running(const std::string& app_name) {
@@ -3908,7 +3915,6 @@ void FlatpakShim::SetupAccessEventChannel(
               return nullptr;
             }));
 
-    access_portal_ = std::make_unique<AccessPortal>(strand.context());
     spdlog::info("[FlatpakPlugin] Access portal created and initialized");
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
@@ -4442,7 +4448,7 @@ void FlatpakShim::CheckExistingPermissions(
     return;
   }
 
-  access_portal_->CheckAllPermissions(
+  permissions_portal_->CheckAllPermissions(
       app_id, permissions,
       [callback](const std::map<std::string, flatpak_plugin::PermissionStatus>&
                      statuses) {
@@ -4554,6 +4560,14 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
                                            bool granted) {
   spdlog::debug("[FlatpakPlugin] Permission response : {} -> {}", permission,
                 granted ? "granted" : "denied");
+  std::string table = "devices";
+  if (permission == "location") {
+    table = "location";
+  } else if (permission == "notifications") {
+    table = "notifications";
+  } else if (permission == "background") {
+    table = "background";
+  }
 
   // Retrieve app id from requests
   std::string app_id;
@@ -4580,8 +4594,8 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
       granted = false;
     }
 
-    access_portal_->SetPermission(
-        table, resource_id, app_id, {granted ? "yes" : "no"},
+    permissions_portal_->SetPermission(
+        table, permission, app_id, {granted ? "yes" : "no"},
         [weak_self = weak_from_this(), request_id, permission,
          granted](bool success) {
           auto self = weak_self.lock();
@@ -4605,7 +4619,7 @@ void FlatpakShim::RequestAppLaunchPermission(
     const std::string& app_id,
     FlatpakInstalledRef* installed_ref,
     const std::function<void(const std::map<std::string, bool>&)>& callback) {
-  if (!access_portal_) {
+  if (!permissions_portal_) {
     spdlog::error("[FlatpakPlugin] Access portal not initialized");
     callback({});
     return;
