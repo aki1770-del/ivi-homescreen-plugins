@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-#include "access_portal.h"
+#include "permissions_portal.h"
 
 #include <iomanip>
 #include "asio/post.hpp"
@@ -24,11 +24,11 @@
 
 namespace flatpak_plugin {
 
-AccessPortal::AccessPortal(asio::io_context& io_context)
+PermissionsPortal::PermissionsPortal(asio::io_context& io_context)
     : io_context_(io_context),
       session_bus_(plugin_common_sdbus::SessionDBus::Instance()) {}
 
-void AccessPortal::CheckAllPermissions(
+void PermissionsPortal::CheckAllPermissions(
     const std::string& app,
     const std::vector<std::string>& permissions,
     const std::function<void(std::map<std::string, PermissionStatus>)>&
@@ -76,7 +76,7 @@ void AccessPortal::CheckAllPermissions(
   }
 }
 
-void AccessPortal::GetPermission(
+void PermissionsPortal::GetPermission(
     const std::string& table,
     const std::string& id,
     const std::string& app,
@@ -148,7 +148,7 @@ void AccessPortal::GetPermission(
   }
 }
 
-void AccessPortal::SetPermission(
+void PermissionsPortal::SetPermission(
     const std::string& table,
     const std::string& id,
     const std::string& app,
@@ -194,7 +194,7 @@ void AccessPortal::SetPermission(
   }
 }
 
-void AccessPortal::DeletePermission(
+void PermissionsPortal::DeletePermission(
     const std::string& table,
     const std::string& id,
     const std::string& app,
@@ -219,11 +219,18 @@ void AccessPortal::DeletePermission(
                  error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
+                  const auto& msg = error->getMessage();
+                  if (msg.find("No entry") != std::string::npos ||
+                      msg.find("not found") != std::string::npos) {
+                    spdlog::debug(
+                        "[AccessPortal] DeletePermission: no entry, skipping");
+                    callback(true);
+                    return;
+                  }
                   spdlog::error("[AccessPortal] DeletePermission failed: {}",
-                                error->getMessage());
+                                msg);
                   callback(false);
                 } else {
-                  spdlog::debug("DeletePermission successful");
                   callback(true);
                 }
               });
@@ -234,7 +241,7 @@ void AccessPortal::DeletePermission(
   }
 }
 
-void AccessPortal::SetResource(
+void PermissionsPortal::SetResource(
     const std::string& table,
     const std::string& id,
     const std::map<std::string, std::vector<std::string>>& permissions,
@@ -278,7 +285,7 @@ void AccessPortal::SetResource(
   }
 }
 
-void AccessPortal::DeleteResource(
+void PermissionsPortal::DeleteResource(
     const std::string& table,
     const std::string& id,
     const std::function<void(bool ready)>& callback) const {
@@ -315,7 +322,7 @@ void AccessPortal::DeleteResource(
     callback(false);
   }
 }
-void AccessPortal::GetAllResource(
+void PermissionsPortal::GetAllResource(
     const std::string& table,
     const std::function<void(bool success, std::vector<std::string> resources)>&
         callback) const {
@@ -357,7 +364,7 @@ void AccessPortal::GetAllResource(
   }
 }
 
-void AccessPortal::GetAllPermissions(
+void PermissionsPortal::GetAllPermissions(
     const std::string& table,
     const std::string& id,
     const std::string& app,
@@ -422,7 +429,56 @@ void AccessPortal::GetAllPermissions(
   }
 }
 
-void AccessPortal::StoreTimestamp(
+void PermissionsPortal::RemoveAllAppPermissions(
+    const std::string& app,
+    const std::function<void(bool ready)>& callback) {
+  struct TableEntry {
+    std::string table;
+    std::string resource_id;
+  };
+
+  auto fixed_entries =
+      std::make_shared<std::vector<TableEntry>>(std::vector<TableEntry>{
+          {"notifications", "notifications"},
+          {"location", "location"},
+          {"background", app},  // resource_id == app for background
+      });
+
+  GetAllResource("devices", [this, app, fixed_entries, callback](
+                                bool ready,
+                                std::vector<std::string> resources) {
+    auto table_entries =
+        std::make_shared<std::vector<TableEntry>>(*fixed_entries);
+    for (const auto& entry : resources) {
+      table_entries->push_back({"devices", entry});
+    }
+
+    auto total = std::make_shared<int>(table_entries->size());
+    auto counter = std::make_shared<std::atomic<int>>(0);
+    auto any_error = std::make_shared<bool>(false);
+
+    if (table_entries->empty()) {
+      callback(true);
+      return;
+    }
+
+    for (const auto& entry : *table_entries) {
+      DeletePermission(
+          entry.table, entry.resource_id, app,
+          [counter, total, any_error, callback](bool ok) {
+            if (!ok) {
+              *any_error = true;
+            }
+            int current = counter->fetch_add(1, std::memory_order_relaxed) + 1;
+            if (current == *total) {
+              callback(!*any_error);
+            }
+          });
+    }
+  });
+}
+
+void PermissionsPortal::StoreTimestamp(
     const std::string& table,
     const std::string& id,
     const std::string& data,

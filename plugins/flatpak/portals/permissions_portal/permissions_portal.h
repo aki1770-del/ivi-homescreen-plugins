@@ -33,11 +33,11 @@ enum PermissionStatus {
   NOT_SET   // No entry exists
 };
 
-class AccessPortal {
+class PermissionsPortal {
  public:
-  explicit AccessPortal(asio::io_context& io_context);
+  explicit PermissionsPortal(asio::io_context& io_context);
 
-  ~AccessPortal() = default;
+  ~PermissionsPortal() = default;
 
   /**
    * \brief Check all permissions for app to launch.
@@ -142,6 +142,14 @@ class AccessPortal {
       const std::function<void(bool success,
                                std::vector<std::string> resources)>& callback)
       const;
+
+  /**
+   * \brief Removes all app permissions from all tables and resources.
+   * \param app Application that needs to uninstall an removes it's resources.
+   * \param callback Callback function for async operations.
+   */
+  void RemoveAllAppPermissions(const std::string& app,
+                               const std::function<void(bool ready)>& callback);
 
   /**
    * \brief Storing timestamps of when a resource was last accessed.

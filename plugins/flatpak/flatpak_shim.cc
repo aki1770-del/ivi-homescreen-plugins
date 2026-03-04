@@ -1383,6 +1383,7 @@ void FlatpakShim::ApplicationUninstall(
     g_clear_error(&error);
     callback(ErrorOr<bool>(
         FlutterError("UNINSTALL_ERROR", "Failed to get user installation")));
+    return;
   }
 
   auto refs =
@@ -1394,6 +1395,7 @@ void FlatpakShim::ApplicationUninstall(
     g_object_unref(installation);
     callback(ErrorOr<bool>(
         FlutterError("UNINSTALL_ERROR", "Failed to get installed apps")));
+    return;
   }
 
   bool app_found = false;
@@ -1606,29 +1608,38 @@ void FlatpakShim::ApplicationUninstall(
 
     // Post result back to original strand
     asio::post(*strand_ptr, [self, callback, success, err_msg, id]() {
-      if (success) {
-        flutter::EncodableMap complete_event;
-        complete_event[flutter::EncodableValue("type")] =
-            flutter::EncodableValue("uninstall_complete");
-        complete_event[flutter::EncodableValue("message")] =
-            flutter::EncodableValue("Uninstallation completed successfully");
-        self->SendTransactionEvent(id, complete_event);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-        callback(ErrorOr<bool>(true));
-      } else {
+      if (!success) {
         flutter::EncodableMap failed_event;
         failed_event[flutter::EncodableValue("type")] =
             flutter::EncodableValue("uninstall_failed");
         failed_event[flutter::EncodableValue("error")] =
             flutter::EncodableValue("Uninstall failed: " + err_msg);
         self->SendTransactionEvent(id, failed_event);
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
+        self->RemoveTransactionEvent(id);
         callback(ErrorOr<bool>(
             FlutterError("UNINSTALL_FAILED", "Uninstall failed: " + err_msg)));
+        return;
       }
-      self->RemoveTransactionEvent(id);
+
+      self->permissions_portal_->RemoveAllAppPermissions(id, [self, callback,
+                                                              id](bool ok) {
+        if (!ok) {
+          // Uninstall succeeded but permissions cleanup failed
+          spdlog::warn(
+              "[FlatpakPlugin] Permissions cleanup failed for {}, "
+              "app was uninstalled successfully",
+              id);
+        }
+
+        flutter::EncodableMap complete_event;
+        complete_event[flutter::EncodableValue("type")] =
+            flutter::EncodableValue("uninstall_complete");
+        complete_event[flutter::EncodableValue("message")] =
+            flutter::EncodableValue("Uninstallation completed successfully");
+        self->SendTransactionEvent(id, complete_event);
+        self->RemoveTransactionEvent(id);
+        callback(ErrorOr<bool>(true));
+      });
     });
   }).detach();
 }
@@ -3871,7 +3882,7 @@ void FlatpakShim::SetupAccessEventChannel(
               return nullptr;
             }));
 
-    access_portal_ = std::make_unique<AccessPortal>(strand.context());
+    permissions_portal_ = std::make_unique<PermissionsPortal>(strand.context());
     spdlog::info("[FlatpakPlugin] Access portal created and initialized");
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
@@ -4405,7 +4416,7 @@ void FlatpakShim::CheckExistingPermissions(
     return;
   }
 
-  access_portal_->CheckAllPermissions(
+  permissions_portal_->CheckAllPermissions(
       app_id, permissions,
       [callback](const std::map<std::string, flatpak_plugin::PermissionStatus>&
                      statuses) {
@@ -4539,7 +4550,7 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
   }
 
   if (!app_id.empty()) {
-    access_portal_->SetPermission(
+    permissions_portal_->SetPermission(
         table, permission, app_id, {granted ? "yes" : "no"},
         [weak_self = weak_from_this(), request_id, permission,
          granted](bool success) {
@@ -4564,7 +4575,7 @@ void FlatpakShim::RequestAppLaunchPermission(
     const std::string& app_id,
     FlatpakInstalledRef* installed_ref,
     const std::function<void(const std::map<std::string, bool>&)>& callback) {
-  if (!access_portal_) {
+  if (!permissions_portal_) {
     spdlog::error("[FlatpakPlugin] Access portal not initialized");
     callback({});
     return;
