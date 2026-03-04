@@ -145,11 +145,12 @@ class PermissionsPortal {
 
   /**
    * \brief Removes all app permissions from all tables and resources.
-   * \param app Application that needs to uninstall an removes it's resources.
+   * \param app Application that needs to uninstall and removes it's resources.
    * \param callback Callback function for async operations.
    */
-  void RemoveAllAppPermissions(const std::string& app,
-                               const std::function<void(bool ready)>& callback);
+  void RemoveAllAppPermissions(
+      const std::string& app,
+      const std::function<void(bool ready)>& callback) const;
 
   /**
    * \brief Storing timestamps of when a resource was last accessed.

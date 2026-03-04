@@ -431,7 +431,7 @@ void PermissionsPortal::GetAllPermissions(
 
 void PermissionsPortal::RemoveAllAppPermissions(
     const std::string& app,
-    const std::function<void(bool ready)>& callback) {
+    const std::function<void(bool ready)>& callback) const {
   struct TableEntry {
     std::string table;
     std::string resource_id;
@@ -445,8 +445,8 @@ void PermissionsPortal::RemoveAllAppPermissions(
       });
 
   GetAllResource("devices", [this, app, fixed_entries, callback](
-                                bool ready,
-                                std::vector<std::string> resources) {
+                                bool /*ready*/,
+                                const std::vector<std::string>& resources) {
     auto table_entries =
         std::make_shared<std::vector<TableEntry>>(*fixed_entries);
     for (const auto& entry : resources) {
