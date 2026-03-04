@@ -218,7 +218,7 @@ std::time_t FlatpakShim::get_appstream_timestamp(
     return std::chrono::system_clock::to_time_t(sctp);
   } catch (const std::exception& e) {
     spdlog::error("[FlatpakPlugin] Failed to get timestamp for {}: {}",
-                 timestamp_filepath.string(), e.what());
+                  timestamp_filepath.string(), e.what());
     return std::time(nullptr);
   }
 }
@@ -801,7 +801,7 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
         installation, configuration.name().c_str(), nullptr, nullptr);
     if (existing_remote) {
       spdlog::error("[FlatpakPlugin] Remote '{}' already exists",
-                   configuration.name());
+                    configuration.name());
       g_object_unref(installation);
       g_object_unref(existing_remote);
       return ErrorOr<bool>(
