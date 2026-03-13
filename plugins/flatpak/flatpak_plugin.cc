@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,9 @@
 
 #include "flatpak_plugin.h"
 
+#include <filesystem>
 #include <sstream>
+#include <system_error>
 #include <vector>
 
 #include <asio/dispatch.hpp>
@@ -357,6 +359,26 @@ void FlatpakPlugin::HandleMethodCall(
     const {
   const auto& method_name = method.method_name();
   spdlog::debug("[FlatpakPlugin] HandleMethodCall {}", method_name);
+
+  // --- NEW: System Storage request (df -h equivalent) ---
+  if (method_name == "getSystemStorage") {
+    std::error_code ec;
+    auto space_info = std::filesystem::space("/", ec);
+
+    if (!ec) {
+      flutter::EncodableMap storage_info;
+      storage_info[flutter::EncodableValue("total")] =
+          flutter::EncodableValue(static_cast<int64_t>(space_info.capacity));
+      storage_info[flutter::EncodableValue("free")] =
+          flutter::EncodableValue(static_cast<int64_t>(space_info.free));
+      storage_info[flutter::EncodableValue("available")] =
+          flutter::EncodableValue(static_cast<int64_t>(space_info.available));
+      result->Success(flutter::EncodableValue(storage_info));
+    } else {
+      result->Error("STORAGE_ERROR", "Could not read system storage");
+    }
+    return;
+  }
 
   if (method_name == "permissionResponse" ||
       method_name == "checkPermissions" || method_name == "grantPermission" ||
