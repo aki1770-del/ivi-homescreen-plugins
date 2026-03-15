@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,11 +41,33 @@ void OperationTracker::TrackOperationStart(const std::string& app_id,
     op_info.op_type = op_type;
     op_info.total_ops = 0;
     op_info.completed_ops = 0;
+    op_info.required_bytes = 0;  // Initialize
     active_ops_[app_id] = op_info;
 
     spdlog::debug("[FlatpakPlugin] Operation {} Tracker started for {}",
                   op_type, app_id);
   });
+}
+
+void OperationTracker::SetOperationSize(const std::string& app_id,
+                                        uint64_t size_bytes) {
+  asio::post(io_context_, [this, app_id, size_bytes]() {
+    auto it = active_ops_.find(app_id);
+    if (it != active_ops_.end()) {
+      total_pending_bytes_ -= it->second.required_bytes;
+      it->second.required_bytes = size_bytes;
+      total_pending_bytes_ += size_bytes;
+
+      spdlog::debug(
+          "[FlatpakPlugin] Cached required size {} bytes for app {}. Total "
+          "queue pending: {}",
+          size_bytes, app_id, total_pending_bytes_.load());
+    }
+  });
+}
+
+uint64_t OperationTracker::GetTotalPendingSize() const {
+  return total_pending_bytes_.load();
 }
 
 void OperationTracker::TrackOperationProgress(const std::string& app_id,
@@ -115,7 +137,6 @@ void OperationTracker::TrackOperationComplete(const std::string& app_id,
     spdlog::debug("[FlatpakPlugin] Operation Progress for {}: {}/{}", app_id,
                   op_info.completed_ops, op_info.total_ops);
 
-    // check if it's the app itself
     if (ref.find(app_id) != std::string::npos) {
       op_info.is_app = true;
       spdlog::info("[FlatpakPlugin] Application Operations completed: {}",
@@ -153,7 +174,10 @@ void OperationTracker::SendOperationFinish(const std::string& app_id,
 
     if (send_event_callback_) {
       send_event_callback_(summary_event);
-    }  // remove from the tracker
+    }
+
+    // Decrease total pending size
+    total_pending_bytes_ -= it->second.required_bytes;
     active_ops_.erase(it);
   });
 }
@@ -161,7 +185,8 @@ void OperationTracker::SendOperationFinish(const std::string& app_id,
 void OperationTracker::ClearOperation(const std::string& app_id) {
   asio::post(io_context_, [this, app_id]() {
     auto it = active_ops_.find(app_id);
-    if (it == active_ops_.end()) {
+    if (it != active_ops_.end()) {
+      total_pending_bytes_ -= it->second.required_bytes;
       active_ops_.erase(it);
       spdlog::debug("[FlatpakPlugin] clear operation for {}", app_id);
     }

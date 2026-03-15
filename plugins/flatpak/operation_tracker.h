@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,8 @@
 #ifndef FLUTTER_PLUGIN_FLATPAK_OPERATION_TRACKER_H
 #define FLUTTER_PLUGIN_FLATPAK_OPERATION_TRACKER_H
 
+#include <atomic>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <string>
@@ -38,6 +40,7 @@ class OperationTracker {
     int total_ops;
     int completed_ops;
     std::set<std::string> completed_ref;
+    uint64_t required_bytes = 0;  // Added for queue caching
   };
   explicit OperationTracker(
       asio::io_context& io_context,
@@ -71,10 +74,16 @@ class OperationTracker {
 
   void ClearOperation(const std::string& app_id);
 
+  // New methods for queue storage logic
+  void SetOperationSize(const std::string& app_id, uint64_t size_bytes);
+  [[nodiscard]] uint64_t GetTotalPendingSize() const;
+
  private:
   asio::io_context& io_context_;
   std::function<void(const flutter::EncodableMap&)> send_event_callback_;
   std::map<std::string, OperationInfo> active_ops_;
+
+  std::atomic<uint64_t> total_pending_bytes_{0};  // Thread-safe queue total
 };
 }  // namespace flatpak_plugin
 

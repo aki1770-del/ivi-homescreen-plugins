@@ -18,6 +18,8 @@
 
 #include <filesystem>
 
+#include <cstdlib>
+
 #include <libxml/tree.h>
 #include <libxml/xmlstring.h>
 #include <rapidjson/document.h>
@@ -42,6 +44,7 @@
 #include "cxxopts/include/cxxopts.hpp"
 #include "messages.g.h"
 #include "plugins/flatpak/flatpak_plugin.h"
+#include "plugins/flatpak/operation_tracker.h"
 #include "portals/portal_manager.h"
 #include "screenshot.h"
 
@@ -1014,7 +1017,9 @@ void FlatpakShim::ApplicationInstall(
 
   spdlog::info("[FlatpakPlugin] Starting TWO-PHASE installation for: {}", id);
 
+  // START QUEUE TRACKING
   operation_tracker_->TrackOperationStart(id, "install");
+
   FlatpakTransaction* transaction =
       flatpak_transaction_new_for_installation(installation, nullptr, &error);
 
@@ -1022,7 +1027,8 @@ void FlatpakShim::ApplicationInstall(
     std::string err_msg = error->message;
     spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
     g_clear_error(&error);
-    asio::post(*strand_, [callback]() {
+    asio::post(*strand_, [this, id, callback]() {
+      operation_tracker_->SendOperationFinish(id, "install", false);
       callback(ErrorOr<bool>(
           FlutterError("TRANSACTION_ERROR", "Error creating transaction")));
     });
@@ -1043,6 +1049,7 @@ void FlatpakShim::ApplicationInstall(
   flatpak_transaction_set_no_deploy(transaction, FALSE);
 
   g_object_set_data_full(G_OBJECT(transaction), "transaction_id", tid, g_free);
+  g_object_set_data(G_OBJECT(transaction), "installation", installation);
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
   g_signal_connect(transaction, "operation-done",
@@ -1061,7 +1068,8 @@ void FlatpakShim::ApplicationInstall(
     if (error) {
       g_clear_error(&error);
     }
-    asio::post(*strand_, [callback, error_msg]() {
+    asio::post(*strand_, [this, id, callback, error_msg]() {
+      operation_tracker_->SendOperationFinish(id, "install", false);
       callback(ErrorOr<bool>(FlutterError("ADD_INSTALL_ERROR", error_msg)));
     });
     return;
@@ -1077,29 +1085,6 @@ void FlatpakShim::ApplicationInstall(
   start_event[flutter::EncodableValue("ref")] =
       flutter::EncodableValue(ref_name);
   SendTransactionEvent(id, start_event);
-
-  guint64 estimated_download{0};
-  guint64 estimated_installed{0};
-  flatpak_installation_fetch_remote_size_sync(
-      installation, remote_name.c_str(), found_ref, &estimated_download,
-      &estimated_installed, nullptr, &error);
-  if (error) {
-    std::string error_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Failed to fetch remote size: {}", error_msg);
-    g_clear_error(&error);
-    asio::post(*strand_, [callback, error_msg]() {
-      callback(
-          ErrorOr<bool>(FlutterError("FETCH_REMOTE_SIZE_ERROR", error_msg)));
-    });
-    return;
-  }
-  if (!check_desk_usage(installation, estimated_download)) {
-    asio::post(*strand_, [callback]() {
-      callback(ErrorOr<bool>(FlutterError(
-          "DISK_USAGE", "Not enough disk space available for installation")));
-    });
-    return;
-  }
 
   // transfer ownership to thread
   auto transaction_raw = transaction_guard.release();
@@ -1134,6 +1119,10 @@ void FlatpakShim::ApplicationInstall(
       asio::post(*strand_ptr, [self, callback, err_msg, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
         self->operation_tracker_->SendOperationFinish(id, "install", false);
+
+        spdlog::info(
+            "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
+        self->ApplicationStop(id);
 
         callback(ErrorOr<bool>(FlutterError(
             "INSTALL_FAILED", "Dependency installation failed: " + err_msg)));
@@ -1219,7 +1208,11 @@ void FlatpakShim::ApplicationInstall(
         g_clear_error(&phase2_error);
 
       asio::post(*strand_ptr, [self, callback, phase2_err, transaction_raw,
-                               found_ref_raw, installation_raw]() {
+                               found_ref_raw, installation_raw, id]() {
+        spdlog::info(
+            "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
+        self->ApplicationStop(id);
+
         callback(ErrorOr<bool>(FlutterError("TRANSACTION_ERROR", phase2_err)));
         g_object_unref(transaction_raw);
         g_object_unref(installation_raw);
@@ -1257,7 +1250,11 @@ void FlatpakShim::ApplicationInstall(
       g_object_unref(phase2_transaction);
 
       asio::post(*strand_ptr, [self, callback, add_err, transaction_raw,
-                               found_ref_raw, installation_raw]() {
+                               found_ref_raw, installation_raw, id]() {
+        spdlog::info(
+            "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
+        self->ApplicationStop(id);
+
         callback(ErrorOr<bool>(FlutterError("ADD_INSTALL_ERROR", add_err)));
         g_object_unref(transaction_raw);
         g_object_unref(installation_raw);
@@ -1280,6 +1277,11 @@ void FlatpakShim::ApplicationInstall(
       asio::post(*strand_ptr, [self, callback, phase2_err_msg, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
         self->operation_tracker_->SendOperationFinish(id, "install", false);
+
+        spdlog::info(
+            "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
+        self->ApplicationStop(id);
+
         callback(ErrorOr<bool>(FlutterError(
             "INSTALL_FAILED", "App installation failed: " + phase2_err_msg)));
         g_object_unref(transaction_raw);
@@ -1511,6 +1513,7 @@ void FlatpakShim::ApplicationUninstall(
   flatpak_transaction_set_disable_related(transaction, FALSE);
   flatpak_transaction_set_disable_prune(transaction, FALSE);
   g_object_set_data_full(G_OBJECT(transaction), "transaction_id", tid, g_free);
+  g_object_set_data(G_OBJECT(transaction), "installation", installation);
 
   g_signal_connect(transaction, "new-operation", G_CALLBACK(OnNewOperation),
                    this);
@@ -3440,9 +3443,8 @@ void FlatpakShim::check_runtime(
   spdlog::debug("[FlatpakPlugin] Checking runtime: {} for {}", runtime,
                 sandbox.application.name);
 
-  // Check if runtime is NOT installed
   if (!is_runtime_installed_for_app(runtime, installation)) {
-    spdlog::warn("[FlatpakPlugin] Runtime {} not installed, installing...",
+    spdlog::info("[FlatpakPlugin] Runtime {} not installed, installing...",
                  runtime);
 
     install_runtime(
@@ -4283,30 +4285,41 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
   auto* handler = static_cast<FlatpakShim*>(user_data);
   const char* id = static_cast<const char*>(
       g_object_get_data(G_OBJECT(transaction), "transaction_id"));
+  auto* installation = static_cast<FlatpakInstallation*>(
+      g_object_get_data(G_OBJECT(transaction), "installation"));
 
   GList* operations = flatpak_transaction_get_operations(transaction);
   int total_ops = static_cast<int>(g_list_length(operations));
 
   spdlog::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
 
-  std::string app_id;
+  std::string tx_app_id = id ? id : "";
+  guint64 total_download_size = 0;
+  bool is_download_transaction = false;
   flutter::EncodableList ops_list;
+
   for (GList* l = operations; l != nullptr; l = l->next) {
     auto* op = static_cast<FlatpakTransactionOperation*>(l->data);
     const char* ref = flatpak_transaction_operation_get_ref(op);
     FlatpakTransactionOperationType type =
         flatpak_transaction_operation_get_operation_type(op);
 
+    // Sum up the required download size for the app AND all dependencies
+    total_download_size += flatpak_transaction_operation_get_download_size(op);
+
     std::string type_str;
     switch (type) {
       case FLATPAK_TRANSACTION_OPERATION_INSTALL:
         type_str = "install";
+        is_download_transaction = true;
         break;
       case FLATPAK_TRANSACTION_OPERATION_UPDATE:
         type_str = "update";
+        is_download_transaction = true;
         break;
       case FLATPAK_TRANSACTION_OPERATION_INSTALL_BUNDLE:
         type_str = "install_bundle";
+        is_download_transaction = true;
         break;
       case FLATPAK_TRANSACTION_OPERATION_UNINSTALL:
         type_str = "uninstall";
@@ -4322,13 +4335,6 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     std::string kind = "unknown";
     if (ref_str.find("app/") == 0) {
       kind = "app";
-
-      // extract app to pass
-      size_t first_slash = ref_str.find('/') + 1;
-      size_t second_slash = ref_str.find('/', first_slash);
-      if (second_slash != std::string::npos) {
-        app_id = ref_str.substr(first_slash, second_slash - first_slash);
-      }
     } else if (ref_str.find("runtime/") == 0) {
       kind = "runtime";
     }
@@ -4341,11 +4347,20 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     ops_list.emplace_back(op_map);
   }
 
-  if (app_id.empty()) {
-    handler->operation_tracker_->UpdateTotalOperations(app_id, total_ops);
+  if (is_download_transaction && installation && !tx_app_id.empty()) {
+    if (!handler->check_disk_usage(installation, total_download_size,
+                                   tx_app_id)) {
+      spdlog::error(
+          "[FlatpakPlugin] Transaction aborted natively due to insufficient "
+          "disk space.");
+      return FALSE;  // Cleanly aborts Flatpak transaction
+    }
   }
+
+  handler->operation_tracker_->UpdateTotalOperations(tx_app_id, total_ops);
+
   if (handler->strand_) {
-    asio::post(*handler->strand_, [id, handler, app_id, total_ops,
+    asio::post(*handler->strand_, [id, handler, tx_app_id, total_ops,
                                    ops_list = std::move(ops_list)]() {
       try {
         flutter::EncodableMap ready_event;
@@ -4356,7 +4371,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
         ready_event[flutter::EncodableValue("operations")] =
             flutter::EncodableValue(ops_list);
         ready_event[flutter::EncodableValue("main_app_id")] =
-            flutter::EncodableValue(app_id);
+            flutter::EncodableValue(tx_app_id);
         handler->SendTransactionEvent(id, ready_event);
       } catch (const std::exception& e) {
         spdlog::error("[FlatpakPlugin] Error sending ready event: {}",
@@ -4364,12 +4379,12 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
       }
     });
   }
-
   return TRUE;
 }
 
-bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
-                                   guint64 estimated_download) const {
+bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
+                                   guint64 estimated_download,
+                                   const std::string& app_id) {
   GError* error = nullptr;
   guint64 min_free_space{0};
 
@@ -4381,10 +4396,11 @@ bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
     return false;
   }
 
-  std::string free_space_msg = "Minimum free space required: " +
-                               std::to_string(min_free_space / 1024 / 1024) +
-                               " MB";
-  spdlog::debug("[FlatpakPlugin] {}", free_space_msg);
+  // Fix logging bug to show total required space
+  guint64 total_requirement = min_free_space + estimated_download;
+  spdlog::info(
+      "[FlatpakPlugin] Total storage requirement (buffer + download): {} MB",
+      total_requirement / 1024 / 1024);
 
   const auto repo_path = flatpak_installation_get_path(installation);
   auto info = g_file_query_filesystem_info(
@@ -4398,13 +4414,26 @@ bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
   }
   const auto available_free_space_bytes =
       g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+
+  // Subtract the queue size and current app size mathematically
+  uint64_t pending_queue_bytes = operation_tracker_->GetTotalPendingSize();
+  uint64_t total_pending_with_this_app =
+      pending_queue_bytes + estimated_download;
+  uint64_t effective_free_space = available_free_space_bytes;
+
+  if (effective_free_space > total_pending_with_this_app) {
+    effective_free_space -= total_pending_with_this_app;
+  } else {
+    effective_free_space = 0;  // Queue takes up entire drive
+  }
+
   std::string available_free_space_str =
-      "Available free space: " +
-      std::to_string(available_free_space_bytes / 1024 / 1024) + " MB";
+      "Available free space (adjusted for queue): " +
+      std::to_string(effective_free_space / 1024 / 1024) + " MB";
   spdlog::info("[FlatpakPlugin] {}", available_free_space_str);
 
-  // check if we have enough space
-  if (available_free_space_bytes < (min_free_space + estimated_download)) {
+  // check if we have enough space based on the COMPLETE requirement
+  if (effective_free_space < total_requirement) {
     spdlog::error("[FlatpakPlugin] Not enough free space!");
 
     flutter::EncodableMap disk_usage_event;
@@ -4412,22 +4441,27 @@ bool FlatpakShim::check_desk_usage(FlatpakInstallation* installation,
         flutter::EncodableValue("free_space_error");
     disk_usage_event[flutter::EncodableValue("available_mb")] =
         flutter::EncodableValue(
-            static_cast<int64_t>(available_free_space_bytes / 1024 / 1024));
+            static_cast<int64_t>(effective_free_space / 1024 / 1024));
     disk_usage_event[flutter::EncodableValue("required_mb")] =
-        flutter::EncodableValue(static_cast<int64_t>(
-            (min_free_space + estimated_download) / 1024 / 1024));
+        flutter::EncodableValue(
+            static_cast<int64_t>(total_requirement / 1024 / 1024));
     disk_usage_event[flutter::EncodableValue("message")] =
         flutter::EncodableValue(
             "Not enough disk space. Available: " +
-            std::to_string(available_free_space_bytes / 1024 / 1024) +
+            std::to_string(effective_free_space / 1024 / 1024) +
             " MB, Required: " +
-            std::to_string((min_free_space + estimated_download) / 1024 /
-                           1024) +
-            " MB");
+            std::to_string(total_requirement / 1024 / 1024) + " MB");
 
-    SendTransactionEvent("disk_usage", disk_usage_event);
+    // Use app_id to send the event to the correct flutter channel
+    SendTransactionEvent(app_id, disk_usage_event);
+
+    // Clear the operation from the tracker if it fails so it doesn't get stuck
+    // in the queue
+    operation_tracker_->ClearOperation(app_id);
     return false;
   }
+
+  operation_tracker_->SetOperationSize(app_id, estimated_download);
   return true;
 }
 

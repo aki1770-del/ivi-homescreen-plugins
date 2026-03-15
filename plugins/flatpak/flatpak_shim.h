@@ -604,8 +604,9 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   static gboolean OnTransactionReady(FlatpakTransaction* transaction,
                                      gpointer user_data);
 
-  bool check_desk_usage(FlatpakInstallation* installation,
-                        guint64 estimated_download) const;
+  bool check_disk_usage(FlatpakInstallation* installation,
+                        guint64 estimated_download,
+                        const std::string& app_id);
 
   void RequestAppLaunchPermission(
       const std::string& app_id,
