@@ -5,6 +5,14 @@ inputs:
   name:
     description: "The name of the plugin to build"
     required: true
+  homescreen-ref:
+    description: "The git ref of ivi-homescreen to build against (branch, tag, or commit)"
+    required: false
+    default: "v2.0"
+  plugins-ref:
+    description: "The git ref of ivi-homescreen-plugins to build against (branch, tag, or commit). Ignored if building from the ivi-homescreen-plugins repo."
+    required: false
+    default: "v2.0"
   libcamera-enable:
     description: "Whether to enable libcamera support"
     required: false
@@ -30,7 +38,7 @@ runs:
     with:
       repository: toyota-connected/ivi-homescreen
       path: ivi-homescreen
-      ref: v2.0
+      ref: ${{ inputs.homescreen-ref }}
       fetch-depth: 1
       submodules: true
       persist-credentials: false
@@ -40,7 +48,7 @@ runs:
     with:
       repository: toyota-connected/ivi-homescreen-plugins
       path: ivi-homescreen-plugins
-      ref: v2.0
+      ref: ${{ inputs.plugins-ref }}
       fetch-depth: 1
       submodules: true
       persist-credentials: false
