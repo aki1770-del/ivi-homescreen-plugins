@@ -55,6 +55,28 @@ std::mutex FlatpakShim::monitor_mutex_;
 std::map<std::string, std::shared_ptr<FlatpakShim::MonitorSession>>
     FlatpakShim::active_sessions_;
 
+namespace {
+struct WorkerGuard {
+  std::shared_ptr<std::promise<void>> promise;
+  ~WorkerGuard() {
+    if (promise) promise->set_value();
+  }
+};
+}  // namespace
+
+void FlatpakShim::TrackWorker(std::future<void> f) {
+  std::lock_guard<std::mutex> lock(worker_mutex_);
+  worker_futures_.erase(
+      std::remove_if(worker_futures_.begin(), worker_futures_.end(),
+                     [](std::future<void>& fut) {
+                       return fut.valid() &&
+                              fut.wait_for(std::chrono::seconds(0)) ==
+                                  std::future_status::ready;
+                     }),
+      worker_futures_.end());
+  worker_futures_.push_back(std::move(f));
+}
+
 std::optional<std::string> FlatpakShim::getOptionalAttribute(
     const xmlNode* node,
     const char* attrName) {
@@ -1113,9 +1135,17 @@ void FlatpakShim::ApplicationInstall(
 
   auto self = shared_from_this();
 
+  static constexpr int kFsyncMaxRetries = 10;
+  static constexpr auto kFsyncRetryDelay = std::chrono::milliseconds(500);
+
+  auto worker_promise = std::make_shared<std::promise<void>>();
+  TrackWorker(worker_promise->get_future());
+
   // run transaction in a detached thread
   std::thread([self, transaction_raw, callback, ref_name, remote_name,
-               strand_ptr = strand_, installation_raw, found_ref_raw, id]() {
+               strand_ptr = strand_, installation_raw, found_ref_raw, id,
+               p = std::move(worker_promise)]() mutable {
+    WorkerGuard guard{std::move(p)};
     pthread_setname_np(pthread_self(), "flatpak-install");
 
     GError* error = nullptr;
@@ -1157,32 +1187,28 @@ void FlatpakShim::ApplicationInstall(
     ihs::log::info(
         "[FlatpakPlugin] Phase 1 complete, checking if app was installed...");
 
-    // wait for filesystem sync
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-
-    // Check if the app is now installed, it might have been installed in phase
-    // 1
-    GError* check_error = nullptr;
-    auto fresh_install = flatpak_installation_new_user(nullptr, &check_error);
+    // Poll until the installed ref is visible (up to kFsyncMaxRetries x 500ms)
     bool app_already_installed = false;
-
-    if (!check_error && fresh_install) {
-      const auto check_ref = flatpak_installation_get_installed_ref(
-          fresh_install, FLATPAK_REF_KIND_APP,
-          flatpak_ref_get_name(found_ref_raw),
-          flatpak_ref_get_arch(found_ref_raw),
-          flatpak_ref_get_branch(found_ref_raw), nullptr, &check_error);
-
-      if (check_ref) {
-        ihs::log::info(
-            "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase 2.");
-        g_object_unref(check_ref);
-        app_already_installed = true;
+    for (int retry = 0; retry < kFsyncMaxRetries && !app_already_installed;
+         ++retry) {
+      std::this_thread::sleep_for(kFsyncRetryDelay);
+      GError* check_error = nullptr;
+      auto fresh_install = flatpak_installation_new_user(nullptr, &check_error);
+      if (!check_error && fresh_install) {
+        const auto check_ref = flatpak_installation_get_installed_ref(
+            fresh_install, FLATPAK_REF_KIND_APP,
+            flatpak_ref_get_name(found_ref_raw),
+            flatpak_ref_get_arch(found_ref_raw),
+            flatpak_ref_get_branch(found_ref_raw), nullptr, &check_error);
+        if (check_ref) {
+          ihs::log::info(
+              "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase 2.");
+          g_object_unref(check_ref);
+          app_already_installed = true;
+        }
+        if (check_error) g_clear_error(&check_error);
+        g_object_unref(fresh_install);
       }
-      if (check_error) {
-        g_clear_error(&check_error);
-      }
-      g_object_unref(fresh_install);
     }
 
     // If the app is already installed, skip Phase 2
@@ -1313,31 +1339,29 @@ void FlatpakShim::ApplicationInstall(
     }
 
     ihs::log::info("[FlatpakPlugin] verifying installation...");
-    std::this_thread::sleep_for(std::chrono::seconds(2));
-
     bool verified = false;
-    GError* verify_error = nullptr;
-    auto fresh_installation =
-        flatpak_installation_new_user(nullptr, &verify_error);
-
-    if (!verify_error && fresh_installation) {
-      auto verify_ref = flatpak_installation_get_installed_ref(
-          fresh_installation, FLATPAK_REF_KIND_APP,
-          flatpak_ref_get_name(found_ref_raw),
-          flatpak_ref_get_arch(found_ref_raw),
-          flatpak_ref_get_branch(found_ref_raw), nullptr, &verify_error);
-
-      if (verify_ref) {
-        ihs::log::info("[FlatpakPlugin] Installation verified: {}", ref_name);
-        g_object_unref(verify_ref);
-        verified = true;
-      } else if (verify_error) {
-        ihs::log::error("[FlatpakPlugin] Verification failed: {}",
+    for (int retry = 0; retry < kFsyncMaxRetries && !verified; ++retry) {
+      std::this_thread::sleep_for(kFsyncRetryDelay);
+      GError* verify_error = nullptr;
+      auto fresh_installation =
+          flatpak_installation_new_user(nullptr, &verify_error);
+      if (!verify_error && fresh_installation) {
+        auto verify_ref = flatpak_installation_get_installed_ref(
+            fresh_installation, FLATPAK_REF_KIND_APP,
+            flatpak_ref_get_name(found_ref_raw),
+            flatpak_ref_get_arch(found_ref_raw),
+            flatpak_ref_get_branch(found_ref_raw), nullptr, &verify_error);
+        if (verify_ref) {
+          ihs::log::info("[FlatpakPlugin] Installation verified: {}", ref_name);
+          g_object_unref(verify_ref);
+          verified = true;
+        } else if (verify_error) {
+          ihs::log::error("[FlatpakPlugin] Verification failed: {}",
                         verify_error->message);
-        g_clear_error(&verify_error);
+          g_clear_error(&verify_error);
+        }
+        g_object_unref(fresh_installation);
       }
-
-      g_object_unref(fresh_installation);
     }
 
     asio::post(*strand_ptr, [self, callback, verified, ref_name,
@@ -1600,8 +1624,12 @@ void FlatpakShim::ApplicationUninstall(
   auto found_ref_raw = found_ref_guard.release();
   auto self = shared_from_this();
 
+  auto worker_promise = std::make_shared<std::promise<void>>();
+  TrackWorker(worker_promise->get_future());
+
   std::thread([self, transaction_raw, installation_raw, found_app_name,
-               strand_ptr = strand_, found_ref_raw, callback, id]() {
+               strand_ptr = strand_, found_ref_raw, callback, id,
+               p = std::move(worker_promise)]() mutable {
     pthread_setname_np(pthread_self(), "flatpak-uninstall");
 
     GError* error = nullptr;
@@ -1667,6 +1695,7 @@ void FlatpakShim::ApplicationUninstall(
         callback(ErrorOr<bool>(true));
       });
     });
+    p->set_value();
   }).detach();
 }
 
@@ -1871,8 +1900,12 @@ void FlatpakShim::ApplicationUpdate(
   auto found_ref_raw = found_ref_guard.release();
   auto self = shared_from_this();
 
+  auto worker_promise = std::make_shared<std::promise<void>>();
+  TrackWorker(worker_promise->get_future());
+
   std::thread([self, transaction_raw, installation_raw, found_app_name,
-               strand_ptr = strand_, found_ref_raw, callback, id]() {
+               strand_ptr = strand_, found_ref_raw, callback, id,
+               p = std::move(worker_promise)]() mutable {
     pthread_setname_np(pthread_self(), "flatpak-update");
 
     GError* error = nullptr;
@@ -1927,6 +1960,7 @@ void FlatpakShim::ApplicationUpdate(
       }
       self->RemoveTransactionEvent(id);
     });
+    p->set_value();
   }).detach();
 }
 
@@ -3641,8 +3675,11 @@ void FlatpakShim::install_runtime(
   }
 
   // run transaction async, since it will block the thread until it finishes.
+  auto worker_promise = std::make_shared<std::promise<void>>();
+  self->TrackWorker(worker_promise->get_future());
+
   std::thread([transaction, strand_ptr = &strand, complete_callback, self,
-               runtime]() {
+               runtime, p = std::move(worker_promise)]() mutable {
     pthread_setname_np(pthread_self(), "flatpak-runtime");
 
     ihs::log::info("[FlatpakPlugin] Starting runtime installation for: {}",
@@ -3675,6 +3712,7 @@ void FlatpakShim::install_runtime(
 
     g_object_unref(transaction);
     ihs::log::debug("[FlatpakPlugin] Runtime installation thread exiting");
+    p->set_value();
   }).detach();
 }
 
@@ -3790,8 +3828,12 @@ void FlatpakShim::install_extensions(
   }
 
   // Run transaction in separate thread
+  auto worker_promise = std::make_shared<std::promise<void>>();
+  self->TrackWorker(worker_promise->get_future());
+
   std::thread([transaction, strand_ptr = &strand, complete_callback,
-               count = missing_extensions.size(), self]() {
+               count = missing_extensions.size(), self,
+               p = std::move(worker_promise)]() mutable {
     pthread_setname_np(pthread_self(), "flatpak-ext");
 
     ihs::log::info(
@@ -3827,6 +3869,7 @@ void FlatpakShim::install_extensions(
 
     g_object_unref(transaction);
     ihs::log::debug("[FlatpakPlugin] Extension installation thread exiting");
+    p->set_value();
   }).detach();
 }
 

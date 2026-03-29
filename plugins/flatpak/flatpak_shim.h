@@ -19,6 +19,7 @@
 #define FLUTTER_PLUGIN_FLATPAK_FLATPAK_SHIM_H
 
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <string>
 
@@ -68,6 +69,10 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   ~FlatpakShim() {
     plugin_ = nullptr;
     messenger_ = nullptr;
+    std::lock_guard<std::mutex> lock(worker_mutex_);
+    for (auto& f : worker_futures_) {
+      if (f.valid()) f.wait();
+    }
   }
 
   /**
@@ -513,6 +518,11 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
   mutable std::mutex access_sink_mutex_;
   std::map<std::string, PermissionRequest> active_permissions_;
   mutable std::mutex permissions_mutex_;
+
+  mutable std::mutex worker_mutex_;
+  std::vector<std::future<void>> worker_futures_;
+
+  void TrackWorker(std::future<void> f);
 
   static std::optional<Application> create_component(
       FlatpakRemoteRef* app_ref,
