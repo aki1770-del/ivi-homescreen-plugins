@@ -70,6 +70,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
         }
       } else if (methodCall.method_name() == "create") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->create(
             *args, [reply = result.get()](ErrorOr<EncodableMap>&& output) {
               if (output.has_error()) {
@@ -81,6 +85,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             });
       } else if (methodCall.method_name() == "initialize") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->initialize(
             *args, [reply = result.get()](ErrorOr<std::string>&& output) {
               if (output.has_error()) {
@@ -92,6 +100,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             });
       } else if (methodCall.method_name() == "takePicture") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->takePicture(
             *args, [reply = result.get()](ErrorOr<std::string>&& output) {
               if (output.has_error()) {
@@ -103,6 +115,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             });
       } else if (methodCall.method_name() == "startVideoRecording") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->startVideoRecording(
             *args,
             [reply = result.get()](std::optional<FlutterError>&& output) {
@@ -115,6 +131,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             });
       } else if (methodCall.method_name() == "pauseVideoRecording") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->pauseVideoRecording(
             *args,
             [reply = result.get()](std::optional<FlutterError>&& output) {
@@ -127,6 +147,10 @@ void CameraApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             });
       } else if (methodCall.method_name() == "resumeVideoRecording") {
         const auto& args = std::get_if<EncodableMap>(methodCall.arguments());
+        if (!args) {
+          result->Error("argument_error", "Expected map arguments");
+          return;
+        }
         api->resumeVideoRecording(
             *args,
             [reply = result.get()](std::optional<FlutterError>&& output) {
