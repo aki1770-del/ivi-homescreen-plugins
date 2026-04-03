@@ -62,7 +62,7 @@ class VideoPlayer {
   void Play();
   void Pause();
   int64_t GetPosition();
-  void SendBufferingUpdate() const;
+  void SendBufferingUpdate();
   void SeekTo(int64_t seek);
   int64_t GetTextureId() const { return m_texture_id; };
   bool IsValid();
@@ -81,7 +81,6 @@ class VideoPlayer {
 
   GLuint m_texture_id{};
   std::atomic<bool> m_valid = true;
-  std::mutex m_buffer_mutex;
   flutter::TextureRegistrar* m_texture_registry{};
   std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture_;
 
@@ -97,37 +96,38 @@ class VideoPlayer {
   GstElement* video_scale_{};
   GstCaps* scale_{};
   GstVideoInfo info_{};
-  gint64 position_ = 0;
+  std::atomic<gint64> position_{0};
   gdouble rate_ = 0.0;
   GstBus* bus_{};
 
   gulong handoff_handler_id_;
   gulong on_bus_msg_id_;
 
-  GstState target_state_ = GST_STATE_PAUSED;
+  std::atomic<GstState> target_state_{GST_STATE_PAUSED};
 
   AVCodecID codec_id_{};
 
   gint n_video_{};
   gint current_video_{};
   std::unique_ptr<nv12::Shader> shader_;
-  bool is_looping_{};
-  bool is_buffering_{};
+  std::atomic<bool> is_looping_{};
+  std::atomic<bool> is_buffering_{};
   gboolean is_live_{};
   bool events_enabled_{};
   double volume_ = 0.0;
 
   std::mutex gst_mutex_;
+  std::mutex event_mutex_;
 
-  bool is_initialized_ = false;
-  void SetBuffering(bool buffering) const;
+  std::atomic<bool> is_initialized_{false};
+  void SetBuffering(bool buffering);
 
-  void OnPlaybackEnded() const;
+  void OnPlaybackEnded();
   void OnMediaInitialized();
   void OnMediaStateChange(GstState state);
   static void OnMediaError(GstMessage* msg);
   void OnMediaDurationChange();
-  void SendInitialized() const;
+  void SendInitialized();
 
   static void OnTag(const GstTagList* list,
                     const gchar* tag,

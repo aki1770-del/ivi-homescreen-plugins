@@ -416,7 +416,7 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
                                   GstPad* /* pad */,
                                   void* user_data) {
   const auto obj = static_cast<VideoPlayer*>(user_data);
-  if (!obj->is_initialized_ || obj->info_.finfo == nullptr) {
+  if (!obj->m_valid || !obj->is_initialized_ || obj->info_.finfo == nullptr) {
     return;
   }
 
@@ -474,25 +474,30 @@ void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
           [this](const flutter::EncodableValue* /* arguments */,
                  std::unique_ptr<flutter::EventSink<>>&& events)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
             event_sink_ = std::move(events);
             return nullptr;
           },
           [this](const flutter::EncodableValue* /* arguments */)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
             event_sink_ = nullptr;
             return nullptr;
           }));
 }
 
 VideoPlayer::~VideoPlayer() {
-  m_valid = false;
+  if (m_valid) {
+    Dispose();
+  }
 }
 
 bool VideoPlayer::IsValid() {
   return m_valid;
 }
 
-void VideoPlayer::SendInitialized() const {
+void VideoPlayer::SendInitialized() {
+  std::lock_guard event_lock(event_mutex_);
   if (!event_sink_) {
     return;
   }
@@ -510,12 +515,13 @@ void VideoPlayer::SendInitialized() const {
   event_sink_->Success(flutter::EncodableValue(event));
 }
 
-void VideoPlayer::OnPlaybackEnded() const {
-  if (this->event_sink_) {
+void VideoPlayer::OnPlaybackEnded() {
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
     SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
     auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
                                        flutter::EncodableValue("completed")}});
-    this->event_sink_->Success(flutter::EncodableValue(res));
+    event_sink_->Success(flutter::EncodableValue(res));
   }
 }
 
@@ -541,8 +547,9 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
   }
 }
 
-void VideoPlayer::SetBuffering(const bool buffering) const {
-  if (this->event_sink_) {
+void VideoPlayer::SetBuffering(const bool buffering) {
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
     SPDLOG_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
     auto res = flutter::EncodableMap(
         {{flutter::EncodableValue("event"),
@@ -554,24 +561,32 @@ void VideoPlayer::SetBuffering(const bool buffering) const {
 
 void VideoPlayer::Dispose() {
   SPDLOG_DEBUG("[VideoPlayer] Dispose");
+  m_valid = false;
+  is_initialized_ = false;
+
   std::lock_guard buffer_lock(buffer_mutex_);
 
-  if (is_initialized_) {
-    Pause();
-  }
+  Pause();
 
   g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
   g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
 
-  m_registrar->texture_registrar()->TextureMakeCurrent();
-  shader_.reset();
-  m_registrar->texture_registrar()->TextureClearCurrent();
+  {
+    // Ensure no in-flight handoff callback is using the shader
+    std::lock_guard gst_lock(gst_mutex_);
+    m_registrar->texture_registrar()->TextureMakeCurrent();
+    shader_.reset();
+    m_registrar->texture_registrar()->TextureClearCurrent();
+  }
 
   m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
 
   m_texture_id = 0;
+  {
+    std::lock_guard event_lock(event_mutex_);
+    event_sink_ = nullptr;
+  }
   event_channel_ = nullptr;
-  m_valid = false;
 }
 
 void VideoPlayer::SetLooping(const bool isLooping) {
@@ -585,17 +600,18 @@ void VideoPlayer::SetVolume(const double volume) {
 }
 
 void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
+  const gint64 pos = position_.load();
   GstEvent* seek_event;
   if (playbackSpeed > 0) {
     seek_event = gst_event_new_seek(
         playbackSpeed, GST_FORMAT_TIME,
         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, position_, GST_SEEK_TYPE_END, 0);
+        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_END, 0);
   } else {
     seek_event = gst_event_new_seek(
         playbackSpeed, GST_FORMAT_TIME,
         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, position_);
+        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
   }
 
   gst_element_send_event(sink_, seek_event);
@@ -615,13 +631,16 @@ void VideoPlayer::Play() {
 
 void VideoPlayer::Pause() {
   GstState state;
-  gst_element_get_state(playbin_, &state, nullptr, GST_CLOCK_TIME_NONE);
+  gst_element_get_state(playbin_, &state, nullptr, GST_SECOND);
   if (state != GST_STATE_NULL) {
     target_state_ = GST_STATE_PAUSED;
     const GstStateChangeReturn ret =
         gst_element_set_state(playbin_, GST_STATE_PAUSED);
     if (ret == GST_STATE_CHANGE_FAILURE) {
-      event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
+      std::lock_guard event_lock(event_mutex_);
+      if (event_sink_) {
+        event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
+      }
       return;
     }
     SPDLOG_DEBUG("[VideoPlayer] Transport Paused.");
@@ -629,13 +648,17 @@ void VideoPlayer::Pause() {
 }
 
 int64_t VideoPlayer::GetPosition() {
-  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_)) {
-    SPDLOG_TRACE("[VideoPlayer] Position: {}", position_);
+  gint64 pos;
+  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
+    position_ = pos;
+    SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
   }
-  return position_ >= 0 ? position_ / AV_TIME_BASE : 0;
+  const gint64 current = position_.load();
+  return current >= 0 ? current / AV_TIME_BASE : 0;
 }
 
-void VideoPlayer::SendBufferingUpdate() const {
+void VideoPlayer::SendBufferingUpdate() {
+  std::lock_guard event_lock(event_mutex_);
   if (!event_sink_) {
     return;
   }
@@ -666,8 +689,10 @@ void VideoPlayer::SeekTo(const int64_t seek) {
           position)) {
     SPDLOG_ERROR("[VideoPlayer] Seek Failed");
   }
-  gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_);
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position_);
+  gint64 pos;
+  gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos);
+  position_ = pos;
+  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
 }
 
 void VideoPlayer::prepare(VideoPlayer* user_data) {
