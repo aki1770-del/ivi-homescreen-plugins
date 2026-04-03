@@ -16,6 +16,7 @@
 
 #include "video_player_plugin.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <filesystem>
@@ -71,12 +72,10 @@ std::optional<FlutterError> VideoPlayerPlugin::Initialize() {
 static bool is_allowed_uri_scheme(const std::string& uri) {
   static constexpr std::array<const char*, 4> kAllowedSchemes = {
       "file://", "http://", "https://", "rtsp://"};
-  for (const auto* scheme : kAllowedSchemes) {
-    if (uri.compare(0, strlen(scheme), scheme) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(kAllowedSchemes.begin(), kAllowedSchemes.end(),
+                     [&uri](const char* scheme) {
+                       return uri.compare(0, strlen(scheme), scheme) == 0;
+                     });
 }
 
 static bool has_header_injection(const std::string& value) {
