@@ -94,7 +94,8 @@ class VideoPlayer {
   GstElement* video_scale_{};
   GstVideoInfo info_{};
   std::atomic<gint64> position_{0};
-  gdouble rate_ = 0.0;
+  gdouble rate_ = 1.0;
+  gdouble pending_rate_ = 1.0;
   GstBus* bus_{};
 
   gulong handoff_handler_id_;
@@ -114,8 +115,10 @@ class VideoPlayer {
   std::mutex event_mutex_;
 
   std::atomic<bool> is_initialized_{false};
+  std::atomic<bool> sent_initialized_{false};
   void SetBuffering(bool buffering);
 
+  void ApplyPlaybackSpeed();
   void OnPlaybackEnded();
   void OnMediaInitialized();
   void OnMediaStateChange(GstState state);

@@ -28,12 +28,15 @@ extern "C" {
 
 #include <backend/backend.h>
 #include <plugins/common/common.h>
-#include <cstdlib>
 #include <utility>
 
 #define GSTREAMER_DEBUG 0
 
 namespace video_player_linux {
+
+// Serialize access to the shared EGL texture context across all players.
+// EGL contexts can only be current on one thread at a time.
+static std::mutex g_texture_context_mutex;
 
 typedef enum {
   GST_PLAY_FLAG_AUDIO = 1 << 0,
@@ -65,9 +68,13 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   /// Setup OpenGL
 
-  m_registrar->texture_registrar()->TextureMakeCurrent();
-  shader_ = std::make_unique<nv12::Shader>(width_, height_);
-  m_texture_id = shader_->textureId;
+  {
+    std::lock_guard ctx_lock(g_texture_context_mutex);
+    m_registrar->texture_registrar()->TextureMakeCurrent();
+    shader_ = std::make_unique<nv12::Shader>(width_, height_);
+    m_texture_id = shader_->textureId;
+    m_registrar->texture_registrar()->TextureClearCurrent();
+  }
 
   /// Setup GL Texture 2D
 
@@ -90,6 +97,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   flutter::TextureVariant texture = *gpu_surface_texture_;
   m_registrar->texture_registrar()->RegisterTexture(&texture);
+  SPDLOG_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
 
   /// Setup GST Pipeline
 
@@ -204,15 +212,18 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   bus_ = gst_element_get_bus(playbin_);
   GSource* bus_source = gst_bus_create_watch(bus_);
+  // GstBus source dispatch calls the callback with (GstBus*, GstMessage*,
+  // gpointer) arguments matching gst_bus_async_signal_func's signature.
+  // Cast through void* to avoid -Wcast-function-type-mismatch.
   g_source_set_callback(
-      bus_source, reinterpret_cast<GSourceFunc>(gst_bus_async_signal_func),
+      bus_source,
+      reinterpret_cast<GSourceFunc>(
+          reinterpret_cast<void*>(gst_bus_async_signal_func)),
       nullptr, nullptr);
   g_source_attach(bus_source, context_);
   g_source_unref(bus_source);
   on_bus_msg_id_ = g_signal_connect(
       bus_, "message", reinterpret_cast<GCallback>(OnBusMessage), this);
-
-  m_registrar->texture_registrar()->TextureClearCurrent();
 }
 
 void VideoPlayer::OnMediaError(GstMessage* msg) {
@@ -458,32 +469,43 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
   std::lock_guard lock(obj->gst_mutex_);
   GstVideoFrame frame;
   if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
-    obj->m_registrar->texture_registrar()->TextureMakeCurrent();
-    glBindVertexArray(obj->shader_->vertex_arr_id_);
+    {
+      std::lock_guard ctx_lock(g_texture_context_mutex);
+      obj->m_registrar->texture_registrar()->TextureMakeCurrent();
+      glBindVertexArray(obj->shader_->vertex_arr_id_);
 
-    if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
-        n_planes == 2) {
-      // Assume NV12
-      obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
-                                GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
-                                GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
-                                GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
-                                GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
-                                GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
-    } else {
-      // Assume RGB
-      obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+      if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
+          n_planes == 2) {
+        // Assume NV12
+        obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
+      } else {
+        // Assume RGB
+        obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+      }
+      gst_video_frame_unmap(&frame);
+
+      // Render NV12->RGBA into the back buffer
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
+      obj->shader_->draw_core();
+
+      // Blit back buffer to the front (Flutter-registered) texture
+      obj->shader_->blit_to_front();
+
+      obj->m_registrar->texture_registrar()->TextureClearCurrent();
     }
-    gst_video_frame_unmap(&frame);
 
-    // Render NV12->RGBA into the back buffer
-    glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
-    obj->shader_->draw_core();
+    // Send initialized event after first frame so the Dart Texture widget
+    // doesn't display stale GL content before real video arrives.
+    if (!obj->sent_initialized_) {
+      obj->sent_initialized_ = true;
+      obj->SendInitialized();
+    }
 
-    // Blit back buffer to the front (Flutter-registered) texture
-    obj->shader_->blit_to_front();
-
-    obj->m_registrar->texture_registrar()->TextureClearCurrent();
     obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(
         obj->m_texture_id);
     SPDLOG_TRACE("[VideoPlayer] frame");
@@ -540,14 +562,18 @@ void VideoPlayer::SendInitialized() {
       {{flutter::EncodableValue("event"),
         flutter::EncodableValue("initialized")},
        {flutter::EncodableValue("duration"),
-        flutter::EncodableValue(static_cast<int64_t>(duration_))}});
+        flutter::EncodableValue(std::in_place_type<int64_t>,
+                                static_cast<int64_t>(duration_))}});
 
   event.insert({flutter::EncodableValue("width"),
-                flutter::EncodableValue(static_cast<int32_t>(width_))});
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(width_))});
   event.insert({flutter::EncodableValue("height"),
-                flutter::EncodableValue(static_cast<int32_t>(height_))});
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(height_))});
 
-  event_sink_->Success(flutter::EncodableValue(event));
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(event)));
 }
 
 void VideoPlayer::OnPlaybackEnded() {
@@ -567,7 +593,8 @@ void VideoPlayer::OnPlaybackEnded() {
     SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
     auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
                                        flutter::EncodableValue("completed")}});
-    event_sink_->Success(flutter::EncodableValue(res));
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
   }
 }
 
@@ -578,7 +605,6 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
   } else {
     if (!is_initialized_) {
       is_initialized_ = true;
-      SendInitialized();
     }
     SetBuffering(false);
 
@@ -586,6 +612,7 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
                    m_texture_id);
       prepare(this);
+      ApplyPlaybackSpeed();
     } else if (state == GST_STATE_READY) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
                    m_texture_id);
@@ -601,7 +628,8 @@ void VideoPlayer::SetBuffering(const bool buffering) {
         {{flutter::EncodableValue("event"),
           flutter::EncodableValue(buffering ? "bufferingStart"
                                             : "bufferingEnd")}});
-    event_sink_->Success(flutter::EncodableValue(res));
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
   }
 }
 
@@ -620,11 +648,13 @@ void VideoPlayer::Dispose() {
   {
     // Ensure no in-flight handoff callback is using the shader
     std::lock_guard gst_lock(gst_mutex_);
+    std::lock_guard ctx_lock(g_texture_context_mutex);
     m_registrar->texture_registrar()->TextureMakeCurrent();
     shader_.reset();
     m_registrar->texture_registrar()->TextureClearCurrent();
   }
 
+  SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
   m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
 
   m_texture_id = 0;
@@ -636,7 +666,7 @@ void VideoPlayer::Dispose() {
 }
 
 void VideoPlayer::SetLooping(const bool isLooping) {
-  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_);
+  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
   is_looping_ = isLooping;
 }
 
@@ -647,6 +677,28 @@ void VideoPlayer::SetVolume(const double volume) {
 }
 
 void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
+  // Store the desired rate so it can be applied when the pipeline is ready
+  pending_rate_ = playbackSpeed;
+
+  // Seek events require the pipeline to be in PAUSED or PLAYING state
+  GstState state;
+  gst_element_get_state(playbin_, &state, nullptr, 0);
+  if (state < GST_STATE_PAUSED) {
+    SPDLOG_DEBUG(
+        "[VideoPlayer] Deferring playback speed {} until pipeline is ready",
+        playbackSpeed);
+    return;
+  }
+
+  ApplyPlaybackSpeed();
+}
+
+void VideoPlayer::ApplyPlaybackSpeed() {
+  if (pending_rate_ == rate_) {
+    return;
+  }
+
+  const auto playbackSpeed = pending_rate_;
   const gint64 pos = position_.load();
   GstEvent* seek_event;
   if (playbackSpeed > 0) {
@@ -663,7 +715,10 @@ void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
         GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
   }
 
-  if (!gst_element_send_event(sink_, seek_event)) {
+  // Send seek to playbin_ so the segment event propagates to all elements
+  // (including audio). Sending to sink_ alone causes "data flow before segment
+  // event" warnings on the audio path.
+  if (!gst_element_send_event(playbin_, seek_event)) {
     SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
                  playbackSpeed);
     return;
@@ -726,11 +781,13 @@ void VideoPlayer::SendBufferingUpdate() {
     for (guint i = 0; i < n_ranges; i++) {
       gint64 start, stop;
       if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
-        values.emplace_back(flutter::EncodableList(
-            {flutter::EncodableValue(
-                 static_cast<int64_t>(start / AV_TIME_BASE)),
-             flutter::EncodableValue(
-                 static_cast<int64_t>(stop / AV_TIME_BASE))}));
+        values.emplace_back(
+            std::in_place_type<flutter::EncodableList>,
+            flutter::EncodableList{
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        start / AV_TIME_BASE),
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        stop / AV_TIME_BASE)});
       }
     }
   }
@@ -739,8 +796,11 @@ void VideoPlayer::SendBufferingUpdate() {
   auto res = flutter::EncodableMap(
       {{flutter::EncodableValue("event"),
         flutter::EncodableValue("bufferingUpdate")},
-       {flutter::EncodableValue("values"), flutter::EncodableValue(values)}});
-  event_sink_->Success(flutter::EncodableValue(res));
+       {flutter::EncodableValue("values"),
+        flutter::EncodableValue(std::in_place_type<flutter::EncodableList>,
+                                std::move(values))}});
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(res)));
 }
 
 void VideoPlayer::SeekTo(const int64_t seek) {

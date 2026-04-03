@@ -336,7 +336,7 @@ GstElementFactory* VideoPlayerPlugin::find_decoder_factory(
 
   // clang-format off
   static const std::map<AVCodecID, std::vector<HwDecoder>> kHwDecoders = {
-      {AV_CODEC_ID_H264,  {{"vaapidecodebin"}, {"v4l2h264dec"},  {"nvh264dec"}}},
+      {AV_CODEC_ID_H264,  {{"vaapidecodebin"}, {"v4l2h264dec"},  {"nvh264dec"}, {"openh264dec"}}},
       {AV_CODEC_ID_H265,  {{"vaapidecodebin"}, {"v4l2h265dec"},  {"nvh265dec"}}},
       {AV_CODEC_ID_VP8,   {{"vaapidecodebin"}, {"v4l2vp8dec"},   {"nvvp8dec"}}},
       {AV_CODEC_ID_VP9,   {{"vaapidecodebin"}, {"v4l2vp9dec"},   {"nvvp9dec"}}},
