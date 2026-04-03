@@ -98,11 +98,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_object_set(playbin_, "uri", uri_.c_str(), nullptr);
 
   if (!http_headers_.empty()) {
-    GstStructure* extraHeaders =
-        gst_structure_new_empty("extra-headers");
+    GstStructure* extraHeaders = gst_structure_new_empty("extra-headers");
     for (const auto& [key, value] : http_headers_) {
-      gst_structure_set(extraHeaders, key.c_str(), G_TYPE_STRING,
-                        value.c_str(), nullptr);
+      gst_structure_set(extraHeaders, key.c_str(), G_TYPE_STRING, value.c_str(),
+                        nullptr);
       SPDLOG_DEBUG("extra-header: {}:{}", key, value);
     }
     g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
@@ -697,7 +696,8 @@ void VideoPlayer::SendBufferingUpdate() {
       gint64 start, stop;
       if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
         values.emplace_back(flutter::EncodableList(
-            {flutter::EncodableValue(static_cast<int64_t>(start / AV_TIME_BASE)),
+            {flutter::EncodableValue(
+                 static_cast<int64_t>(start / AV_TIME_BASE)),
              flutter::EncodableValue(
                  static_cast<int64_t>(stop / AV_TIME_BASE))}));
       }

@@ -186,7 +186,7 @@ class Shader {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
 
-  void blit_to_front() {
+  void blit_to_front() const {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, backFramebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
     glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,

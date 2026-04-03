@@ -290,7 +290,8 @@ bool VideoPlayerPlugin::get_video_info(const char* url,
   AVFormatContext* fmt_ctx = avformat_alloc_context();
 
   AVDictionary* opts = nullptr;
-  av_dict_set(&opts, "protocol_whitelist", "file,http,https,tcp,tls,rtsp,rtp,udp", 0);
+  av_dict_set(&opts, "protocol_whitelist",
+              "file,http,https,tcp,tls,rtsp,rtp,udp", 0);
   av_dict_set(&opts, "timeout", "10000000", 0);  // 10 seconds in microseconds
 
   if (avformat_open_input(&fmt_ctx, url, nullptr, &opts) < 0) {
