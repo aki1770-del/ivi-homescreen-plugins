@@ -21,14 +21,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
 
 #include <flutter/event_channel.h>
-#include <flutter/event_stream_handler.h>
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/plugin_registrar_homescreen.h>
-#include <flutter/standard_method_codec.h>
 
 #include "nv12.h"
 
@@ -50,8 +47,7 @@ class VideoPlayer {
               std::map<std::string, std::string> http_headers,
               GLsizei width,
               GLsizei height,
-              gint64 duration,
-              GstElementFactory* decoder_factory);
+              gint64 duration);
   ~VideoPlayer();
 
   void Dispose();
@@ -76,20 +72,17 @@ class VideoPlayer {
   GLsizei width_{};
   GLsizei height_{};
   gint64 duration_{};
-  GstElementFactory* decoder_factory_;
 
   GLuint m_texture_id{};
   std::atomic<bool> m_valid = true;
   std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture_;
 
   GMainContext* context_;
-  GstState media_state_;
 
   // Gst members
   GstElement* playbin_{};
   GstElement* pipeline_{};
   GstElement* sink_{};
-  GstElement* decoder_{};
   GstElement* video_convert_{};
   GstElement* video_scale_{};
   GstVideoInfo info_{};
@@ -120,7 +113,7 @@ class VideoPlayer {
 
   void ApplyPlaybackSpeed();
   void OnPlaybackEnded();
-  void OnMediaInitialized();
+  static void OnMediaInitialized();
   void OnMediaStateChange(GstState state);
   void OnMediaError(GstMessage* msg);
   void OnMediaDurationChange();
@@ -149,7 +142,7 @@ class VideoPlayer {
    * @param[in] fakesink No use
    * @param[in] buffer Pointer to New frame data
    * @param[in] pad No use
-   * @param[in,out] _data Pointer to User data
+   * @param[in,out] user_data Pointer to User data
    * @return void
    * @relation
    * flutter
@@ -163,7 +156,7 @@ class VideoPlayer {
 
   /**
    * @brief Prepare
-   * @param[in,out] data Pointer to User data
+   * @param[in,out] user_data Pointer to User data
    * @return void
    * @relation
    * flutter
