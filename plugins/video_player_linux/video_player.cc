@@ -114,6 +114,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
   g_object_set(playbin_, "connection-speed", 56, nullptr);
+  g_object_set(playbin_, "volume", volume_, nullptr);
 
   sink_ = gst_element_factory_make("fakesink", nullptr);
   assert(sink_);
@@ -606,8 +607,9 @@ void VideoPlayer::SetLooping(const bool isLooping) {
 }
 
 void VideoPlayer::SetVolume(const double volume) {
-  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume_);
+  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume);
   volume_ = volume;
+  g_object_set(playbin_, "volume", volume, nullptr);
 }
 
 void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
