@@ -215,11 +215,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   // GstBus source dispatch calls the callback with (GstBus*, GstMessage*,
   // gpointer) arguments matching gst_bus_async_signal_func's signature.
   // Cast through void* to avoid -Wcast-function-type-mismatch.
-  g_source_set_callback(
-      bus_source,
-      reinterpret_cast<GSourceFunc>(
-          reinterpret_cast<void*>(gst_bus_async_signal_func)),
-      nullptr, nullptr);
+  g_source_set_callback(bus_source,
+                        reinterpret_cast<GSourceFunc>(
+                            reinterpret_cast<void*>(gst_bus_async_signal_func)),
+                        nullptr, nullptr);
   g_source_attach(bus_source, context_);
   g_source_unref(bus_source);
   on_bus_msg_id_ = g_signal_connect(

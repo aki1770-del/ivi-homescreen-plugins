@@ -84,7 +84,8 @@ class Shader {
     glGenTextures(1, &textureId);
 
     // Initialize front texture with black pixels to prevent stale content
-    auto front_size = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    auto front_size =
+        static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
     auto* black_pixels = new unsigned char[front_size]();
     glBindTexture(GL_TEXTURE_2D, textureId);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -114,7 +115,8 @@ class Shader {
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    auto back_size = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    auto back_size =
+        static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
     auto* back_black = new unsigned char[back_size]();
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
                  GL_UNSIGNED_BYTE, back_black);
