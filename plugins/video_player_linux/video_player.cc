@@ -22,6 +22,10 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
 
+extern "C" {
+#include <libavutil/avutil.h>
+}
+
 #include <backend/backend.h>
 #include <plugins/common/common.h>
 #include <utility>
@@ -29,6 +33,10 @@
 #define GSTREAMER_DEBUG 0
 
 namespace video_player_linux {
+
+// Serialize access to the shared EGL texture context across all players.
+// EGL contexts can only be current on one thread at a time.
+static std::mutex g_texture_context_mutex;
 
 typedef enum {
   GST_PLAY_FLAG_AUDIO = 1 << 0,
@@ -60,9 +68,13 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   /// Setup OpenGL
 
-  m_registrar->texture_registrar()->TextureMakeCurrent();
-  shader_ = std::make_unique<nv12::Shader>(width_, height_);
-  m_texture_id = shader_->textureId;
+  {
+    std::lock_guard ctx_lock(g_texture_context_mutex);
+    m_registrar->texture_registrar()->TextureMakeCurrent();
+    shader_ = std::make_unique<nv12::Shader>(width_, height_);
+    m_texture_id = shader_->textureId;
+    m_registrar->texture_registrar()->TextureClearCurrent();
+  }
 
   /// Setup GL Texture 2D
 
@@ -85,27 +97,28 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   flutter::TextureVariant texture = *gpu_surface_texture_;
   m_registrar->texture_registrar()->RegisterTexture(&texture);
+  SPDLOG_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
 
   /// Setup GST Pipeline
 
   context_ = g_main_context_get_thread_default();
 
   playbin_ = gst_element_factory_make("playbin", nullptr);
-  assert(playbin_);
+  if (!playbin_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create playbin element");
+    return;
+  }
   g_object_set(playbin_, "uri", uri_.c_str(), nullptr);
 
   if (!http_headers_.empty()) {
-    std::stringstream ss;
-    for (auto& [key, value] : http_headers_) {
-      ss << key << ":" << value << " ";
+    GstStructure* extraHeaders = gst_structure_new_empty("extra-headers");
+    for (const auto& [key, value] : http_headers_) {
+      gst_structure_set(extraHeaders, key.c_str(), G_TYPE_STRING, value.c_str(),
+                        nullptr);
+      SPDLOG_DEBUG("extra-header: {}:{}", key, value);
     }
-    SPDLOG_DEBUG("extra-headers: {}", ss.str().c_str());
-    GstStructure* extraHeaders =
-        gst_structure_from_string(ss.str().c_str(), nullptr);
-    if (extraHeaders != nullptr) {
-      g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
-      gst_structure_free(extraHeaders);
-    }
+    g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
+    gst_structure_free(extraHeaders);
   }
 
   gint flags = 0;
@@ -113,10 +126,22 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
-  g_object_set(playbin_, "connection-speed", 56, nullptr);
+  int connection_speed = 10000;
+  if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
+    char* end = nullptr;
+    const long val = std::strtol(env, &end, 10);
+    if (end != env && val > 0) {
+      connection_speed = static_cast<int>(val);
+    }
+  }
+  g_object_set(playbin_, "connection-speed", connection_speed, nullptr);
+  g_object_set(playbin_, "volume", volume_, nullptr);
 
   sink_ = gst_element_factory_make("fakesink", nullptr);
-  assert(sink_);
+  if (!sink_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
+    return;
+  }
   g_object_set(sink_, "sync", TRUE, nullptr);
   g_object_set(sink_, "signal-handoffs", TRUE, nullptr);
   g_object_set(sink_, "can-activate-pull", TRUE, nullptr);
@@ -124,16 +149,25 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
       sink_, "handoff", reinterpret_cast<GCallback>(handoff_handler), this);
 
   decoder_ = gst_element_factory_create(decoder_factory, "decoder");
-  assert(decoder_);
+  if (!decoder_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create decoder element");
+    return;
+  }
 
   video_convert_ = gst_element_factory_make("videoconvert", nullptr);
-  assert(video_convert_);
+  if (!video_convert_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
+    return;
+  }
 
   GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
                                       "NV12", nullptr);
 
   video_scale_ = gst_element_factory_make("videoscale", nullptr);
-  assert(video_scale_);
+  if (!video_scale_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
+    return;
+  }
 
   GstCaps* scale =
       gst_caps_new_simple("video/x-raw", "width", G_TYPE_INT, width_, "height",
@@ -158,6 +192,9 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   GstPad* pad = gst_element_get_static_pad(decoder_, "sink");
   if (gst_pad_is_linked(pad)) {
     SPDLOG_ERROR("[VideoPlayer] already linked, ignore");
+    gst_object_unref(pad);
+    gst_caps_unref(scale);
+    m_valid = false;
     return;
   }
   GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
@@ -175,28 +212,36 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   bus_ = gst_element_get_bus(playbin_);
   GSource* bus_source = gst_bus_create_watch(bus_);
-  g_source_set_callback(
-      bus_source, reinterpret_cast<GSourceFunc>(gst_bus_async_signal_func),
-      nullptr, nullptr);
+  // GstBus source dispatch calls the callback with (GstBus*, GstMessage*,
+  // gpointer) arguments matching gst_bus_async_signal_func's signature.
+  // Cast through void* to avoid -Wcast-function-type-mismatch.
+  g_source_set_callback(bus_source,
+                        reinterpret_cast<GSourceFunc>(
+                            reinterpret_cast<void*>(gst_bus_async_signal_func)),
+                        nullptr, nullptr);
   g_source_attach(bus_source, context_);
   g_source_unref(bus_source);
   on_bus_msg_id_ = g_signal_connect(
       bus_, "message", reinterpret_cast<GCallback>(OnBusMessage), this);
-
-  m_registrar->texture_registrar()->TextureClearCurrent();
 }
 
 void VideoPlayer::OnMediaError(GstMessage* msg) {
   GError* err;
   gchar* debug_info;
   gst_message_parse_error(msg, &err, &debug_info);
+  const std::string error_msg = err->message ? err->message : "Unknown error";
   spdlog::error("[VideoPlayer] Error: {}:{}", GST_OBJECT_NAME(msg->src),
-                err->message);
+                error_msg);
   if (debug_info) {
     spdlog::error("[VideoPlayer] {}", debug_info);
     g_free(debug_info);
   }
   g_clear_error(&err);
+
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
+    event_sink_->Error("VideoPlayerError", error_msg);
+  }
 }
 
 void VideoPlayer::OnMediaDurationChange() {
@@ -213,7 +258,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
-      OnMediaError(msg);
+      obj->OnMediaError(msg);
       gst_object_unref(bus);
       return FALSE;
     case GST_MESSAGE_EOS: {
@@ -278,28 +323,28 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
       gst_message_parse_buffering(msg, &percent);
       // SPDLOG_DEBUG("Buffering: {}%", percent);
 
-      // TODO - bufferingUpdate
+      obj->SendBufferingUpdate();
 
       if (percent == 100) {
         // a 100% message means buffering is done
         if (obj->is_buffering_) {
           obj->is_buffering_ = false;
-          obj->SetBuffering(obj->is_buffering_);
+          obj->SetBuffering(false);
         }
-        // if the desired state is playing, go back
-        //        if (obj->target_state_ == GST_STATE_PLAYING) {
-        //          gst_element_set_state(obj->playbin_, GST_STATE_PLAYING);
-        //        }
+        // if the desired state is playing, resume
+        if (obj->target_state_ == GST_STATE_PLAYING) {
+          gst_element_set_state(obj->playbin_, GST_STATE_PLAYING);
+        }
       } else {
         // buffering busy
         if (!obj->is_buffering_ && obj->target_state_ == GST_STATE_PLAYING) {
-          // we were not buffering but PLAYING, PAUSE the pipeline
-          //          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
+          // pause the pipeline while buffering
+          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
         }
-        // if (!obj->is_buffering_) {
-        obj->is_buffering_ = true;
-        obj->SetBuffering(obj->is_buffering_);
-        //}
+        if (!obj->is_buffering_) {
+          obj->is_buffering_ = true;
+          obj->SetBuffering(true);
+        }
       }
       break;
     }
@@ -416,36 +461,50 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
                                   GstPad* /* pad */,
                                   void* user_data) {
   const auto obj = static_cast<VideoPlayer*>(user_data);
-  if (!obj->is_initialized_ || obj->info_.finfo == nullptr) {
+  if (!obj->m_valid || !obj->is_initialized_ || obj->info_.finfo == nullptr) {
     return;
   }
 
   std::lock_guard lock(obj->gst_mutex_);
   GstVideoFrame frame;
   if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
-    obj->m_registrar->texture_registrar()->TextureMakeCurrent();
-    glBindVertexArray(obj->shader_->vertex_arr_id_);
-    glClear(GL_COLOR_BUFFER_BIT);
+    {
+      std::lock_guard ctx_lock(g_texture_context_mutex);
+      obj->m_registrar->texture_registrar()->TextureMakeCurrent();
+      glBindVertexArray(obj->shader_->vertex_arr_id_);
 
-    if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
-        n_planes == 2) {
-      // Assume NV12
-      obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
-                                GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
-                                GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
-                                GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
-                                GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
-                                GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
-    } else {
-      // Assume RGB
-      obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+      if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
+          n_planes == 2) {
+        // Assume NV12
+        obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
+      } else {
+        // Assume RGB
+        obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+      }
+      gst_video_frame_unmap(&frame);
+
+      // Render NV12->RGBA into the back buffer
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
+      obj->shader_->draw_core();
+
+      // Blit back buffer to the front (Flutter-registered) texture
+      obj->shader_->blit_to_front();
+
+      obj->m_registrar->texture_registrar()->TextureClearCurrent();
     }
-    gst_video_frame_unmap(&frame);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->framebuffer);
-    obj->shader_->draw_core();
+    // Send initialized event after first frame so the Dart Texture widget
+    // doesn't display stale GL content before real video arrives.
+    if (!obj->sent_initialized_) {
+      obj->sent_initialized_ = true;
+      obj->SendInitialized();
+    }
 
-    obj->m_registrar->texture_registrar()->TextureClearCurrent();
     obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(
         obj->m_texture_id);
     SPDLOG_TRACE("[VideoPlayer] frame");
@@ -471,25 +530,30 @@ void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
           [this](const flutter::EncodableValue* /* arguments */,
                  std::unique_ptr<flutter::EventSink<>>&& events)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
             event_sink_ = std::move(events);
             return nullptr;
           },
           [this](const flutter::EncodableValue* /* arguments */)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
             event_sink_ = nullptr;
             return nullptr;
           }));
 }
 
 VideoPlayer::~VideoPlayer() {
-  m_valid = false;
+  if (m_valid) {
+    Dispose();
+  }
 }
 
 bool VideoPlayer::IsValid() {
   return m_valid;
 }
 
-void VideoPlayer::SendInitialized() const {
+void VideoPlayer::SendInitialized() {
+  std::lock_guard event_lock(event_mutex_);
   if (!event_sink_) {
     return;
   }
@@ -497,22 +561,39 @@ void VideoPlayer::SendInitialized() const {
       {{flutter::EncodableValue("event"),
         flutter::EncodableValue("initialized")},
        {flutter::EncodableValue("duration"),
-        flutter::EncodableValue(static_cast<int64_t>(duration_))}});
+        flutter::EncodableValue(std::in_place_type<int64_t>,
+                                static_cast<int64_t>(duration_))}});
 
   event.insert({flutter::EncodableValue("width"),
-                flutter::EncodableValue(static_cast<int32_t>(width_))});
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(width_))});
   event.insert({flutter::EncodableValue("height"),
-                flutter::EncodableValue(static_cast<int32_t>(height_))});
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(height_))});
 
-  event_sink_->Success(flutter::EncodableValue(event));
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(event)));
 }
 
-void VideoPlayer::OnPlaybackEnded() const {
-  if (this->event_sink_) {
+void VideoPlayer::OnPlaybackEnded() {
+  if (is_looping_) {
+    SPDLOG_DEBUG("[VideoPlayer] Looping: seeking to start");
+    if (!gst_element_seek_simple(
+            playbin_, GST_FORMAT_TIME,
+            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
+                                      GST_SEEK_FLAG_SEGMENT),
+            0)) {
+      SPDLOG_ERROR("[VideoPlayer] Loop seek failed");
+    }
+    return;
+  }
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
     SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
     auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
                                        flutter::EncodableValue("completed")}});
-    this->event_sink_->Success(flutter::EncodableValue(res));
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
   }
 }
 
@@ -523,7 +604,6 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
   } else {
     if (!is_initialized_) {
       is_initialized_ = true;
-      SendInitialized();
     }
     SetBuffering(false);
 
@@ -531,6 +611,7 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
                    m_texture_id);
       prepare(this);
+      ApplyPlaybackSpeed();
     } else if (state == GST_STATE_READY) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
                    m_texture_id);
@@ -538,64 +619,109 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
   }
 }
 
-void VideoPlayer::SetBuffering(const bool buffering) const {
-  if (this->event_sink_) {
+void VideoPlayer::SetBuffering(const bool buffering) {
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
     SPDLOG_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
     auto res = flutter::EncodableMap(
         {{flutter::EncodableValue("event"),
           flutter::EncodableValue(buffering ? "bufferingStart"
                                             : "bufferingEnd")}});
-    event_sink_->Success(flutter::EncodableValue(res));
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
   }
 }
 
 void VideoPlayer::Dispose() {
   SPDLOG_DEBUG("[VideoPlayer] Dispose");
-  std::lock_guard buffer_lock(buffer_mutex_);
+  m_valid = false;
+  is_initialized_ = false;
 
-  if (is_initialized_) {
-    Pause();
-  }
+  std::lock_guard buffer_lock(buffer_mutex_);
 
   g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
   g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
 
-  m_registrar->texture_registrar()->TextureMakeCurrent();
-  shader_.reset();
-  m_registrar->texture_registrar()->TextureClearCurrent();
+  gst_element_set_state(playbin_, GST_STATE_NULL);
 
+  {
+    // Ensure no in-flight handoff callback is using the shader
+    std::lock_guard gst_lock(gst_mutex_);
+    std::lock_guard ctx_lock(g_texture_context_mutex);
+    m_registrar->texture_registrar()->TextureMakeCurrent();
+    shader_.reset();
+    m_registrar->texture_registrar()->TextureClearCurrent();
+  }
+
+  SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
   m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
 
   m_texture_id = 0;
+  {
+    std::lock_guard event_lock(event_mutex_);
+    event_sink_ = nullptr;
+  }
   event_channel_ = nullptr;
-  m_valid = false;
 }
 
 void VideoPlayer::SetLooping(const bool isLooping) {
-  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_);
+  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
   is_looping_ = isLooping;
 }
 
 void VideoPlayer::SetVolume(const double volume) {
-  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume_);
+  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume);
   volume_ = volume;
+  g_object_set(playbin_, "volume", volume, nullptr);
 }
 
 void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
-  GstEvent* seek_event;
-  if (playbackSpeed > 0) {
-    seek_event = gst_event_new_seek(
-        playbackSpeed, GST_FORMAT_TIME,
-        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, position_, GST_SEEK_TYPE_END, 0);
-  } else {
-    seek_event = gst_event_new_seek(
-        playbackSpeed, GST_FORMAT_TIME,
-        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, position_);
+  // Store the desired rate so it can be applied when the pipeline is ready
+  pending_rate_ = playbackSpeed;
+
+  // Seek events require the pipeline to be in PAUSED or PLAYING state
+  GstState state;
+  gst_element_get_state(playbin_, &state, nullptr, 0);
+  if (state < GST_STATE_PAUSED) {
+    SPDLOG_DEBUG(
+        "[VideoPlayer] Deferring playback speed {} until pipeline is ready",
+        playbackSpeed);
+    return;
   }
 
-  gst_element_send_event(sink_, seek_event);
+  ApplyPlaybackSpeed();
+}
+
+void VideoPlayer::ApplyPlaybackSpeed() {
+  if (pending_rate_ == rate_) {
+    return;
+  }
+
+  const auto playbackSpeed = pending_rate_;
+  const gint64 pos = position_.load();
+  GstEvent* seek_event;
+  if (playbackSpeed > 0) {
+    // Forward playback: from current position to end
+    seek_event = gst_event_new_seek(
+        playbackSpeed, GST_FORMAT_TIME,
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_END, 0);
+  } else {
+    // Reverse playback: from beginning to current position
+    seek_event = gst_event_new_seek(
+        playbackSpeed, GST_FORMAT_TIME,
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
+  }
+
+  // Send seek to playbin_ so the segment event propagates to all elements
+  // (including audio). Sending to sink_ alone causes "data flow before segment
+  // event" warnings on the audio path.
+  if (!gst_element_send_event(playbin_, seek_event)) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
+                 playbackSpeed);
+    return;
+  }
   rate_ = playbackSpeed;
 
   SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
@@ -607,18 +733,24 @@ void VideoPlayer::Play() {
       gst_element_set_state(playbin_, GST_STATE_PLAYING);
   if (ret == GST_STATE_CHANGE_FAILURE) {
     spdlog::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
+  } else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
+    is_live_ = TRUE;
+    SPDLOG_DEBUG("[VideoPlayer] Pipeline is live");
   }
 }
 
 void VideoPlayer::Pause() {
   GstState state;
-  gst_element_get_state(playbin_, &state, nullptr, GST_CLOCK_TIME_NONE);
+  gst_element_get_state(playbin_, &state, nullptr, GST_SECOND);
   if (state != GST_STATE_NULL) {
     target_state_ = GST_STATE_PAUSED;
     const GstStateChangeReturn ret =
         gst_element_set_state(playbin_, GST_STATE_PAUSED);
     if (ret == GST_STATE_CHANGE_FAILURE) {
-      event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
+      std::lock_guard event_lock(event_mutex_);
+      if (event_sink_) {
+        event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
+      }
       return;
     }
     SPDLOG_DEBUG("[VideoPlayer] Transport Paused.");
@@ -626,30 +758,48 @@ void VideoPlayer::Pause() {
 }
 
 int64_t VideoPlayer::GetPosition() {
-  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_)) {
-    SPDLOG_TRACE("[VideoPlayer] Position: {}", position_);
+  gint64 pos;
+  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
+    position_ = pos;
+    SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
   }
-  return position_ >= 0 ? position_ / AV_TIME_BASE : 0;
+  const gint64 current = position_.load();
+  return current >= 0 ? current / AV_TIME_BASE : 0;
 }
 
-void VideoPlayer::SendBufferingUpdate() const {
+void VideoPlayer::SendBufferingUpdate() {
+  std::lock_guard event_lock(event_mutex_);
   if (!event_sink_) {
     return;
   }
   auto values = flutter::EncodableList();
-  // TODO ranges = player GetBufferedRanges();
-  const std::vector<std::tuple<uint64_t, uint64_t>> ranges;
-  for (auto& it : ranges) {
-    values.emplace_back(flutter::EncodableList(
-        {flutter::EncodableValue(static_cast<int64_t>(std::get<0>(it))),
-         flutter::EncodableValue(static_cast<int64_t>(std::get<1>(it)))}));
+
+  GstQuery* query = gst_query_new_buffering(GST_FORMAT_TIME);
+  if (gst_element_query(playbin_, query)) {
+    const guint n_ranges = gst_query_get_n_buffering_ranges(query);
+    for (guint i = 0; i < n_ranges; i++) {
+      gint64 start, stop;
+      if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
+        values.emplace_back(
+            std::in_place_type<flutter::EncodableList>,
+            flutter::EncodableList{
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        start / AV_TIME_BASE),
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        stop / AV_TIME_BASE)});
+      }
+    }
   }
+  gst_query_unref(query);
 
   auto res = flutter::EncodableMap(
       {{flutter::EncodableValue("event"),
         flutter::EncodableValue("bufferingUpdate")},
-       {flutter::EncodableValue("values"), flutter::EncodableValue(values)}});
-  event_sink_->Success(flutter::EncodableValue(res));
+       {flutter::EncodableValue("values"),
+        flutter::EncodableValue(std::in_place_type<flutter::EncodableList>,
+                                std::move(values))}});
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(res)));
 }
 
 void VideoPlayer::SeekTo(const int64_t seek) {
@@ -663,8 +813,10 @@ void VideoPlayer::SeekTo(const int64_t seek) {
           position)) {
     SPDLOG_ERROR("[VideoPlayer] Seek Failed");
   }
-  gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_);
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position_);
+  gint64 pos;
+  gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos);
+  position_ = pos;
+  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
 }
 
 void VideoPlayer::prepare(VideoPlayer* user_data) {
@@ -683,7 +835,11 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
     return;
   }
   const GstCaps* caps = gst_pad_get_current_caps(pad);
-  assert(caps);
+  if (!caps) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to get caps from video pad");
+    gst_object_unref(pad);
+    return;
+  }
   std::lock_guard lock(user_data->gst_mutex_);
   if (!gst_video_info_from_caps(&user_data->info_, caps)) {
     SPDLOG_ERROR("[VideoPlayer] Fail to get video info from the cap");

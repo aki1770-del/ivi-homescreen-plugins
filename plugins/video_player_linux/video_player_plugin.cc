@@ -16,13 +16,18 @@
 
 #include "video_player_plugin.h"
 
+#include <algorithm>
+#include <array>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavutil/avutil.h>
+#include <libavutil/dict.h>
 }
 
 #include "messages.g.h"
@@ -63,6 +68,21 @@ std::optional<FlutterError> VideoPlayerPlugin::Initialize() {
   return std::nullopt;
 }
 
+static bool is_allowed_uri_scheme(const std::string& uri) {
+  static constexpr std::array<const char*, 4> kAllowedSchemes = {
+      "file://", "http://", "https://", "rtsp://"};
+  return std::any_of(kAllowedSchemes.begin(), kAllowedSchemes.end(),
+                     [&uri](const char* scheme) {
+                       return uri.compare(0, strlen(scheme), scheme) == 0;
+                     });
+}
+
+static bool has_header_injection(const std::string& value) {
+  return value.find('\r') != std::string::npos ||
+         value.find('\n') != std::string::npos ||
+         value.find('\0') != std::string::npos;
+}
+
 ErrorOr<int64_t> VideoPlayerPlugin::Create(
     const std::string* asset,
     const std::string* uri,
@@ -88,13 +108,26 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     }
     asset_to_load += path.c_str();
   } else if (uri && !uri->empty()) {
+    if (!is_allowed_uri_scheme(*uri)) {
+      spdlog::error("[VideoPlayer] Unsupported URI scheme: {}", *uri);
+      return FlutterError("uri_load_failed",
+                          "URI scheme not allowed. "
+                          "Supported: file, http, https, rtsp");
+    }
     asset_to_load = *uri;
 
     for (const auto& [key, value] : http_headers) {
       if (std::holds_alternative<std::string>(key) &&
           std::holds_alternative<std::string>(value)) {
-        http_headers_[std::get<std::string>(key)] =
-            std::get<std::string>(value);
+        const auto& k = std::get<std::string>(key);
+        const auto& v = std::get<std::string>(value);
+        if (has_header_injection(k) || has_header_injection(v)) {
+          spdlog::error(
+              "[VideoPlayer] Rejected HTTP header with control characters");
+          return FlutterError("invalid_headers",
+                              "HTTP header contains invalid characters");
+        }
+        http_headers_[k] = v;
       }
     }
   } else {
@@ -113,16 +146,10 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
       spdlog::error("Failed to get video info");
     }
 
-    const auto gst_codec = map_ffmpeg_plugin(codec_id);
-    if (!gst_codec[0]) {
-      spdlog::critical("[VideoPlayer] Failed to find codec: {}", gst_codec);
-    }
-    const auto decoder_factory = gst_element_factory_find(gst_codec);
+    const auto decoder_factory = find_decoder_factory(codec_id);
     if (decoder_factory == nullptr) {
-      spdlog::error(
-          "[VideoPlayer] Failed to find decoder: {}.  May be a missing "
-          "runtime package",
-          gst_codec);
+      return FlutterError("codec_load_failed",
+                          "No suitable decoder found for this codec");
     }
 
     player = std::make_unique<VideoPlayer>(registrar_, asset_to_load.c_str(),
@@ -255,11 +282,18 @@ bool VideoPlayerPlugin::get_video_info(const char* url,
                                        AVCodecID& codec_id) {
   AVFormatContext* fmt_ctx = avformat_alloc_context();
 
-  if (avformat_open_input(&fmt_ctx, url, nullptr, nullptr) < 0) {
+  AVDictionary* opts = nullptr;
+  av_dict_set(&opts, "protocol_whitelist",
+              "file,http,https,tcp,tls,rtsp,rtp,udp", 0);
+  av_dict_set(&opts, "timeout", "10000000", 0);  // 10 seconds in microseconds
+
+  if (avformat_open_input(&fmt_ctx, url, nullptr, &opts) < 0) {
     spdlog::error("[VideoPlayer] Unable to open: {}", url);
+    av_dict_free(&opts);
     avformat_free_context(fmt_ctx);
     return false;
   }
+  av_dict_free(&opts);
 
   if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
     spdlog::error("[VideoPlayer] Cannot find stream information: {}", url);
@@ -289,6 +323,54 @@ bool VideoPlayerPlugin::get_video_info(const char* url,
 
   avformat_free_context(fmt_ctx);
   return true;
+}
+
+GstElementFactory* VideoPlayerPlugin::find_decoder_factory(
+    const AVCodecID codec_id) {
+  // Hardware decoder candidates per codec, tried in priority order.
+  // vaapidecodebin works across Intel/AMD, v4l2 for embedded SoCs, nv for
+  // NVIDIA.
+  struct HwDecoder {
+    const char* name;
+  };
+
+  // clang-format off
+  static const std::map<AVCodecID, std::vector<HwDecoder>> kHwDecoders = {
+      {AV_CODEC_ID_H264,  {{"vaapidecodebin"}, {"v4l2h264dec"},  {"nvh264dec"}, {"openh264dec"}}},
+      {AV_CODEC_ID_H265,  {{"vaapidecodebin"}, {"v4l2h265dec"},  {"nvh265dec"}}},
+      {AV_CODEC_ID_VP8,   {{"vaapidecodebin"}, {"v4l2vp8dec"},   {"nvvp8dec"}}},
+      {AV_CODEC_ID_VP9,   {{"vaapidecodebin"}, {"v4l2vp9dec"},   {"nvvp9dec"}}},
+      {AV_CODEC_ID_MPEG2VIDEO, {{"vaapidecodebin"}, {"v4l2mpeg2dec"}}},
+      {AV_CODEC_ID_MPEG4, {{"vaapidecodebin"}, {"v4l2mpeg4dec"}}},
+  };
+  // clang-format on
+
+  // Try hardware decoders first
+  if (const auto it = kHwDecoders.find(codec_id); it != kHwDecoders.end()) {
+    for (const auto& [name] : it->second) {
+      GstElementFactory* factory = gst_element_factory_find(name);
+      if (factory) {
+        SPDLOG_DEBUG("[VideoPlayer] Using hardware decoder: {}", name);
+        return factory;
+      }
+    }
+  }
+
+  // Fall back to software decoder
+  const auto sw_name = map_ffmpeg_plugin(codec_id);
+  if (sw_name[0]) {
+    GstElementFactory* factory = gst_element_factory_find(sw_name);
+    if (factory) {
+      SPDLOG_DEBUG("[VideoPlayer] Using software decoder: {}", sw_name);
+      return factory;
+    }
+    spdlog::error(
+        "[VideoPlayer] Failed to find decoder: {}. May be a missing runtime "
+        "package",
+        sw_name);
+  }
+
+  return nullptr;
 }
 
 const char* VideoPlayerPlugin::map_ffmpeg_plugin(const AVCodecID codec_id) {

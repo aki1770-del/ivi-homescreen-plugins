@@ -62,6 +62,8 @@ class Shader {
  public:
   GLuint textureId{};
   GLuint framebuffer{};
+  GLuint backTextureId{};
+  GLuint backFramebuffer{};
   GLuint program;
   GLsizei width, height;
   GLuint vertex_arr_id_{};
@@ -80,16 +82,19 @@ class Shader {
 
     glGenTextures(2, &innerTexture[0]);
     glGenTextures(1, &textureId);
-    glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
 
+    // Initialize front texture with black pixels to prevent stale content
+    auto front_size =
+        static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    auto* black_pixels = new unsigned char[front_size]();
     glBindTexture(GL_TEXTURE_2D, textureId);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-                 GL_UNSIGNED_BYTE, nullptr);
+                 GL_UNSIGNED_BYTE, black_pixels);
+    delete[] black_pixels;
     glBindTexture(GL_TEXTURE_2D, 0);
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
@@ -99,6 +104,34 @@ class Shader {
     if (status != GL_FRAMEBUFFER_COMPLETE) {
       spdlog::error("FramebufferStatus: 0x{:X}", status);
     }
+
+    // Back buffer for double-buffered rendering
+    glGenFramebuffers(1, &backFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, backFramebuffer);
+
+    glGenTextures(1, &backTextureId);
+    glBindTexture(GL_TEXTURE_2D, backTextureId);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    auto back_size =
+        static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+    auto* back_black = new unsigned char[back_size]();
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, back_black);
+    delete[] back_black;
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           backTextureId, 0);
+
+    auto backStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (backStatus != GL_FRAMEBUFFER_COMPLETE) {
+      spdlog::error("Back FramebufferStatus: 0x{:X}", backStatus);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 
     auto size = static_cast<unsigned long>(width) *
                 static_cast<unsigned long>(height) * 3;
@@ -119,8 +152,8 @@ class Shader {
     glGenBuffers(1, &vertex_buffer_);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_);
     static constexpr GLfloat g_vertex_buffer_data[] = {
-        -0.5f, 0.5f,  0.0f, 0.5f,  0.5f,  0.0f, 0.5f,  -0.5f, 0.0f,
-        0.5f,  -0.5f, 0.0f, -0.5f, -0.5f, 0.0f, -0.5f, 0.5f,  0.0f,
+        -1.0f, 1.0f,  0.0f, 1.0f,  1.0f,  0.0f, 1.0f,  -1.0f, 0.0f,
+        1.0f,  -1.0f, 0.0f, -1.0f, -1.0f, 0.0f, -1.0f, 1.0f,  0.0f,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data),
                  g_vertex_buffer_data, GL_STATIC_DRAW);
@@ -152,10 +185,22 @@ class Shader {
     glDeleteBuffers(1, &vertex_buffer_);
     glDeleteVertexArrays(1, &vertex_arr_id_);
     glDeleteProgram(program);
+    glDeleteTextures(1, &backTextureId);
+    glDeleteFramebuffers(1, &backFramebuffer);
     glDeleteTextures(1, &textureId);
     glDeleteTextures(2, &innerTexture[0]);
     glDeleteFramebuffers(1, &framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  void blit_to_front() const {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, backFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glFinish();
   }
 
   /**
@@ -238,7 +283,7 @@ class Shader {
     glCompileShader(fragment_shader_);
     glGetShaderiv(fragment_shader_, GL_COMPILE_STATUS, &result);
     if (result == GL_FALSE) {
-      glGetShaderInfoLog(vertex_shader_, info.size(), &length, info.data());
+      glGetShaderInfoLog(fragment_shader_, info.size(), &length, info.data());
       SPDLOG_ERROR("Failed to compile {}", std::string(info.data(), length));
       return 0;
     }
@@ -264,7 +309,7 @@ class Shader {
 
   void draw_core() const {
     SPDLOG_TRACE("[VideoPlayer] draw_core");
-    glViewport(-width / 2, -height / 2, width * 2, height * 2);
+    glViewport(0, 0, width, height);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(program);

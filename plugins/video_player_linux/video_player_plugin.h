@@ -20,6 +20,10 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_homescreen.h>
 
+extern "C" {
+#include <libavformat/avformat.h>
+}
+
 #include "flutter_desktop_plugin_registrar.h"
 #include "messages.g.h"
 #include "video_player.h"
@@ -92,6 +96,15 @@ class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
    * flutter
    */
   static const char* map_ffmpeg_plugin(AVCodecID codec_id);
+
+  /**
+   * @brief Find the best available decoder factory for a codec
+   * @param[in] codec_id FFmpeg codec ID
+   * @return GstElementFactory* or nullptr if none found
+   * @relation
+   * flutter
+   */
+  static GstElementFactory* find_decoder_factory(AVCodecID codec_id);
 };
 
 }  // namespace video_player_linux
