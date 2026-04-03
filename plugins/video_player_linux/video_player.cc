@@ -22,10 +22,6 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
 
-extern "C" {
-#include <libavutil/avutil.h>
-}
-
 #include <backend/backend.h>
 #include <plugins/common/common.h>
 #include <utility>
@@ -49,16 +45,13 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
                          std::map<std::string, std::string> http_headers,
                          const GLsizei width,
                          const GLsizei height,
-                         const gint64 duration,
-                         GstElementFactory* decoder_factory)
+                         const gint64 duration)
     : m_registrar(registrar),
       uri_(std::move(uri)),
       http_headers_(std::move(http_headers)),
       width_(width),
       height_(height),
       duration_(duration),
-      decoder_factory_(decoder_factory),
-      media_state_(GST_STATE_VOID_PENDING),
       event_channel_(nullptr) {
   SPDLOG_DEBUG(
       "[VideoPlayer] uri: {}, http_headers: {}, size: {} x {}, duration: {}",
@@ -148,12 +141,6 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   handoff_handler_id_ = g_signal_connect(
       sink_, "handoff", reinterpret_cast<GCallback>(handoff_handler), this);
 
-  decoder_ = gst_element_factory_create(decoder_factory, "decoder");
-  if (!decoder_) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to create decoder element");
-    return;
-  }
-
   video_convert_ = gst_element_factory_make("videoconvert", nullptr);
   if (!video_convert_) {
     SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
@@ -175,38 +162,25 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   pipeline_ = gst_bin_new(nullptr);
 
-  gst_bin_add_many(reinterpret_cast<GstBin*>(pipeline_), decoder_,
-                   video_convert_, video_scale_, sink_, nullptr);
-  if (!gst_element_link(decoder_, video_convert_)) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to link decoder with videoconvert");
-  }
+  gst_bin_add_many(GST_BIN(pipeline_), video_convert_, video_scale_, sink_,
+                   nullptr);
 
   if (!gst_element_link_filtered(video_convert_, video_scale_, caps)) {
-    SPDLOG_ERROR(
-        "[VideoPlayer] Failed to link videoconvert with videoscale using "
-        "filter");
+    SPDLOG_ERROR("[VideoPlayer] Failed to link videoconvert with videoscale");
   }
-
   gst_caps_unref(caps);
 
-  GstPad* pad = gst_element_get_static_pad(decoder_, "sink");
-  if (gst_pad_is_linked(pad)) {
-    SPDLOG_ERROR("[VideoPlayer] already linked, ignore");
-    gst_object_unref(pad);
-    gst_caps_unref(scale);
-    m_valid = false;
-    return;
+  if (!gst_element_link_filtered(video_scale_, sink_, scale)) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to link videoscale with fakesink");
   }
+  gst_caps_unref(scale);
+
+  // Ghost pad so playbin can link its decoded output into this bin
+  GstPad* pad = gst_element_get_static_pad(video_convert_, "sink");
   GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
   gst_pad_set_active(ghost_pad, TRUE);
   gst_element_add_pad(pipeline_, ghost_pad);
   gst_object_unref(pad);
-
-  if (!gst_element_link_filtered(video_scale_, sink_, scale)) {
-    SPDLOG_ERROR(
-        "[VideoPlayer] Failed to link videoscale with fakesink using filter");
-  }
-  gst_caps_unref(scale);
 
   g_object_set(playbin_, "video-sink", pipeline_, nullptr);
 
@@ -223,6 +197,291 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_source_unref(bus_source);
   on_bus_msg_id_ = g_signal_connect(
       bus_, "message", reinterpret_cast<GCallback>(OnBusMessage), this);
+}
+
+VideoPlayer::~VideoPlayer() {
+  if (m_valid) {
+    Dispose();
+  }
+}
+
+void VideoPlayer::Dispose() {
+  SPDLOG_DEBUG("[VideoPlayer] Dispose");
+  m_valid = false;
+  is_initialized_ = false;
+
+  std::lock_guard buffer_lock(buffer_mutex_);
+
+  g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
+  g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
+
+  gst_element_set_state(playbin_, GST_STATE_NULL);
+
+  {
+    // Ensure no in-flight handoff callback is using the shader
+    std::lock_guard gst_lock(gst_mutex_);
+    std::lock_guard ctx_lock(g_texture_context_mutex);
+    m_registrar->texture_registrar()->TextureMakeCurrent();
+    shader_.reset();
+    m_registrar->texture_registrar()->TextureClearCurrent();
+  }
+
+  SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
+  m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
+
+  m_texture_id = 0;
+  {
+    std::lock_guard event_lock(event_mutex_);
+    event_sink_ = nullptr;
+  }
+  event_channel_ = nullptr;
+}
+
+void VideoPlayer::SetLooping(const bool isLooping) {
+  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
+  is_looping_ = isLooping;
+}
+
+void VideoPlayer::SetVolume(const double volume) {
+  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume);
+  volume_ = volume;
+  g_object_set(playbin_, "volume", volume, nullptr);
+}
+
+void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
+  // Store the desired rate so it can be applied when the pipeline is ready
+  pending_rate_ = playbackSpeed;
+
+  // Seek events require the pipeline to be in PAUSED or PLAYING state
+  GstState state;
+  gst_element_get_state(playbin_, &state, nullptr, 0);
+  if (state < GST_STATE_PAUSED) {
+    SPDLOG_DEBUG(
+        "[VideoPlayer] Deferring playback speed {} until pipeline is ready",
+        playbackSpeed);
+    return;
+  }
+
+  ApplyPlaybackSpeed();
+}
+
+void VideoPlayer::Play() {
+  target_state_ = GST_STATE_PLAYING;
+  const GstStateChangeReturn ret =
+      gst_element_set_state(playbin_, GST_STATE_PLAYING);
+  if (ret == GST_STATE_CHANGE_FAILURE) {
+    spdlog::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
+  } else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
+    is_live_ = TRUE;
+    SPDLOG_DEBUG("[VideoPlayer] Pipeline is live");
+  }
+}
+
+void VideoPlayer::Pause() {
+  GstState state;
+  gst_element_get_state(playbin_, &state, nullptr, GST_SECOND);
+  if (state != GST_STATE_NULL) {
+    target_state_ = GST_STATE_PAUSED;
+    const GstStateChangeReturn ret =
+        gst_element_set_state(playbin_, GST_STATE_PAUSED);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+      std::lock_guard event_lock(event_mutex_);
+      if (event_sink_) {
+        event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
+      }
+      return;
+    }
+    SPDLOG_DEBUG("[VideoPlayer] Transport Paused.");
+  }
+}
+
+int64_t VideoPlayer::GetPosition() {
+  gint64 pos;
+  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
+    position_ = pos;
+    SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
+  }
+  const gint64 current = position_.load();
+  return current >= 0 ? current / GST_MSECOND : 0;
+}
+
+void VideoPlayer::SendBufferingUpdate() {
+  std::lock_guard event_lock(event_mutex_);
+  if (!event_sink_) {
+    return;
+  }
+  auto values = flutter::EncodableList();
+
+  GstQuery* query = gst_query_new_buffering(GST_FORMAT_TIME);
+  if (gst_element_query(playbin_, query)) {
+    const guint n_ranges = gst_query_get_n_buffering_ranges(query);
+    for (guint i = 0; i < n_ranges; i++) {
+      gint64 start, stop;
+      if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
+        values.emplace_back(
+            std::in_place_type<flutter::EncodableList>,
+            flutter::EncodableList{
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        start / GST_MSECOND),
+                flutter::EncodableValue(std::in_place_type<int64_t>,
+                                        stop / GST_MSECOND)});
+      }
+    }
+  }
+  gst_query_unref(query);
+
+  auto res = flutter::EncodableMap(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("bufferingUpdate")},
+       {flutter::EncodableValue("values"),
+        flutter::EncodableValue(std::in_place_type<flutter::EncodableList>,
+                                std::move(values))}});
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(res)));
+}
+
+void VideoPlayer::SeekTo(const int64_t seek) {
+  const gint64 position = seek * GST_MSECOND;
+  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position);
+
+  if (!gst_element_seek_simple(
+          playbin_, GST_FORMAT_TIME,
+          static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
+                                    GST_SEEK_FLAG_KEY_UNIT),
+          position)) {
+    SPDLOG_ERROR("[VideoPlayer] Seek Failed");
+  }
+  gint64 pos;
+  gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos);
+  position_ = pos;
+  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
+}
+
+bool VideoPlayer::IsValid() {
+  return m_valid;
+}
+
+void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
+  if (is_initialized_) {
+    return;
+  }
+
+  SPDLOG_DEBUG("[VideoPlayer] Init");
+  event_channel_ = std::make_unique<flutter::EventChannel<>>(
+      messenger,
+      std::string("flutter.io/videoPlayer/videoEvents") +
+          std::to_string(m_texture_id),
+      &flutter::StandardMethodCodec::GetInstance());
+
+  event_channel_->SetStreamHandler(
+      std::make_unique<flutter::StreamHandlerFunctions<>>(
+          [this](const flutter::EncodableValue* /* arguments */,
+                 std::unique_ptr<flutter::EventSink<>>&& events)
+              -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
+            event_sink_ = std::move(events);
+            return nullptr;
+          },
+          [this](const flutter::EncodableValue* /* arguments */)
+              -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard event_lock(event_mutex_);
+            event_sink_ = nullptr;
+            return nullptr;
+          }));
+}
+
+void VideoPlayer::SetBuffering(const bool buffering) {
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
+    SPDLOG_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
+    auto res = flutter::EncodableMap(
+        {{flutter::EncodableValue("event"),
+          flutter::EncodableValue(buffering ? "bufferingStart"
+                                            : "bufferingEnd")}});
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
+  }
+}
+
+void VideoPlayer::ApplyPlaybackSpeed() {
+  if (pending_rate_ == rate_) {
+    return;
+  }
+
+  const auto playbackSpeed = pending_rate_;
+  const gint64 pos = position_.load();
+  GstEvent* seek_event;
+  if (playbackSpeed > 0) {
+    // Forward playback: from current position to end
+    seek_event = gst_event_new_seek(
+        playbackSpeed, GST_FORMAT_TIME,
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_END, 0);
+  } else {
+    // Reverse playback: from beginning to current position
+    seek_event = gst_event_new_seek(
+        playbackSpeed, GST_FORMAT_TIME,
+        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
+        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
+  }
+
+  // Send seek to playbin_ so the segment event propagates to all elements
+  // (including audio). Sending to sink_ alone causes "data flow before segment
+  // event" warnings on the audio path.
+  if (!gst_element_send_event(playbin_, seek_event)) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
+                 playbackSpeed);
+    return;
+  }
+  rate_ = playbackSpeed;
+
+  SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
+}
+
+void VideoPlayer::OnPlaybackEnded() {
+  if (is_looping_) {
+    SPDLOG_DEBUG("[VideoPlayer] Looping: seeking to start");
+    if (!gst_element_seek_simple(
+            playbin_, GST_FORMAT_TIME,
+            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
+                                      GST_SEEK_FLAG_SEGMENT),
+            0)) {
+      SPDLOG_ERROR("[VideoPlayer] Loop seek failed");
+    }
+    return;
+  }
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
+    SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
+    auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
+                                       flutter::EncodableValue("completed")}});
+    event_sink_->Success(flutter::EncodableValue(
+        std::in_place_type<flutter::EncodableMap>, std::move(res)));
+  }
+}
+
+void VideoPlayer::OnMediaInitialized() {}
+
+void VideoPlayer::OnMediaStateChange(const GstState state) {
+  if (state == GST_STATE_NULL) {
+    SetBuffering(true);
+    SendBufferingUpdate();
+  } else {
+    if (!is_initialized_) {
+      is_initialized_ = true;
+    }
+    SetBuffering(false);
+
+    if (state == GST_STATE_PLAYING) {
+      SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
+                   m_texture_id);
+      prepare(this);
+      ApplyPlaybackSpeed();
+    } else if (state == GST_STATE_READY) {
+      SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
+                   m_texture_id);
+    }
+  }
 }
 
 void VideoPlayer::OnMediaError(GstMessage* msg) {
@@ -250,6 +509,115 @@ void VideoPlayer::OnMediaDurationChange() {
     gst_query_parse_duration(query, nullptr, &duration_);
   }
   gst_query_unref(query);
+}
+
+void VideoPlayer::SendInitialized() {
+  std::lock_guard event_lock(event_mutex_);
+  if (!event_sink_) {
+    return;
+  }
+  auto event = flutter::EncodableMap(
+      {{flutter::EncodableValue("event"),
+        flutter::EncodableValue("initialized")},
+       {flutter::EncodableValue("duration"),
+        flutter::EncodableValue(
+            std::in_place_type<int64_t>,
+            static_cast<int64_t>(duration_ / GST_MSECOND))}});
+
+  event.insert({flutter::EncodableValue("width"),
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(width_))});
+  event.insert({flutter::EncodableValue("height"),
+                flutter::EncodableValue(std::in_place_type<int32_t>,
+                                        static_cast<int32_t>(height_))});
+
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(event)));
+}
+
+void VideoPlayer::OnTag(const GstTagList* list,
+                        const gchar* tag,
+                        gpointer /* user_data */) {
+  const std::string tag_str = tag;
+  if (const auto type = gst_tag_get_type(tag);
+      tag_str == "audio-codec" && type == 64) {
+    gchar* value;
+    gst_tag_list_get_string(list, tag, &value);
+    spdlog::debug("[VideoPlayer] audio-codec: {}", value);
+  } else if (tag_str == "video-codec" && type == 64) {
+    gchar* value;
+    gst_tag_list_get_string(list, tag, &value);
+    spdlog::debug("[VideoPlayer] video-codec: {}", value);
+  } else if (tag_str == "maximum-bitrate" && type == 28) {
+    guint value;
+    gst_tag_list_get_uint(list, tag, &value);
+    spdlog::debug("[VideoPlayer] maximum-bitrate: {}", value);
+  } else if (tag_str == "minimum-bitrate" && type == 28) {
+    guint value;
+    gst_tag_list_get_uint(list, tag, &value);
+    spdlog::debug("[VideoPlayer] minimum-bitrate: {}", value);
+  } else if (tag_str == "bitrate" && type == 28) {
+    guint value;
+    gst_tag_list_get_uint(list, tag, &value);
+    spdlog::debug("[VideoPlayer] bitrate: {}", value);
+  }
+}
+
+void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
+                                  GstBuffer* buffer,
+                                  GstPad* /* pad */,
+                                  void* user_data) {
+  const auto obj = static_cast<VideoPlayer*>(user_data);
+  if (!obj->m_valid || !obj->is_initialized_ || obj->info_.finfo == nullptr) {
+    return;
+  }
+
+  std::lock_guard lock(obj->gst_mutex_);
+  GstVideoFrame frame;
+  if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
+    {
+      std::lock_guard ctx_lock(g_texture_context_mutex);
+      obj->m_registrar->texture_registrar()->TextureMakeCurrent();
+      glBindVertexArray(obj->shader_->vertex_arr_id_);
+
+      if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
+          n_planes == 2) {
+        // Assume NV12
+        obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
+                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
+                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
+      } else {
+        // Assume RGB
+        obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
+      }
+      gst_video_frame_unmap(&frame);
+
+      // Render NV12->RGBA into the back buffer
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
+      obj->shader_->draw_core();
+
+      // Blit back buffer to the front (Flutter-registered) texture
+      obj->shader_->blit_to_front();
+
+      obj->m_registrar->texture_registrar()->TextureClearCurrent();
+    }
+
+    // Send initialized event after first frame so the Dart Texture widget
+    // doesn't display stale GL content before real video arrives.
+    if (!obj->sent_initialized_) {
+      obj->sent_initialized_ = true;
+      obj->SendInitialized();
+    }
+
+    obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(
+        obj->m_texture_id);
+    SPDLOG_TRACE("[VideoPlayer] frame");
+  } else {
+    SPDLOG_ERROR("[VideoPlayer] Cannot read video frame out from buffer");
+  }
 }
 
 gboolean VideoPlayer::OnBusMessage(GstBus* bus,
@@ -426,397 +794,6 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
 #endif
   }
   return TRUE;
-}
-
-void VideoPlayer::OnTag(const GstTagList* list,
-                        const gchar* tag,
-                        gpointer /* user_data */) {
-  const std::string tag_str = tag;
-  if (const auto type = gst_tag_get_type(tag);
-      tag_str == "audio-codec" && type == 64) {
-    gchar* value;
-    gst_tag_list_get_string(list, tag, &value);
-    spdlog::debug("[VideoPlayer] audio-codec: {}", value);
-  } else if (tag_str == "video-codec" && type == 64) {
-    gchar* value;
-    gst_tag_list_get_string(list, tag, &value);
-    spdlog::debug("[VideoPlayer] video-codec: {}", value);
-  } else if (tag_str == "maximum-bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] maximum-bitrate: {}", value);
-  } else if (tag_str == "minimum-bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] minimum-bitrate: {}", value);
-  } else if (tag_str == "bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] bitrate: {}", value);
-  }
-}
-
-void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
-                                  GstBuffer* buffer,
-                                  GstPad* /* pad */,
-                                  void* user_data) {
-  const auto obj = static_cast<VideoPlayer*>(user_data);
-  if (!obj->m_valid || !obj->is_initialized_ || obj->info_.finfo == nullptr) {
-    return;
-  }
-
-  std::lock_guard lock(obj->gst_mutex_);
-  GstVideoFrame frame;
-  if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
-    {
-      std::lock_guard ctx_lock(g_texture_context_mutex);
-      obj->m_registrar->texture_registrar()->TextureMakeCurrent();
-      glBindVertexArray(obj->shader_->vertex_arr_id_);
-
-      if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
-          n_planes == 2) {
-        // Assume NV12
-        obj->shader_->load_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0),
-                                  GST_VIDEO_FRAME_PLANE_DATA(&frame, 1),
-                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 0),
-                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 0),
-                                  GST_VIDEO_FRAME_COMP_PSTRIDE(&frame, 1),
-                                  GST_VIDEO_FRAME_PLANE_STRIDE(&frame, 1));
-      } else {
-        // Assume RGB
-        obj->shader_->load_rgb_pixels(GST_VIDEO_FRAME_PLANE_DATA(&frame, 0));
-      }
-      gst_video_frame_unmap(&frame);
-
-      // Render NV12->RGBA into the back buffer
-      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
-      obj->shader_->draw_core();
-
-      // Blit back buffer to the front (Flutter-registered) texture
-      obj->shader_->blit_to_front();
-
-      obj->m_registrar->texture_registrar()->TextureClearCurrent();
-    }
-
-    // Send initialized event after first frame so the Dart Texture widget
-    // doesn't display stale GL content before real video arrives.
-    if (!obj->sent_initialized_) {
-      obj->sent_initialized_ = true;
-      obj->SendInitialized();
-    }
-
-    obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(
-        obj->m_texture_id);
-    SPDLOG_TRACE("[VideoPlayer] frame");
-  } else {
-    SPDLOG_ERROR("[VideoPlayer] Cannot read video frame out from buffer");
-  }
-}
-
-void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
-  if (is_initialized_) {
-    return;
-  }
-
-  SPDLOG_DEBUG("[VideoPlayer] Init");
-  event_channel_ = std::make_unique<flutter::EventChannel<>>(
-      messenger,
-      std::string("flutter.io/videoPlayer/videoEvents") +
-          std::to_string(m_texture_id),
-      &flutter::StandardMethodCodec::GetInstance());
-
-  event_channel_->SetStreamHandler(
-      std::make_unique<flutter::StreamHandlerFunctions<>>(
-          [this](const flutter::EncodableValue* /* arguments */,
-                 std::unique_ptr<flutter::EventSink<>>&& events)
-              -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            std::lock_guard event_lock(event_mutex_);
-            event_sink_ = std::move(events);
-            return nullptr;
-          },
-          [this](const flutter::EncodableValue* /* arguments */)
-              -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            std::lock_guard event_lock(event_mutex_);
-            event_sink_ = nullptr;
-            return nullptr;
-          }));
-}
-
-VideoPlayer::~VideoPlayer() {
-  if (m_valid) {
-    Dispose();
-  }
-}
-
-bool VideoPlayer::IsValid() {
-  return m_valid;
-}
-
-void VideoPlayer::SendInitialized() {
-  std::lock_guard event_lock(event_mutex_);
-  if (!event_sink_) {
-    return;
-  }
-  auto event = flutter::EncodableMap(
-      {{flutter::EncodableValue("event"),
-        flutter::EncodableValue("initialized")},
-       {flutter::EncodableValue("duration"),
-        flutter::EncodableValue(std::in_place_type<int64_t>,
-                                static_cast<int64_t>(duration_))}});
-
-  event.insert({flutter::EncodableValue("width"),
-                flutter::EncodableValue(std::in_place_type<int32_t>,
-                                        static_cast<int32_t>(width_))});
-  event.insert({flutter::EncodableValue("height"),
-                flutter::EncodableValue(std::in_place_type<int32_t>,
-                                        static_cast<int32_t>(height_))});
-
-  event_sink_->Success(flutter::EncodableValue(
-      std::in_place_type<flutter::EncodableMap>, std::move(event)));
-}
-
-void VideoPlayer::OnPlaybackEnded() {
-  if (is_looping_) {
-    SPDLOG_DEBUG("[VideoPlayer] Looping: seeking to start");
-    if (!gst_element_seek_simple(
-            playbin_, GST_FORMAT_TIME,
-            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
-                                      GST_SEEK_FLAG_SEGMENT),
-            0)) {
-      SPDLOG_ERROR("[VideoPlayer] Loop seek failed");
-    }
-    return;
-  }
-  std::lock_guard event_lock(event_mutex_);
-  if (event_sink_) {
-    SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
-    auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
-                                       flutter::EncodableValue("completed")}});
-    event_sink_->Success(flutter::EncodableValue(
-        std::in_place_type<flutter::EncodableMap>, std::move(res)));
-  }
-}
-
-void VideoPlayer::OnMediaStateChange(const GstState state) {
-  if (state == GST_STATE_NULL) {
-    SetBuffering(true);
-    SendBufferingUpdate();
-  } else {
-    if (!is_initialized_) {
-      is_initialized_ = true;
-    }
-    SetBuffering(false);
-
-    if (state == GST_STATE_PLAYING) {
-      SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
-                   m_texture_id);
-      prepare(this);
-      ApplyPlaybackSpeed();
-    } else if (state == GST_STATE_READY) {
-      SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
-                   m_texture_id);
-    }
-  }
-}
-
-void VideoPlayer::SetBuffering(const bool buffering) {
-  std::lock_guard event_lock(event_mutex_);
-  if (event_sink_) {
-    SPDLOG_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
-    auto res = flutter::EncodableMap(
-        {{flutter::EncodableValue("event"),
-          flutter::EncodableValue(buffering ? "bufferingStart"
-                                            : "bufferingEnd")}});
-    event_sink_->Success(flutter::EncodableValue(
-        std::in_place_type<flutter::EncodableMap>, std::move(res)));
-  }
-}
-
-void VideoPlayer::Dispose() {
-  SPDLOG_DEBUG("[VideoPlayer] Dispose");
-  m_valid = false;
-  is_initialized_ = false;
-
-  std::lock_guard buffer_lock(buffer_mutex_);
-
-  g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
-  g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
-
-  gst_element_set_state(playbin_, GST_STATE_NULL);
-
-  {
-    // Ensure no in-flight handoff callback is using the shader
-    std::lock_guard gst_lock(gst_mutex_);
-    std::lock_guard ctx_lock(g_texture_context_mutex);
-    m_registrar->texture_registrar()->TextureMakeCurrent();
-    shader_.reset();
-    m_registrar->texture_registrar()->TextureClearCurrent();
-  }
-
-  SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
-  m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
-
-  m_texture_id = 0;
-  {
-    std::lock_guard event_lock(event_mutex_);
-    event_sink_ = nullptr;
-  }
-  event_channel_ = nullptr;
-}
-
-void VideoPlayer::SetLooping(const bool isLooping) {
-  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
-  is_looping_ = isLooping;
-}
-
-void VideoPlayer::SetVolume(const double volume) {
-  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume);
-  volume_ = volume;
-  g_object_set(playbin_, "volume", volume, nullptr);
-}
-
-void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
-  // Store the desired rate so it can be applied when the pipeline is ready
-  pending_rate_ = playbackSpeed;
-
-  // Seek events require the pipeline to be in PAUSED or PLAYING state
-  GstState state;
-  gst_element_get_state(playbin_, &state, nullptr, 0);
-  if (state < GST_STATE_PAUSED) {
-    SPDLOG_DEBUG(
-        "[VideoPlayer] Deferring playback speed {} until pipeline is ready",
-        playbackSpeed);
-    return;
-  }
-
-  ApplyPlaybackSpeed();
-}
-
-void VideoPlayer::ApplyPlaybackSpeed() {
-  if (pending_rate_ == rate_) {
-    return;
-  }
-
-  const auto playbackSpeed = pending_rate_;
-  const gint64 pos = position_.load();
-  GstEvent* seek_event;
-  if (playbackSpeed > 0) {
-    // Forward playback: from current position to end
-    seek_event = gst_event_new_seek(
-        playbackSpeed, GST_FORMAT_TIME,
-        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_END, 0);
-  } else {
-    // Reverse playback: from beginning to current position
-    seek_event = gst_event_new_seek(
-        playbackSpeed, GST_FORMAT_TIME,
-        static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
-  }
-
-  // Send seek to playbin_ so the segment event propagates to all elements
-  // (including audio). Sending to sink_ alone causes "data flow before segment
-  // event" warnings on the audio path.
-  if (!gst_element_send_event(playbin_, seek_event)) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
-                 playbackSpeed);
-    return;
-  }
-  rate_ = playbackSpeed;
-
-  SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
-}
-
-void VideoPlayer::Play() {
-  target_state_ = GST_STATE_PLAYING;
-  const GstStateChangeReturn ret =
-      gst_element_set_state(playbin_, GST_STATE_PLAYING);
-  if (ret == GST_STATE_CHANGE_FAILURE) {
-    spdlog::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
-  } else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
-    is_live_ = TRUE;
-    SPDLOG_DEBUG("[VideoPlayer] Pipeline is live");
-  }
-}
-
-void VideoPlayer::Pause() {
-  GstState state;
-  gst_element_get_state(playbin_, &state, nullptr, GST_SECOND);
-  if (state != GST_STATE_NULL) {
-    target_state_ = GST_STATE_PAUSED;
-    const GstStateChangeReturn ret =
-        gst_element_set_state(playbin_, GST_STATE_PAUSED);
-    if (ret == GST_STATE_CHANGE_FAILURE) {
-      std::lock_guard event_lock(event_mutex_);
-      if (event_sink_) {
-        event_sink_->Error("[VideoPlayer] Unable to Pause Transport.");
-      }
-      return;
-    }
-    SPDLOG_DEBUG("[VideoPlayer] Transport Paused.");
-  }
-}
-
-int64_t VideoPlayer::GetPosition() {
-  gint64 pos;
-  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
-    position_ = pos;
-    SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
-  }
-  const gint64 current = position_.load();
-  return current >= 0 ? current / AV_TIME_BASE : 0;
-}
-
-void VideoPlayer::SendBufferingUpdate() {
-  std::lock_guard event_lock(event_mutex_);
-  if (!event_sink_) {
-    return;
-  }
-  auto values = flutter::EncodableList();
-
-  GstQuery* query = gst_query_new_buffering(GST_FORMAT_TIME);
-  if (gst_element_query(playbin_, query)) {
-    const guint n_ranges = gst_query_get_n_buffering_ranges(query);
-    for (guint i = 0; i < n_ranges; i++) {
-      gint64 start, stop;
-      if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
-        values.emplace_back(
-            std::in_place_type<flutter::EncodableList>,
-            flutter::EncodableList{
-                flutter::EncodableValue(std::in_place_type<int64_t>,
-                                        start / AV_TIME_BASE),
-                flutter::EncodableValue(std::in_place_type<int64_t>,
-                                        stop / AV_TIME_BASE)});
-      }
-    }
-  }
-  gst_query_unref(query);
-
-  auto res = flutter::EncodableMap(
-      {{flutter::EncodableValue("event"),
-        flutter::EncodableValue("bufferingUpdate")},
-       {flutter::EncodableValue("values"),
-        flutter::EncodableValue(std::in_place_type<flutter::EncodableList>,
-                                std::move(values))}});
-  event_sink_->Success(flutter::EncodableValue(
-      std::in_place_type<flutter::EncodableMap>, std::move(res)));
-}
-
-void VideoPlayer::SeekTo(const int64_t seek) {
-  const gint64 position = seek * AV_TIME_BASE;
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position);
-
-  if (!gst_element_seek_simple(
-          playbin_, GST_FORMAT_TIME,
-          static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
-                                    GST_SEEK_FLAG_KEY_UNIT),
-          position)) {
-    SPDLOG_ERROR("[VideoPlayer] Seek Failed");
-  }
-  gint64 pos;
-  gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos);
-  position_ = pos;
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
 }
 
 void VideoPlayer::prepare(VideoPlayer* user_data) {

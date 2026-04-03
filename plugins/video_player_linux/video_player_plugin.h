@@ -20,10 +20,6 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_homescreen.h>
 
-extern "C" {
-#include <libavformat/avformat.h>
-}
-
 #include "flutter_desktop_plugin_registrar.h"
 #include "messages.g.h"
 #include "video_player.h"
@@ -68,43 +64,10 @@ class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
 
   flutter::PluginRegistrarDesktop* registrar_{};
 
-  /**
-   * @brief Get video info
-   * @param[in] url URL of the stream
-   * @param[out] width Buffer to store width info
-   * @param[out] height Buffer to store height info
-   * @param[out] duration Buffer to store duration info
-   * @param[out] codec_id Buffer to store codec info
-   * @return bool
-   * @retval true Normal end
-   * @retval false Abnormal end
-   * @relation
-   * flutter
-   */
-  static bool get_video_info(const char* url,
-                             int& width,
-                             int& height,
-                             gint64& duration,
-                             AVCodecID& codec_id);
-
-  /**
-   * @brief Return GStreamer plugin for codec ID
-   * @param[in] codec_id Codec ID
-   * @return char*
-   * @retval GStreamer plugin
-   * @relation
-   * flutter
-   */
-  static const char* map_ffmpeg_plugin(AVCodecID codec_id);
-
-  /**
-   * @brief Find the best available decoder factory for a codec
-   * @param[in] codec_id FFmpeg codec ID
-   * @return GstElementFactory* or nullptr if none found
-   * @relation
-   * flutter
-   */
-  static GstElementFactory* find_decoder_factory(AVCodecID codec_id);
+  static bool discover_video_info(const char* url,
+                                  int& width,
+                                  int& height,
+                                  gint64& duration);
 };
 
 }  // namespace video_player_linux
