@@ -35,7 +35,6 @@
 extern "C" {
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include <libavformat/avformat.h>
 }
 
 #include "messages.g.h"
@@ -81,7 +80,6 @@ class VideoPlayer {
 
   GLuint m_texture_id{};
   std::atomic<bool> m_valid = true;
-  flutter::TextureRegistrar* m_texture_registry{};
   std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture_;
 
   GMainContext* context_;
@@ -94,7 +92,6 @@ class VideoPlayer {
   GstElement* decoder_{};
   GstElement* video_convert_{};
   GstElement* video_scale_{};
-  GstCaps* scale_{};
   GstVideoInfo info_{};
   std::atomic<gint64> position_{0};
   gdouble rate_ = 0.0;
@@ -105,15 +102,12 @@ class VideoPlayer {
 
   std::atomic<GstState> target_state_{GST_STATE_PAUSED};
 
-  AVCodecID codec_id_{};
-
   gint n_video_{};
   gint current_video_{};
   std::unique_ptr<nv12::Shader> shader_;
   std::atomic<bool> is_looping_{};
   std::atomic<bool> is_buffering_{};
   gboolean is_live_{};
-  bool events_enabled_{};
   double volume_ = 0.0;
 
   std::mutex gst_mutex_;
@@ -148,16 +142,6 @@ class VideoPlayer {
   std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
 
   /**
-   * @brief Creates all items required for Texture
-   * @param[in] width texture width
-   * @param[in] height texture height
-   * @return bool true if successful
-   * @relation
-   * wayland
-   */
-  bool EnsureTextureCreated(uint32_t width, uint32_t height);
-
-  /**
    * @brief Callback called when fakesink receives new frame data
    * @param[in] fakesink No use
    * @param[in] buffer Pointer to New frame data
@@ -173,33 +157,6 @@ class VideoPlayer {
                               void* user_data);
 
   static gboolean OnBusMessage(GstBus* bus, GstMessage* msg, void* user_data);
-
-  /**
-   * @brief Load RGB pixels
-   * @param[in] textureId Texture image id
-   * @param[in] data Pointer to image data
-   * @param[in] width Texture image width
-   * @param[in] height Texture image height
-   * @return void
-   * @relation
-   * flutter
-   */
-  static void load_rgb_pixels(GLuint textureId,
-                              const unsigned char* data,
-                              int width,
-                              int height);
-
-  /**
-   * @brief Load shaders
-   * @param[in] vsource Source code to load into vertexShader
-   * @param[in] fsource Source code to load into fragmentShader
-   * @return GLuint
-   * @retval Non-zero Normal end
-   * @retval 0 Abnormal end
-   * @relation
-   * flutter
-   */
-  GLuint load_shaders(const GLchar* vsource, const GLchar* fsource);
 
   /**
    * @brief Prepare

@@ -22,6 +22,10 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
 
+extern "C" {
+#include <libavutil/avutil.h>
+}
+
 #include <backend/backend.h>
 #include <plugins/common/common.h>
 #include <cstdlib>
@@ -116,9 +120,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_object_set(playbin_, "flags", flags, nullptr);
   int connection_speed = 10000;
   if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
-    connection_speed = std::atoi(env);
-    if (connection_speed <= 0) {
-      connection_speed = 10000;
+    char* end = nullptr;
+    const long val = std::strtol(env, &end, 10);
+    if (end != env && val > 0) {
+      connection_speed = static_cast<int>(val);
     }
   }
   g_object_set(playbin_, "connection-speed", connection_speed, nullptr);
@@ -179,6 +184,9 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   GstPad* pad = gst_element_get_static_pad(decoder_, "sink");
   if (gst_pad_is_linked(pad)) {
     SPDLOG_ERROR("[VideoPlayer] already linked, ignore");
+    gst_object_unref(pad);
+    gst_caps_unref(scale);
+    m_valid = false;
     return;
   }
   GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
@@ -671,6 +679,9 @@ void VideoPlayer::Play() {
       gst_element_set_state(playbin_, GST_STATE_PLAYING);
   if (ret == GST_STATE_CHANGE_FAILURE) {
     spdlog::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
+  } else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
+    is_live_ = TRUE;
+    SPDLOG_DEBUG("[VideoPlayer] Pipeline is live");
   }
 }
 

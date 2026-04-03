@@ -145,8 +145,8 @@ class Shader {
     glGenBuffers(1, &vertex_buffer_);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_);
     static constexpr GLfloat g_vertex_buffer_data[] = {
-        -0.5f, 0.5f,  0.0f, 0.5f,  0.5f,  0.0f, 0.5f,  -0.5f, 0.0f,
-        0.5f,  -0.5f, 0.0f, -0.5f, -0.5f, 0.0f, -0.5f, 0.5f,  0.0f,
+        -1.0f, 1.0f,  0.0f, 1.0f,  1.0f,  0.0f, 1.0f,  -1.0f, 0.0f,
+        1.0f,  -1.0f, 0.0f, -1.0f, -1.0f, 0.0f, -1.0f, 1.0f,  0.0f,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data),
                  g_vertex_buffer_data, GL_STATIC_DRAW);
@@ -276,7 +276,7 @@ class Shader {
     glCompileShader(fragment_shader_);
     glGetShaderiv(fragment_shader_, GL_COMPILE_STATUS, &result);
     if (result == GL_FALSE) {
-      glGetShaderInfoLog(vertex_shader_, info.size(), &length, info.data());
+      glGetShaderInfoLog(fragment_shader_, info.size(), &length, info.data());
       SPDLOG_ERROR("Failed to compile {}", std::string(info.data(), length));
       return 0;
     }
@@ -302,7 +302,7 @@ class Shader {
 
   void draw_core() const {
     SPDLOG_TRACE("[VideoPlayer] draw_core");
-    glViewport(-width / 2, -height / 2, width * 2, height * 2);
+    glViewport(0, 0, width, height);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glUseProgram(program);
