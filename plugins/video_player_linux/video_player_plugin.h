@@ -20,6 +20,10 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_homescreen.h>
 
+extern "C" {
+#include <libavformat/avformat.h>
+}
+
 #include "flutter_desktop_plugin_registrar.h"
 #include "messages.g.h"
 #include "video_player.h"
