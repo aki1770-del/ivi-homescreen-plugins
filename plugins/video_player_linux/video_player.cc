@@ -22,6 +22,8 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
 
+#include <climits>
+
 #include <backend/backend.h>
 #include <plugins/common/common.h>
 #include <utility>
@@ -56,6 +58,14 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   SPDLOG_DEBUG(
       "[VideoPlayer] uri: {}, http_headers: {}, size: {} x {}, duration: {}",
       uri.c_str(), http_headers_.size(), width, height, duration);
+
+  gst_video_info_init(&info_);
+
+  if (width_ <= 0 || height_ <= 0) {
+    SPDLOG_ERROR("[VideoPlayer] Invalid dimensions: {}x{}", width_, height_);
+    m_valid = false;
+    return;
+  }
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
@@ -99,6 +109,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   playbin_ = gst_element_factory_make("playbin", nullptr);
   if (!playbin_) {
     SPDLOG_ERROR("[VideoPlayer] Failed to create playbin element");
+    m_valid = false;
     return;
   }
   g_object_set(playbin_, "uri", uri_.c_str(), nullptr);
@@ -123,7 +134,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
     char* end = nullptr;
     const long val = std::strtol(env, &end, 10);
-    if (end != env && val > 0) {
+    if (end != env && val > 0 && val <= INT_MAX) {
       connection_speed = static_cast<int>(val);
     }
   }
@@ -133,6 +144,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   sink_ = gst_element_factory_make("fakesink", nullptr);
   if (!sink_) {
     SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
+    m_valid = false;
     return;
   }
   g_object_set(sink_, "sync", TRUE, nullptr);
@@ -144,6 +156,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   video_convert_ = gst_element_factory_make("videoconvert", nullptr);
   if (!video_convert_) {
     SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
+    m_valid = false;
     return;
   }
 
@@ -153,6 +166,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   video_scale_ = gst_element_factory_make("videoscale", nullptr);
   if (!video_scale_) {
     SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
+    m_valid = false;
     return;
   }
 
@@ -212,24 +226,39 @@ void VideoPlayer::Dispose() {
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
-  g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
-  g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
+  if (bus_) {
+    g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
+  }
+  if (sink_) {
+    g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
+  }
 
-  gst_element_set_state(playbin_, GST_STATE_NULL);
+  if (playbin_) {
+    gst_element_set_state(playbin_, GST_STATE_NULL);
+  }
 
   {
     // Ensure no in-flight handoff callback is using the shader
     std::lock_guard gst_lock(gst_mutex_);
-    std::lock_guard ctx_lock(g_texture_context_mutex);
-    m_registrar->texture_registrar()->TextureMakeCurrent();
-    shader_.reset();
-    m_registrar->texture_registrar()->TextureClearCurrent();
+    if (shader_) {
+      std::lock_guard ctx_lock(g_texture_context_mutex);
+      m_registrar->texture_registrar()->TextureMakeCurrent();
+      shader_.reset();
+      m_registrar->texture_registrar()->TextureClearCurrent();
+    }
   }
 
-  SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
-  m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
+  if (m_texture_id != 0) {
+    SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
+    m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
+    m_texture_id = 0;
+  }
 
-  m_texture_id = 0;
+  if (bus_) {
+    gst_object_unref(bus_);
+    bus_ = nullptr;
+  }
+
   {
     std::lock_guard event_lock(event_mutex_);
     event_sink_ = nullptr;
@@ -296,7 +325,7 @@ void VideoPlayer::Pause() {
 }
 
 int64_t VideoPlayer::GetPosition() {
-  gint64 pos;
+  gint64 pos = 0;
   if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
     position_ = pos;
     SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
@@ -316,7 +345,7 @@ void VideoPlayer::SendBufferingUpdate() {
   if (gst_element_query(playbin_, query)) {
     const guint n_ranges = gst_query_get_n_buffering_ranges(query);
     for (guint i = 0; i < n_ranges; i++) {
-      gint64 start, stop;
+      gint64 start = 0, stop = 0;
       if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
         values.emplace_back(
             std::in_place_type<flutter::EncodableList>,
@@ -467,15 +496,13 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
     SetBuffering(true);
     SendBufferingUpdate();
   } else {
-    if (!is_initialized_) {
-      is_initialized_ = true;
-    }
     SetBuffering(false);
 
     if (state == GST_STATE_PLAYING) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
                    m_texture_id);
       prepare(this);
+      is_initialized_ = true;
       ApplyPlaybackSpeed();
     } else if (state == GST_STATE_READY) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
@@ -541,25 +568,32 @@ void VideoPlayer::OnTag(const GstTagList* list,
   const std::string tag_str = tag;
   if (const auto type = gst_tag_get_type(tag);
       tag_str == "audio-codec" && type == 64) {
-    gchar* value;
-    gst_tag_list_get_string(list, tag, &value);
-    spdlog::debug("[VideoPlayer] audio-codec: {}", value);
+    gchar* value = nullptr;
+    if (gst_tag_list_get_string(list, tag, &value) && value) {
+      spdlog::debug("[VideoPlayer] audio-codec: {}", value);
+      g_free(value);
+    }
   } else if (tag_str == "video-codec" && type == 64) {
-    gchar* value;
-    gst_tag_list_get_string(list, tag, &value);
-    spdlog::debug("[VideoPlayer] video-codec: {}", value);
+    gchar* value = nullptr;
+    if (gst_tag_list_get_string(list, tag, &value) && value) {
+      spdlog::debug("[VideoPlayer] video-codec: {}", value);
+      g_free(value);
+    }
   } else if (tag_str == "maximum-bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] maximum-bitrate: {}", value);
+    guint value = 0;
+    if (gst_tag_list_get_uint(list, tag, &value)) {
+      spdlog::debug("[VideoPlayer] maximum-bitrate: {}", value);
+    }
   } else if (tag_str == "minimum-bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] minimum-bitrate: {}", value);
+    guint value = 0;
+    if (gst_tag_list_get_uint(list, tag, &value)) {
+      spdlog::debug("[VideoPlayer] minimum-bitrate: {}", value);
+    }
   } else if (tag_str == "bitrate" && type == 28) {
-    guint value;
-    gst_tag_list_get_uint(list, tag, &value);
-    spdlog::debug("[VideoPlayer] bitrate: {}", value);
+    guint value = 0;
+    if (gst_tag_list_get_uint(list, tag, &value)) {
+      spdlog::debug("[VideoPlayer] bitrate: {}", value);
+    }
   }
 }
 
@@ -568,11 +602,14 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
                                   GstPad* /* pad */,
                                   void* user_data) {
   const auto obj = static_cast<VideoPlayer*>(user_data);
-  if (!obj->m_valid || !obj->is_initialized_ || obj->info_.finfo == nullptr) {
+  if (!obj->m_valid || !obj->is_initialized_) {
     return;
   }
 
   std::lock_guard lock(obj->gst_mutex_);
+  if (obj->info_.finfo == nullptr || !obj->shader_) {
+    return;
+  }
   GstVideoFrame frame;
   if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
     {
@@ -620,14 +657,13 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
   }
 }
 
-gboolean VideoPlayer::OnBusMessage(GstBus* bus,
+gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
                                    GstMessage* msg,
                                    void* user_data) {
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
       obj->OnMediaError(msg);
-      gst_object_unref(bus);
       return FALSE;
     case GST_MESSAGE_EOS: {
       SPDLOG_DEBUG("[VideoPlayer] EOS: texture_id: {}", obj->m_texture_id);
@@ -811,7 +847,7 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
     // TODO g_main_loop_quit(obj->main_loop_);
     return;
   }
-  const GstCaps* caps = gst_pad_get_current_caps(pad);
+  GstCaps* caps = gst_pad_get_current_caps(pad);
   if (!caps) {
     SPDLOG_ERROR("[VideoPlayer] Failed to get caps from video pad");
     gst_object_unref(pad);
@@ -820,9 +856,8 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
   std::lock_guard lock(user_data->gst_mutex_);
   if (!gst_video_info_from_caps(&user_data->info_, caps)) {
     SPDLOG_ERROR("[VideoPlayer] Fail to get video info from the cap");
-    // TODO g_main_loop_quit(data->main_loop);
-    // return;
   }
+  gst_caps_unref(caps);
   SPDLOG_DEBUG("[VideoPlayer] original video width: {}, height: {}",
                user_data->info_.width, user_data->info_.height);
   // set to the target
@@ -831,7 +866,6 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
                                  static_cast<guint>(user_data->height_))) {
     SPDLOG_ERROR("[VideoPlayer] Failed to set the video info to target NV12");
   }
-  user_data->is_initialized_ = true;
 }
 
 }  // namespace video_player_linux

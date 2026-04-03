@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -134,6 +133,9 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     if (!discover_video_info(asset_to_load.c_str(), width, height, duration)) {
       return FlutterError("video_info_failed",
                           "Failed to discover video information");
+    }
+    if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
+      return FlutterError("video_info_failed", "Invalid video dimensions");
     }
 
     player = std::make_unique<VideoPlayer>(registrar_, asset_to_load.c_str(),
@@ -285,11 +287,14 @@ bool VideoPlayerPlugin::discover_video_info(const char* url,
 
   duration = static_cast<gint64>(gst_discoverer_info_get_duration(info));
 
-  GList* video_streams = gst_discoverer_info_get_video_streams(info);
-  if (video_streams) {
-    auto* vinfo = static_cast<GstDiscovererVideoInfo*>(video_streams->data);
-    width = static_cast<int>(gst_discoverer_video_info_get_width(vinfo));
-    height = static_cast<int>(gst_discoverer_video_info_get_height(vinfo));
+  if (GList* video_streams = gst_discoverer_info_get_video_streams(info)) {
+    auto* stream_info =
+        static_cast<GstDiscovererStreamInfo*>(video_streams->data);
+    if (GST_IS_DISCOVERER_VIDEO_INFO(stream_info)) {
+      auto* vinfo = GST_DISCOVERER_VIDEO_INFO(stream_info);
+      width = static_cast<int>(gst_discoverer_video_info_get_width(vinfo));
+      height = static_cast<int>(gst_discoverer_video_info_get_height(vinfo));
+    }
     gst_discoverer_stream_info_list_free(video_streams);
   } else {
     spdlog::error("[VideoPlayer] No video stream found in {}", url);

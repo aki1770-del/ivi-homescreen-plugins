@@ -64,8 +64,8 @@ class Shader {
   GLuint framebuffer{};
   GLuint backTextureId{};
   GLuint backFramebuffer{};
-  GLuint program;
-  GLsizei width, height;
+  GLuint program{};
+  GLsizei width{}, height{};
   GLuint vertex_arr_id_{};
 
   Shader(GLsizei _width, GLsizei _height) : width(_width), height(_height) {
@@ -132,22 +132,6 @@ class Shader {
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-
-    auto size = static_cast<unsigned long>(width) *
-                static_cast<unsigned long>(height) * 3;
-    auto pixels = new unsigned char[size]{0};
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, static_cast<GLsizei>(width),
-                 static_cast<GLsizei>(height), 0, GL_RGB, GL_UNSIGNED_BYTE,
-                 pixels);
-    delete[] pixels;
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                    GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glGenerateMipmap(GL_TEXTURE_2D);
 
     glGenBuffers(1, &vertex_buffer_);
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer_);
