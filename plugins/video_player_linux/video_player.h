@@ -125,7 +125,7 @@ class VideoPlayer {
   void OnPlaybackEnded();
   void OnMediaInitialized();
   void OnMediaStateChange(GstState state);
-  static void OnMediaError(GstMessage* msg);
+  void OnMediaError(GstMessage* msg);
   void OnMediaDurationChange();
   void SendInitialized();
 

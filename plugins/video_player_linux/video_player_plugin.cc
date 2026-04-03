@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -147,16 +148,10 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
       spdlog::error("Failed to get video info");
     }
 
-    const auto gst_codec = map_ffmpeg_plugin(codec_id);
-    if (!gst_codec[0]) {
-      spdlog::critical("[VideoPlayer] Failed to find codec: {}", gst_codec);
-    }
-    const auto decoder_factory = gst_element_factory_find(gst_codec);
+    const auto decoder_factory = find_decoder_factory(codec_id);
     if (decoder_factory == nullptr) {
-      spdlog::error(
-          "[VideoPlayer] Failed to find decoder: {}.  May be a missing "
-          "runtime package",
-          gst_codec);
+      return FlutterError("codec_load_failed",
+                          "No suitable decoder found for this codec");
     }
 
     player = std::make_unique<VideoPlayer>(registrar_, asset_to_load.c_str(),
@@ -330,6 +325,54 @@ bool VideoPlayerPlugin::get_video_info(const char* url,
 
   avformat_free_context(fmt_ctx);
   return true;
+}
+
+GstElementFactory* VideoPlayerPlugin::find_decoder_factory(
+    const AVCodecID codec_id) {
+  // Hardware decoder candidates per codec, tried in priority order.
+  // vaapidecodebin works across Intel/AMD, v4l2 for embedded SoCs, nv for
+  // NVIDIA.
+  struct HwDecoder {
+    const char* name;
+  };
+
+  // clang-format off
+  static const std::map<AVCodecID, std::vector<HwDecoder>> kHwDecoders = {
+      {AV_CODEC_ID_H264,  {{"vaapidecodebin"}, {"v4l2h264dec"},  {"nvh264dec"}}},
+      {AV_CODEC_ID_H265,  {{"vaapidecodebin"}, {"v4l2h265dec"},  {"nvh265dec"}}},
+      {AV_CODEC_ID_VP8,   {{"vaapidecodebin"}, {"v4l2vp8dec"},   {"nvvp8dec"}}},
+      {AV_CODEC_ID_VP9,   {{"vaapidecodebin"}, {"v4l2vp9dec"},   {"nvvp9dec"}}},
+      {AV_CODEC_ID_MPEG2VIDEO, {{"vaapidecodebin"}, {"v4l2mpeg2dec"}}},
+      {AV_CODEC_ID_MPEG4, {{"vaapidecodebin"}, {"v4l2mpeg4dec"}}},
+  };
+  // clang-format on
+
+  // Try hardware decoders first
+  if (const auto it = kHwDecoders.find(codec_id); it != kHwDecoders.end()) {
+    for (const auto& [name] : it->second) {
+      GstElementFactory* factory = gst_element_factory_find(name);
+      if (factory) {
+        SPDLOG_DEBUG("[VideoPlayer] Using hardware decoder: {}", name);
+        return factory;
+      }
+    }
+  }
+
+  // Fall back to software decoder
+  const auto sw_name = map_ffmpeg_plugin(codec_id);
+  if (sw_name[0]) {
+    GstElementFactory* factory = gst_element_factory_find(sw_name);
+    if (factory) {
+      SPDLOG_DEBUG("[VideoPlayer] Using software decoder: {}", sw_name);
+      return factory;
+    }
+    spdlog::error(
+        "[VideoPlayer] Failed to find decoder: {}. May be a missing runtime "
+        "package",
+        sw_name);
+  }
+
+  return nullptr;
 }
 
 const char* VideoPlayerPlugin::map_ffmpeg_plugin(const AVCodecID codec_id) {

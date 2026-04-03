@@ -24,6 +24,7 @@
 
 #include <backend/backend.h>
 #include <plugins/common/common.h>
+#include <cstdlib>
 #include <utility>
 
 #define GSTREAMER_DEBUG 0
@@ -113,7 +114,14 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
-  g_object_set(playbin_, "connection-speed", 56, nullptr);
+  int connection_speed = 10000;
+  if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
+    connection_speed = std::atoi(env);
+    if (connection_speed <= 0) {
+      connection_speed = 10000;
+    }
+  }
+  g_object_set(playbin_, "connection-speed", connection_speed, nullptr);
   g_object_set(playbin_, "volume", volume_, nullptr);
 
   sink_ = gst_element_factory_make("fakesink", nullptr);
@@ -203,13 +211,19 @@ void VideoPlayer::OnMediaError(GstMessage* msg) {
   GError* err;
   gchar* debug_info;
   gst_message_parse_error(msg, &err, &debug_info);
+  const std::string error_msg = err->message ? err->message : "Unknown error";
   spdlog::error("[VideoPlayer] Error: {}:{}", GST_OBJECT_NAME(msg->src),
-                err->message);
+                error_msg);
   if (debug_info) {
     spdlog::error("[VideoPlayer] {}", debug_info);
     g_free(debug_info);
   }
   g_clear_error(&err);
+
+  std::lock_guard event_lock(event_mutex_);
+  if (event_sink_) {
+    event_sink_->Error("VideoPlayerError", error_msg);
+  }
 }
 
 void VideoPlayer::OnMediaDurationChange() {
@@ -226,7 +240,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
     case GST_MESSAGE_ERROR:
-      OnMediaError(msg);
+      obj->OnMediaError(msg);
       gst_object_unref(bus);
       return FALSE;
     case GST_MESSAGE_EOS: {
@@ -297,22 +311,22 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
         // a 100% message means buffering is done
         if (obj->is_buffering_) {
           obj->is_buffering_ = false;
-          obj->SetBuffering(obj->is_buffering_);
+          obj->SetBuffering(false);
         }
-        // if the desired state is playing, go back
-        //        if (obj->target_state_ == GST_STATE_PLAYING) {
-        //          gst_element_set_state(obj->playbin_, GST_STATE_PLAYING);
-        //        }
+        // if the desired state is playing, resume
+        if (obj->target_state_ == GST_STATE_PLAYING) {
+          gst_element_set_state(obj->playbin_, GST_STATE_PLAYING);
+        }
       } else {
         // buffering busy
         if (!obj->is_buffering_ && obj->target_state_ == GST_STATE_PLAYING) {
-          // we were not buffering but PLAYING, PAUSE the pipeline
-          //          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
+          // pause the pipeline while buffering
+          gst_element_set_state(obj->playbin_, GST_STATE_PAUSED);
         }
-        // if (!obj->is_buffering_) {
-        obj->is_buffering_ = true;
-        obj->SetBuffering(obj->is_buffering_);
-        //}
+        if (!obj->is_buffering_) {
+          obj->is_buffering_ = true;
+          obj->SetBuffering(true);
+        }
       }
       break;
     }
@@ -590,10 +604,10 @@ void VideoPlayer::Dispose() {
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
-  Pause();
-
   g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
   g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
+
+  gst_element_set_state(playbin_, GST_STATE_NULL);
 
   {
     // Ensure no in-flight handoff callback is using the shader
@@ -628,18 +642,24 @@ void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
   const gint64 pos = position_.load();
   GstEvent* seek_event;
   if (playbackSpeed > 0) {
+    // Forward playback: from current position to end
     seek_event = gst_event_new_seek(
         playbackSpeed, GST_FORMAT_TIME,
         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_END, 0);
   } else {
+    // Reverse playback: from beginning to current position
     seek_event = gst_event_new_seek(
         playbackSpeed, GST_FORMAT_TIME,
         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
         GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_SET, pos);
   }
 
-  gst_element_send_event(sink_, seek_event);
+  if (!gst_element_send_event(sink_, seek_event)) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
+                 playbackSpeed);
+    return;
+  }
   rate_ = playbackSpeed;
 
   SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
