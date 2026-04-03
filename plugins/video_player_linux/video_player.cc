@@ -278,7 +278,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* bus,
       gst_message_parse_buffering(msg, &percent);
       // SPDLOG_DEBUG("Buffering: {}%", percent);
 
-      // TODO - bufferingUpdate
+      obj->SendBufferingUpdate();
 
       if (percent == 100) {
         // a 100% message means buffering is done
@@ -516,6 +516,17 @@ void VideoPlayer::SendInitialized() {
 }
 
 void VideoPlayer::OnPlaybackEnded() {
+  if (is_looping_) {
+    SPDLOG_DEBUG("[VideoPlayer] Looping: seeking to start");
+    if (!gst_element_seek_simple(
+            playbin_, GST_FORMAT_TIME,
+            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
+                                      GST_SEEK_FLAG_SEGMENT),
+            0)) {
+      SPDLOG_ERROR("[VideoPlayer] Loop seek failed");
+    }
+    return;
+  }
   std::lock_guard event_lock(event_mutex_);
   if (event_sink_) {
     SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
@@ -663,13 +674,21 @@ void VideoPlayer::SendBufferingUpdate() {
     return;
   }
   auto values = flutter::EncodableList();
-  // TODO ranges = player GetBufferedRanges();
-  const std::vector<std::tuple<uint64_t, uint64_t>> ranges;
-  for (auto& it : ranges) {
-    values.emplace_back(flutter::EncodableList(
-        {flutter::EncodableValue(static_cast<int64_t>(std::get<0>(it))),
-         flutter::EncodableValue(static_cast<int64_t>(std::get<1>(it)))}));
+
+  GstQuery* query = gst_query_new_buffering(GST_FORMAT_TIME);
+  if (gst_element_query(playbin_, query)) {
+    const guint n_ranges = gst_query_get_n_buffering_ranges(query);
+    for (guint i = 0; i < n_ranges; i++) {
+      gint64 start, stop;
+      if (gst_query_parse_nth_buffering_range(query, i, &start, &stop)) {
+        values.emplace_back(flutter::EncodableList(
+            {flutter::EncodableValue(static_cast<int64_t>(start / AV_TIME_BASE)),
+             flutter::EncodableValue(
+                 static_cast<int64_t>(stop / AV_TIME_BASE))}));
+      }
+    }
   }
+  gst_query_unref(query);
 
   auto res = flutter::EncodableMap(
       {{flutter::EncodableValue("event"),
