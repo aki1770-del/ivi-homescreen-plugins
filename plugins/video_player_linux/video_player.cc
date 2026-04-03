@@ -425,7 +425,6 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
   if (gst_video_frame_map(&frame, &obj->info_, buffer, GST_MAP_READ)) {
     obj->m_registrar->texture_registrar()->TextureMakeCurrent();
     glBindVertexArray(obj->shader_->vertex_arr_id_);
-    glClear(GL_COLOR_BUFFER_BIT);
 
     if (const guint n_planes = GST_VIDEO_INFO_N_PLANES(&obj->info_);
         n_planes == 2) {
@@ -442,8 +441,12 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
     }
     gst_video_frame_unmap(&frame);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->framebuffer);
+    // Render NV12->RGBA into the back buffer
+    glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
     obj->shader_->draw_core();
+
+    // Blit back buffer to the front (Flutter-registered) texture
+    obj->shader_->blit_to_front();
 
     obj->m_registrar->texture_registrar()->TextureClearCurrent();
     obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(

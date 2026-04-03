@@ -62,6 +62,8 @@ class Shader {
  public:
   GLuint textureId{};
   GLuint framebuffer{};
+  GLuint backTextureId{};
+  GLuint backFramebuffer{};
   GLuint program;
   GLsizei width, height;
   GLuint vertex_arr_id_{};
@@ -99,6 +101,30 @@ class Shader {
     if (status != GL_FRAMEBUFFER_COMPLETE) {
       spdlog::error("FramebufferStatus: 0x{:X}", status);
     }
+
+    // Back buffer for double-buffered rendering
+    glGenFramebuffers(1, &backFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, backFramebuffer);
+
+    glGenTextures(1, &backTextureId);
+    glBindTexture(GL_TEXTURE_2D, backTextureId);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           backTextureId, 0);
+
+    auto backStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (backStatus != GL_FRAMEBUFFER_COMPLETE) {
+      spdlog::error("Back FramebufferStatus: 0x{:X}", backStatus);
+    }
+
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 
     auto size = static_cast<unsigned long>(width) *
                 static_cast<unsigned long>(height) * 3;
@@ -152,10 +178,22 @@ class Shader {
     glDeleteBuffers(1, &vertex_buffer_);
     glDeleteVertexArrays(1, &vertex_arr_id_);
     glDeleteProgram(program);
+    glDeleteTextures(1, &backTextureId);
+    glDeleteFramebuffers(1, &backFramebuffer);
     glDeleteTextures(1, &textureId);
     glDeleteTextures(2, &innerTexture[0]);
     glDeleteFramebuffers(1, &framebuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+
+  void blit_to_front() {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, backFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glFinish();
   }
 
   /**
