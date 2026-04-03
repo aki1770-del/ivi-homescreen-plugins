@@ -91,21 +91,22 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   context_ = g_main_context_get_thread_default();
 
   playbin_ = gst_element_factory_make("playbin", nullptr);
-  assert(playbin_);
+  if (!playbin_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create playbin element");
+    return;
+  }
   g_object_set(playbin_, "uri", uri_.c_str(), nullptr);
 
   if (!http_headers_.empty()) {
-    std::stringstream ss;
-    for (auto& [key, value] : http_headers_) {
-      ss << key << ":" << value << " ";
-    }
-    SPDLOG_DEBUG("extra-headers: {}", ss.str().c_str());
     GstStructure* extraHeaders =
-        gst_structure_from_string(ss.str().c_str(), nullptr);
-    if (extraHeaders != nullptr) {
-      g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
-      gst_structure_free(extraHeaders);
+        gst_structure_new_empty("extra-headers");
+    for (const auto& [key, value] : http_headers_) {
+      gst_structure_set(extraHeaders, key.c_str(), G_TYPE_STRING,
+                        value.c_str(), nullptr);
+      SPDLOG_DEBUG("extra-header: {}:{}", key, value);
     }
+    g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
+    gst_structure_free(extraHeaders);
   }
 
   gint flags = 0;
@@ -117,7 +118,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_object_set(playbin_, "volume", volume_, nullptr);
 
   sink_ = gst_element_factory_make("fakesink", nullptr);
-  assert(sink_);
+  if (!sink_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
+    return;
+  }
   g_object_set(sink_, "sync", TRUE, nullptr);
   g_object_set(sink_, "signal-handoffs", TRUE, nullptr);
   g_object_set(sink_, "can-activate-pull", TRUE, nullptr);
@@ -125,16 +129,25 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
       sink_, "handoff", reinterpret_cast<GCallback>(handoff_handler), this);
 
   decoder_ = gst_element_factory_create(decoder_factory, "decoder");
-  assert(decoder_);
+  if (!decoder_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create decoder element");
+    return;
+  }
 
   video_convert_ = gst_element_factory_make("videoconvert", nullptr);
-  assert(video_convert_);
+  if (!video_convert_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
+    return;
+  }
 
   GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
                                       "NV12", nullptr);
 
   video_scale_ = gst_element_factory_make("videoscale", nullptr);
-  assert(video_scale_);
+  if (!video_scale_) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
+    return;
+  }
 
   GstCaps* scale =
       gst_caps_new_simple("video/x-raw", "width", G_TYPE_INT, width_, "height",
@@ -732,7 +745,11 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
     return;
   }
   const GstCaps* caps = gst_pad_get_current_caps(pad);
-  assert(caps);
+  if (!caps) {
+    SPDLOG_ERROR("[VideoPlayer] Failed to get caps from video pad");
+    gst_object_unref(pad);
+    return;
+  }
   std::lock_guard lock(user_data->gst_mutex_);
   if (!gst_video_info_from_caps(&user_data->info_, caps)) {
     SPDLOG_ERROR("[VideoPlayer] Fail to get video info from the cap");

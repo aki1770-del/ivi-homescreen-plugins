@@ -16,13 +16,17 @@
 
 #include "video_player_plugin.h"
 
+#include <array>
+#include <cstring>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
 
 extern "C" {
+#include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/dict.h>
 }
 
 #include "messages.g.h"
@@ -63,6 +67,23 @@ std::optional<FlutterError> VideoPlayerPlugin::Initialize() {
   return std::nullopt;
 }
 
+static bool is_allowed_uri_scheme(const std::string& uri) {
+  static constexpr std::array<const char*, 4> kAllowedSchemes = {
+      "file://", "http://", "https://", "rtsp://"};
+  for (const auto* scheme : kAllowedSchemes) {
+    if (uri.compare(0, strlen(scheme), scheme) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool has_header_injection(const std::string& value) {
+  return value.find('\r') != std::string::npos ||
+         value.find('\n') != std::string::npos ||
+         value.find('\0') != std::string::npos;
+}
+
 ErrorOr<int64_t> VideoPlayerPlugin::Create(
     const std::string* asset,
     const std::string* uri,
@@ -88,13 +109,26 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     }
     asset_to_load += path.c_str();
   } else if (uri && !uri->empty()) {
+    if (!is_allowed_uri_scheme(*uri)) {
+      spdlog::error("[VideoPlayer] Unsupported URI scheme: {}", *uri);
+      return FlutterError("uri_load_failed",
+                          "URI scheme not allowed. "
+                          "Supported: file, http, https, rtsp");
+    }
     asset_to_load = *uri;
 
     for (const auto& [key, value] : http_headers) {
       if (std::holds_alternative<std::string>(key) &&
           std::holds_alternative<std::string>(value)) {
-        http_headers_[std::get<std::string>(key)] =
-            std::get<std::string>(value);
+        const auto& k = std::get<std::string>(key);
+        const auto& v = std::get<std::string>(value);
+        if (has_header_injection(k) || has_header_injection(v)) {
+          spdlog::error(
+              "[VideoPlayer] Rejected HTTP header with control characters");
+          return FlutterError("invalid_headers",
+                              "HTTP header contains invalid characters");
+        }
+        http_headers_[k] = v;
       }
     }
   } else {
@@ -255,11 +289,17 @@ bool VideoPlayerPlugin::get_video_info(const char* url,
                                        AVCodecID& codec_id) {
   AVFormatContext* fmt_ctx = avformat_alloc_context();
 
-  if (avformat_open_input(&fmt_ctx, url, nullptr, nullptr) < 0) {
+  AVDictionary* opts = nullptr;
+  av_dict_set(&opts, "protocol_whitelist", "file,http,https,tcp,tls,rtsp,rtp,udp", 0);
+  av_dict_set(&opts, "timeout", "10000000", 0);  // 10 seconds in microseconds
+
+  if (avformat_open_input(&fmt_ctx, url, nullptr, &opts) < 0) {
     spdlog::error("[VideoPlayer] Unable to open: {}", url);
+    av_dict_free(&opts);
     avformat_free_context(fmt_ctx);
     return false;
   }
+  av_dict_free(&opts);
 
   if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
     spdlog::error("[VideoPlayer] Cannot find stream information: {}", url);
