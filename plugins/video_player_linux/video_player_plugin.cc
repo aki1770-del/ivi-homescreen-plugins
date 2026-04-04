@@ -88,8 +88,8 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     if (asset->c_str()[0] == '/') {
       path /= asset->c_str();
     } else {
-      path = registrar_->flutter_asset_folder();
-      SPDLOG_DEBUG("path: [{}]", registrar_->flutter_asset_folder());
+      path = std::filesystem::absolute(registrar_->flutter_asset_folder());
+      SPDLOG_DEBUG("path: [{}]", path.c_str());
       path /= asset->c_str();
     }
     if (!exists(path)) {

@@ -125,6 +125,19 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
     gst_structure_free(extraHeaders);
   }
 
+  // Use autoaudiosink so playbin falls back gracefully when a specific
+  // backend (e.g. ALSA) is unavailable.  If no audio output exists at all,
+  // route audio to a fakesink so the pipeline still starts for video-only
+  // playback.
+  GstElement* audio_sink = gst_element_factory_make("autoaudiosink", nullptr);
+  if (!audio_sink) {
+    SPDLOG_WARN("[VideoPlayer] No audio sink available, using fakesink");
+    audio_sink = gst_element_factory_make("fakesink", nullptr);
+  }
+  if (audio_sink) {
+    g_object_set(playbin_, "audio-sink", audio_sink, nullptr);
+  }
+
   gint flags = 0;
   g_object_get(playbin_, "flags", &flags, nullptr);
   flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
@@ -467,16 +480,30 @@ void VideoPlayer::ApplyPlaybackSpeed() {
   SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
 }
 
+gboolean VideoPlayer::OnAudioRecovery(gpointer user_data) {
+  auto* self = static_cast<VideoPlayer*>(user_data);
+  SPDLOG_DEBUG("[VideoPlayer] Audio recovery: restarting without audio");
+
+  gint flags = 0;
+  g_object_get(self->playbin_, "flags", &flags, nullptr);
+  flags &= ~GST_PLAY_FLAG_AUDIO;
+  g_object_set(self->playbin_, "flags", flags, nullptr);
+
+  self->is_buffering_ = false;
+  self->sent_initialized_ = false;
+
+  gst_element_set_state(self->playbin_, GST_STATE_NULL);
+  gst_element_set_state(self->playbin_,
+                        static_cast<GstState>(self->target_state_.load()));
+  return G_SOURCE_REMOVE;
+}
+
 void VideoPlayer::OnPlaybackEnded() {
   if (is_looping_) {
-    SPDLOG_DEBUG("[VideoPlayer] Looping: seeking to start");
-    if (!gst_element_seek_simple(
-            playbin_, GST_FORMAT_TIME,
-            static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
-                                      GST_SEEK_FLAG_SEGMENT),
-            0)) {
-      SPDLOG_ERROR("[VideoPlayer] Loop seek failed");
-    }
+    SPDLOG_DEBUG("[VideoPlayer] Looping: restarting pipeline");
+    is_buffering_ = false;
+    gst_element_set_state(playbin_, GST_STATE_READY);
+    gst_element_set_state(playbin_, GST_STATE_PLAYING);
     return;
   }
   std::lock_guard event_lock(event_mutex_);
@@ -501,6 +528,7 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
     if (state == GST_STATE_PLAYING) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
                    m_texture_id);
+      audio_recovery_ = false;
       prepare(this);
       is_initialized_ = true;
       ApplyPlaybackSpeed();
@@ -662,11 +690,46 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
                                    void* user_data) {
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
-    case GST_MESSAGE_ERROR:
+    case GST_MESSAGE_ERROR: {
+      // When the audio sink fails (no audio device), the error cascades
+      // upstream causing the source to also error out.  Ignore all errors
+      // while we are restarting the pipeline without audio.
+      if (obj->audio_recovery_) {
+        SPDLOG_DEBUG("[VideoPlayer] Ignoring error during audio recovery: {}",
+                     GST_OBJECT_NAME(msg->src));
+        break;
+      }
+
+      const gchar* src_name = GST_OBJECT_NAME(msg->src);
+      const bool is_audio_error =
+          src_name && (g_str_has_prefix(src_name, "alsasink") ||
+                       g_str_has_prefix(src_name, "pulsesink") ||
+                       g_str_has_prefix(src_name, "autoaudiosink") ||
+                       g_str_has_prefix(src_name, "pipewire"));
+
+      if (is_audio_error) {
+        spdlog::warn("[VideoPlayer] Audio sink error from {}, disabling audio",
+                     src_name);
+        obj->audio_recovery_ = true;
+
+        // Defer the restart to an idle callback so the bus handler returns
+        // first, allowing cascading errors to drain without deadlocking
+        // the HTTP source teardown on network streams.
+        GSource* idle = g_idle_source_new();
+        g_source_set_callback(idle, OnAudioRecovery, obj, nullptr);
+        g_source_attach(idle, obj->context_);
+        g_source_unref(idle);
+        break;
+      }
       obj->OnMediaError(msg);
       return FALSE;
-    case GST_MESSAGE_EOS: {
-      SPDLOG_DEBUG("[VideoPlayer] EOS: texture_id: {}", obj->m_texture_id);
+    }
+    case GST_MESSAGE_EOS:
+    case GST_MESSAGE_SEGMENT_DONE: {
+      SPDLOG_DEBUG(
+          "[VideoPlayer] {}: texture_id: {}",
+          (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS ? "EOS" : "Segment done"),
+          obj->m_texture_id);
       obj->OnPlaybackEnded();
       break;
     }
@@ -725,7 +788,8 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
 
       gint percent;
       gst_message_parse_buffering(msg, &percent);
-      // SPDLOG_DEBUG("Buffering: {}%", percent);
+      SPDLOG_DEBUG("[VideoPlayer] Buffering: {}% texture_id: {}", percent,
+                   obj->m_texture_id);
 
       obj->SendBufferingUpdate();
 
