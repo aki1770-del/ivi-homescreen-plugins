@@ -107,12 +107,14 @@ class VideoPlayer {
   std::mutex gst_mutex_;
   std::mutex event_mutex_;
 
+  std::atomic<bool> audio_recovery_{false};
   std::atomic<bool> is_initialized_{false};
   std::atomic<bool> sent_initialized_{false};
   void SetBuffering(bool buffering);
 
   void ApplyPlaybackSpeed();
   void OnPlaybackEnded();
+  static gboolean OnAudioRecovery(gpointer user_data);
   static void OnMediaInitialized();
   void OnMediaStateChange(GstState state);
   void OnMediaError(GstMessage* msg);
