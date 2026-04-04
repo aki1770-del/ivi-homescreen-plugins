@@ -214,29 +214,38 @@ class Shader {
     glBindTexture(GL_TEXTURE_2D, innerTexture[0]);
     glUniform1i(texY, 0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // Tell OpenGL the row stride so it skips padding bytes beyond the
+    // visible width.  Without this, stride padding pixels (garbage/green
+    // in NV12) appear on the right edge of the frame.
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, y_s);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                     GL_LINEAR_MIPMAP_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, y_s, height, 0, GL_RED,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
                  GL_UNSIGNED_BYTE, y_buf);
     glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, innerTexture[1]);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glUniform1i(texUV, 1);
+    // UV plane: each RG pair covers 2 horizontal pixels, so row length
+    // is half the byte stride.
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, uv_s / 2);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER,
                     GL_LINEAR_MIPMAP_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, uv_s / 2, height / 2, 0, GL_RG,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
                  GL_UNSIGNED_BYTE, uv_buf);
     glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
     auto fbo_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (fbo_status != GL_FRAMEBUFFER_COMPLETE)
