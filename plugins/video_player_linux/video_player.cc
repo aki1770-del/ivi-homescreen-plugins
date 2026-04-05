@@ -23,6 +23,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <climits>
+#include <cstring>
 
 #include <backend/backend.h>
 #include <plugins/common/common.h>
@@ -74,7 +75,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   {
     std::lock_guard ctx_lock(g_texture_context_mutex);
     m_registrar->texture_registrar()->TextureMakeCurrent();
-    shader_ = std::make_unique<nv12::Shader>(width_, height_);
+    // Double-buffer can be enabled via env var for flicker-sensitive cases.
+    const bool double_buf =
+        std::getenv("VIDEO_PLAYER_DOUBLE_BUFFER") != nullptr;
+    shader_ = std::make_unique<nv12::Shader>(width_, height_, double_buf);
     m_texture_id = shader_->textureId;
     m_registrar->texture_registrar()->TextureClearCurrent();
   }
@@ -125,17 +129,38 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
     gst_structure_free(extraHeaders);
   }
 
-  // Use autoaudiosink so playbin falls back gracefully when a specific
-  // backend (e.g. ALSA) is unavailable.  If no audio output exists at all,
-  // route audio to a fakesink so the pipeline still starts for video-only
-  // playback.
-  GstElement* audio_sink = gst_element_factory_make("autoaudiosink", nullptr);
-  if (!audio_sink) {
-    SPDLOG_WARN("[VideoPlayer] No audio sink available, using fakesink");
-    audio_sink = gst_element_factory_make("fakesink", nullptr);
-  }
-  if (audio_sink) {
-    g_object_set(playbin_, "audio-sink", audio_sink, nullptr);
+  // Try audio sinks in order of preference.  autoaudiosink is avoided
+  // because it can pick ALSA on systems where ALSA devices don't exist
+  // (e.g. WSL2 with PipeWire/PulseAudio over socket), causing the
+  // pipeline to fail during preroll.
+  {
+    GstElement* audio_sink = nullptr;
+    for (const char* name : {"pulsesink", "pipewiresink", "autoaudiosink"}) {
+      audio_sink = gst_element_factory_make(name, nullptr);
+      if (audio_sink) {
+        auto ret = gst_element_set_state(audio_sink, GST_STATE_READY);
+        if (ret != GST_STATE_CHANGE_FAILURE) {
+          gst_element_set_state(audio_sink, GST_STATE_NULL);
+          SPDLOG_DEBUG("[VideoPlayer] Using audio sink: {}", name);
+          audio_upgraded_ = true;  // real sink found, no hotplug needed
+          break;
+        }
+        SPDLOG_DEBUG("[VideoPlayer] Audio sink {} failed READY", name);
+        gst_element_set_state(audio_sink, GST_STATE_NULL);
+        gst_object_unref(audio_sink);
+        audio_sink = nullptr;
+      }
+    }
+    if (!audio_sink) {
+      audio_sink = gst_element_factory_make("fakesink", "fake-audio");
+      if (audio_sink) {
+        g_object_set(audio_sink, "sync", TRUE, nullptr);
+      }
+      spdlog::warn("[VideoPlayer] No audio sink available, using fakesink");
+    }
+    if (audio_sink) {
+      g_object_set(playbin_, "audio-sink", audio_sink, nullptr);
+    }
   }
 
   gint flags = 0;
@@ -143,6 +168,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
+
   int connection_speed = 10000;
   if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
     char* end = nullptr;
@@ -236,6 +262,7 @@ void VideoPlayer::Dispose() {
   SPDLOG_DEBUG("[VideoPlayer] Dispose");
   m_valid = false;
   is_initialized_ = false;
+  StopAudioMonitor();
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
@@ -490,11 +517,150 @@ gboolean VideoPlayer::OnAudioRecovery(gpointer user_data) {
   g_object_set(self->playbin_, "flags", flags, nullptr);
 
   self->is_buffering_ = false;
+  self->is_initialized_ = false;
+  self->sent_initialized_ = false;
+
+  self->is_buffering_ = false;
+  self->is_initialized_ = false;
   self->sent_initialized_ = false;
 
   gst_element_set_state(self->playbin_, GST_STATE_NULL);
   gst_element_set_state(self->playbin_,
                         static_cast<GstState>(self->target_state_.load()));
+  return G_SOURCE_REMOVE;
+}
+
+void VideoPlayer::StartAudioMonitor() {
+  if (udev_mon_)
+    return;  // already running
+
+  udev_ = udev_new();
+  if (!udev_)
+    return;
+
+  udev_mon_ = udev_monitor_new_from_netlink(udev_, "udev");
+  if (!udev_mon_) {
+    udev_unref(udev_);
+    udev_ = nullptr;
+    return;
+  }
+
+  udev_monitor_filter_add_match_subsystem_devtype(udev_mon_, "sound", nullptr);
+  udev_monitor_enable_receiving(udev_mon_);
+
+  int fd = udev_monitor_get_fd(udev_mon_);
+  udev_channel_ = g_io_channel_unix_new(fd);
+  udev_watch_id_ = g_io_add_watch(udev_channel_, G_IO_IN, OnUdevEvent, this);
+
+  SPDLOG_DEBUG("[VideoPlayer] Audio hotplug monitor started");
+
+  // Check if a PCM device already exists (device may have appeared
+  // before the monitor was set up).
+  struct udev_enumerate* enumerate = udev_enumerate_new(udev_);
+  udev_enumerate_add_match_subsystem(enumerate, "sound");
+  udev_enumerate_scan_devices(enumerate);
+  struct udev_list_entry* entry;
+  udev_list_entry_foreach(entry, udev_enumerate_get_list_entry(enumerate)) {
+    const char* path = udev_list_entry_get_name(entry);
+    struct udev_device* dev = udev_device_new_from_syspath(udev_, path);
+    if (dev) {
+      const char* sysname = udev_device_get_sysname(dev);
+      if (sysname && strncmp(sysname, "pcmC", 4) == 0) {
+        SPDLOG_DEBUG("[VideoPlayer] Audio device already present: {}", sysname);
+        udev_device_unref(dev);
+        // Schedule upgrade immediately
+        GSource* idle = g_idle_source_new();
+        g_source_set_callback(idle, OnAudioUpgrade, this, nullptr);
+        g_source_attach(idle, context_);
+        g_source_unref(idle);
+        break;
+      }
+      udev_device_unref(dev);
+    }
+  }
+  udev_enumerate_unref(enumerate);
+}
+
+void VideoPlayer::StopAudioMonitor() {
+  if (udev_watch_id_) {
+    g_source_remove(udev_watch_id_);
+    udev_watch_id_ = 0;
+  }
+  if (udev_channel_) {
+    g_io_channel_unref(udev_channel_);
+    udev_channel_ = nullptr;
+  }
+  if (udev_mon_) {
+    udev_monitor_unref(udev_mon_);
+    udev_mon_ = nullptr;
+  }
+  if (udev_) {
+    udev_unref(udev_);
+    udev_ = nullptr;
+  }
+}
+
+gboolean VideoPlayer::OnUdevEvent(GIOChannel* /*channel*/,
+                                  GIOCondition /*cond*/,
+                                  gpointer user_data) {
+  auto* self = static_cast<VideoPlayer*>(user_data);
+  struct udev_device* dev = udev_monitor_receive_device(self->udev_mon_);
+  if (!dev)
+    return G_SOURCE_CONTINUE;
+
+  const char* action = udev_device_get_action(dev);
+  const char* sysname = udev_device_get_sysname(dev);
+
+  if (action && sysname && strcmp(action, "add") == 0 &&
+      strncmp(sysname, "pcmC", 4) == 0 && !self->audio_upgraded_) {
+    SPDLOG_DEBUG("[VideoPlayer] Audio device hotplugged: {}", sysname);
+    // Schedule the upgrade on an idle callback to avoid reentrancy
+    GSource* idle = g_idle_source_new();
+    g_source_set_callback(idle, OnAudioUpgrade, self, nullptr);
+    g_source_attach(idle, self->context_);
+    g_source_unref(idle);
+  }
+
+  udev_device_unref(dev);
+  return G_SOURCE_CONTINUE;
+}
+
+gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
+  auto* self = static_cast<VideoPlayer*>(user_data);
+  if (self->audio_upgraded_ || !self->m_valid) {
+    return G_SOURCE_REMOVE;
+  }
+
+  // Try to create a real audio sink.  If it can reach READY, swap it in.
+  GstElement* real_sink = gst_element_factory_make("autoaudiosink", nullptr);
+  if (!real_sink) {
+    spdlog::warn("[VideoPlayer] Audio upgrade: autoaudiosink unavailable");
+    return G_SOURCE_REMOVE;
+  }
+
+  if (gst_element_set_state(real_sink, GST_STATE_READY) ==
+      GST_STATE_CHANGE_FAILURE) {
+    gst_element_set_state(real_sink, GST_STATE_NULL);
+    gst_object_unref(real_sink);
+    spdlog::warn("[VideoPlayer] Audio upgrade: sink not ready yet");
+    return G_SOURCE_REMOVE;  // udev will trigger us again on next hotplug
+  }
+  gst_element_set_state(real_sink, GST_STATE_NULL);
+
+  // Hot-swap: pause playbin, swap audio-sink, resume
+  SPDLOG_DEBUG("[VideoPlayer] Audio upgrade: swapping to real audio sink");
+  GstState cur_state = GST_STATE_NULL;
+  gst_element_get_state(self->playbin_, &cur_state, nullptr, 0);
+
+  gst_element_set_state(self->playbin_, GST_STATE_READY);
+  gst_element_get_state(self->playbin_, nullptr, nullptr, 2 * GST_SECOND);
+
+  g_object_set(self->playbin_, "audio-sink", real_sink, nullptr);
+
+  gst_element_set_state(self->playbin_, cur_state);
+  self->audio_upgraded_ = true;
+  self->StopAudioMonitor();
+  SPDLOG_DEBUG("[VideoPlayer] Audio upgrade: done");
   return G_SOURCE_REMOVE;
 }
 
@@ -532,6 +698,11 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
       prepare(this);
       is_initialized_ = true;
       ApplyPlaybackSpeed();
+
+      // If audio was initially a fakesink, monitor for real device hotplug.
+      if (!audio_upgraded_) {
+        StartAudioMonitor();
+      }
     } else if (state == GST_STATE_READY) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
                    m_texture_id);
@@ -660,12 +831,14 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
       }
       gst_video_frame_unmap(&frame);
 
-      // Render NV12->RGBA into the back buffer
-      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
+      // Render NV12→RGBA into the render target
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->render_target());
       obj->shader_->draw_core();
 
-      // Blit back buffer to the front (Flutter-registered) texture
-      obj->shader_->blit_to_front();
+      // When double-buffered, blit back→front to avoid tearing
+      if (obj->shader_->double_buffer) {
+        obj->shader_->blit_to_front();
+      }
 
       obj->m_registrar->texture_registrar()->TextureClearCurrent();
     }
@@ -690,40 +863,9 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
                                    void* user_data) {
   auto obj = static_cast<VideoPlayer*>(user_data);
   switch (GST_MESSAGE_TYPE(msg)) {
-    case GST_MESSAGE_ERROR: {
-      // When the audio sink fails (no audio device), the error cascades
-      // upstream causing the source to also error out.  Ignore all errors
-      // while we are restarting the pipeline without audio.
-      if (obj->audio_recovery_) {
-        SPDLOG_DEBUG("[VideoPlayer] Ignoring error during audio recovery: {}",
-                     GST_OBJECT_NAME(msg->src));
-        break;
-      }
-
-      const gchar* src_name = GST_OBJECT_NAME(msg->src);
-      const bool is_audio_error =
-          src_name && (g_str_has_prefix(src_name, "alsasink") ||
-                       g_str_has_prefix(src_name, "pulsesink") ||
-                       g_str_has_prefix(src_name, "autoaudiosink") ||
-                       g_str_has_prefix(src_name, "pipewire"));
-
-      if (is_audio_error) {
-        spdlog::warn("[VideoPlayer] Audio sink error from {}, disabling audio",
-                     src_name);
-        obj->audio_recovery_ = true;
-
-        // Defer the restart to an idle callback so the bus handler returns
-        // first, allowing cascading errors to drain without deadlocking
-        // the HTTP source teardown on network streams.
-        GSource* idle = g_idle_source_new();
-        g_source_set_callback(idle, OnAudioRecovery, obj, nullptr);
-        g_source_attach(idle, obj->context_);
-        g_source_unref(idle);
-        break;
-      }
+    case GST_MESSAGE_ERROR:
       obj->OnMediaError(msg);
       return FALSE;
-    }
     case GST_MESSAGE_EOS:
     case GST_MESSAGE_SEGMENT_DONE: {
       SPDLOG_DEBUG(
@@ -765,7 +907,14 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
     }
 #endif
     case GST_MESSAGE_WARNING: {
-      spdlog::warn("[VideoPlayer] Warning");
+      GError* warn_err = nullptr;
+      gchar* warn_debug = nullptr;
+      gst_message_parse_warning(msg, &warn_err, &warn_debug);
+      spdlog::warn("[VideoPlayer] Warning: {}:{} debug={}",
+                   GST_OBJECT_NAME(msg->src), warn_err ? warn_err->message : "",
+                   warn_debug ? warn_debug : "");
+      g_clear_error(&warn_err);
+      g_free(warn_debug);
       break;
     }
     case GST_MESSAGE_ASYNC_DONE: {

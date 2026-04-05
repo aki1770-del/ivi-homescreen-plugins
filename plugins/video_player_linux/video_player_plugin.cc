@@ -92,6 +92,8 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
       SPDLOG_DEBUG("path: [{}]", path.c_str());
       path /= asset->c_str();
     }
+    // Ensure the path is absolute so the file:// URI is valid.
+    path = std::filesystem::absolute(path);
     if (!exists(path)) {
       spdlog::error("[VideoPlayer] Asset Path does not exist. {}",
                     path.c_str());
