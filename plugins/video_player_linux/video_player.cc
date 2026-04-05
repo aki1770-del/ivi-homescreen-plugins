@@ -74,7 +74,10 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   {
     std::lock_guard ctx_lock(g_texture_context_mutex);
     m_registrar->texture_registrar()->TextureMakeCurrent();
-    shader_ = std::make_unique<nv12::Shader>(width_, height_);
+    // Double-buffer can be enabled via env var for flicker-sensitive cases.
+    const bool double_buf =
+        std::getenv("VIDEO_PLAYER_DOUBLE_BUFFER") != nullptr;
+    shader_ = std::make_unique<nv12::Shader>(width_, height_, double_buf);
     m_texture_id = shader_->textureId;
     m_registrar->texture_registrar()->TextureClearCurrent();
   }
@@ -143,6 +146,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
+
   int connection_speed = 10000;
   if (const char* env = std::getenv("VIDEO_PLAYER_CONNECTION_SPEED")) {
     char* end = nullptr;
@@ -660,12 +664,14 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
       }
       gst_video_frame_unmap(&frame);
 
-      // Render NV12->RGBA into the back buffer
-      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->backFramebuffer);
+      // Render NV12→RGBA into the render target
+      glBindFramebuffer(GL_FRAMEBUFFER, obj->shader_->render_target());
       obj->shader_->draw_core();
 
-      // Blit back buffer to the front (Flutter-registered) texture
-      obj->shader_->blit_to_front();
+      // When double-buffered, blit back→front to avoid tearing
+      if (obj->shader_->double_buffer) {
+        obj->shader_->blit_to_front();
+      }
 
       obj->m_registrar->texture_registrar()->TextureClearCurrent();
     }
@@ -765,7 +771,15 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
     }
 #endif
     case GST_MESSAGE_WARNING: {
-      spdlog::warn("[VideoPlayer] Warning");
+      GError* warn_err = nullptr;
+      gchar* warn_debug = nullptr;
+      gst_message_parse_warning(msg, &warn_err, &warn_debug);
+      spdlog::warn("[VideoPlayer] Warning: {}:{} debug={}",
+                   GST_OBJECT_NAME(msg->src),
+                   warn_err ? warn_err->message : "",
+                   warn_debug ? warn_debug : "");
+      g_clear_error(&warn_err);
+      g_free(warn_debug);
       break;
     }
     case GST_MESSAGE_ASYNC_DONE: {
