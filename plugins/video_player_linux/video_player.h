@@ -32,6 +32,7 @@
 extern "C" {
 #include <gst/gst.h>
 #include <gst/video/video.h>
+#include <libudev.h>
 }
 
 #include "messages.g.h"
@@ -108,13 +109,26 @@ class VideoPlayer {
   std::mutex event_mutex_;
 
   std::atomic<bool> audio_recovery_{false};
+  std::atomic<bool> audio_upgraded_{false};
   std::atomic<bool> is_initialized_{false};
   std::atomic<bool> sent_initialized_{false};
   void SetBuffering(bool buffering);
 
+  // udev monitor for audio device hotplug
+  struct udev* udev_{};
+  struct udev_monitor* udev_mon_{};
+  GIOChannel* udev_channel_{};
+  guint udev_watch_id_{};
+  void StartAudioMonitor();
+  void StopAudioMonitor();
+  static gboolean OnUdevEvent(GIOChannel* channel,
+                              GIOCondition cond,
+                              gpointer user_data);
+
   void ApplyPlaybackSpeed();
   void OnPlaybackEnded();
   static gboolean OnAudioRecovery(gpointer user_data);
+  static gboolean OnAudioUpgrade(gpointer user_data);
   static void OnMediaInitialized();
   void OnMediaStateChange(GstState state);
   void OnMediaError(GstMessage* msg);

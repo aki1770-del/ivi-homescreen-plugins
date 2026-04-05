@@ -247,11 +247,10 @@ class Shader {
     // --- Y plane: upload via PBO ---
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo_y_[pbo_index_]);
     // Orphan the old buffer so the driver can start DMA immediately
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, y_plane_size, nullptr,
-                 GL_STREAM_DRAW);
-    void* y_mapped = glMapBufferRange(
-        GL_PIXEL_UNPACK_BUFFER, 0, y_plane_size,
-        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+    glBufferData(GL_PIXEL_UNPACK_BUFFER, y_plane_size, nullptr, GL_STREAM_DRAW);
+    void* y_mapped =
+        glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, y_plane_size,
+                         GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
     if (y_mapped) {
       std::memcpy(y_mapped, y_buf, static_cast<size_t>(y_plane_size));
       glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
@@ -276,9 +275,9 @@ class Shader {
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo_uv_[pbo_index_]);
     glBufferData(GL_PIXEL_UNPACK_BUFFER, uv_plane_size, nullptr,
                  GL_STREAM_DRAW);
-    void* uv_mapped = glMapBufferRange(
-        GL_PIXEL_UNPACK_BUFFER, 0, uv_plane_size,
-        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+    void* uv_mapped =
+        glMapBufferRange(GL_PIXEL_UNPACK_BUFFER, 0, uv_plane_size,
+                         GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
     if (uv_mapped) {
       std::memcpy(uv_mapped, uv_buf, static_cast<size_t>(uv_plane_size));
       glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
