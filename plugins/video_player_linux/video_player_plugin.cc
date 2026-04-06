@@ -325,7 +325,7 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
   }
 
   // Embedded album art + text metadata.
-  if (GstTagList* tags = gst_discoverer_info_get_tags(disc_info)) {
+  if (const GstTagList* tags = gst_discoverer_info_get_tags(disc_info)) {
     GstSample* image_sample = nullptr;
     if (gst_tag_list_get_sample(tags, GST_TAG_IMAGE, &image_sample) ||
         gst_tag_list_get_sample(tags, GST_TAG_PREVIEW_IMAGE, &image_sample)) {

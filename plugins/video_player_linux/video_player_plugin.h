@@ -28,7 +28,8 @@ namespace video_player_linux {
 
 #define GSTREAMER_DEBUG 1
 
-class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
+class VideoPlayerPlugin final : public flutter::Plugin,
+                                public LinuxVideoPlayerApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
 

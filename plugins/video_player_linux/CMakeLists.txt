@@ -38,8 +38,13 @@ pkg_check_modules(GST IMPORTED_TARGET REQUIRED
         gstreamer-tag-1.0
         gstreamer-pbutils-1.0)
 pkg_check_modules(UDEV IMPORTED_TARGET REQUIRED libudev)
+# GLESv2 + EGL must be linked from this static lib so the symbols are
+# resolved after libplugin_video_player_linux.a in the final executable
+# link line. Without this, --as-needed strips them when they appear
+# earlier than the plugin .a in the homescreen link command.
+pkg_check_modules(GLES IMPORTED_TARGET REQUIRED egl glesv2)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen flutter PkgConfig::GST PkgConfig::UDEV plugin_common_glib)
+target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen flutter PkgConfig::GST PkgConfig::UDEV PkgConfig::GLES plugin_common_glib)

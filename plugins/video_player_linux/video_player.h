@@ -159,7 +159,11 @@ class VideoPlayer {
   GstElement* video_scale_{};
   GstVideoInfo info_{};
   std::atomic<gint64> position_{0};
-  gdouble rate_ = 1.0;
+  // `rate_` starts at a sentinel (-2.0) so the first ApplyPlaybackSpeed
+  // call always sends a real seek to the pipeline — otherwise a fresh
+  // playbin can inherit a stray segment rate from a previous instance and
+  // play the first second or two too fast before correcting itself.
+  gdouble rate_ = -2.0;
   gdouble pending_rate_ = 1.0;
   GstBus* bus_{};
 
@@ -168,6 +172,7 @@ class VideoPlayer {
   GstElement* audio_bin_{};
   GstElement* audio_convert_{};
   GstElement* audio_resample_{};
+  GstElement* audio_scaletempo_{};  // time-stretch for playback rate changes
   GstElement* audio_capsfilter_{};
   GstElement* equalizer_{};  // optional, inserted on first SetEqualizer
   GstElement* videobalance_{};  // optional, inserted on first SetVideoBalance
