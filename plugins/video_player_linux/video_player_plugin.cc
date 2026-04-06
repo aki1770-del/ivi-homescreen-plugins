@@ -24,6 +24,7 @@
 #include <string>
 
 #include <gst/pbutils/pbutils.h>
+#include <gst/tag/tag.h>
 
 #include "messages.g.h"
 #include "plugins/common/glib/main_loop.h"
@@ -130,19 +131,18 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
   SPDLOG_DEBUG("[VideoPlayer] asset: {}", asset_to_load);
 
   try {
-    int width = 0, height = 0;
-    gint64 duration = 0;
-    if (!discover_video_info(asset_to_load.c_str(), width, height, duration)) {
-      return FlutterError("video_info_failed",
-                          "Failed to discover video information");
+    MediaInfo info;
+    if (!discover_media_info(asset_to_load.c_str(), info)) {
+      return FlutterError("media_info_failed",
+                          "No playable streams found");
     }
-    if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
+    if (info.has_video && (info.width <= 0 || info.height <= 0 ||
+                           info.width > 16384 || info.height > 16384)) {
       return FlutterError("video_info_failed", "Invalid video dimensions");
     }
 
-    player = std::make_unique<VideoPlayer>(registrar_, asset_to_load.c_str(),
-                                           std::move(http_headers_), width,
-                                           height, duration);
+    player = std::make_unique<VideoPlayer>(registrar_, asset_to_load,
+                                           std::move(http_headers_), info);
 
   } catch (std::exception& e) {
     return FlutterError("uri_load_failed", e.what());
@@ -263,10 +263,7 @@ std::optional<FlutterError> VideoPlayerPlugin::Pause(const int64_t texture_id) {
   return std::nullopt;
 }
 
-bool VideoPlayerPlugin::discover_video_info(const char* url,
-                                            int& width,
-                                            int& height,
-                                            gint64& duration) {
+bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
   GError* err = nullptr;
   GstDiscoverer* discoverer = gst_discoverer_new(10 * GST_SECOND, &err);
   if (!discoverer) {
@@ -276,41 +273,156 @@ bool VideoPlayerPlugin::discover_video_info(const char* url,
     return false;
   }
 
-  GstDiscovererInfo* info = gst_discoverer_discover_uri(discoverer, url, &err);
-  if (!info || gst_discoverer_info_get_result(info) != GST_DISCOVERER_OK) {
+  GstDiscovererInfo* disc_info =
+      gst_discoverer_discover_uri(discoverer, url, &err);
+  if (!disc_info ||
+      gst_discoverer_info_get_result(disc_info) != GST_DISCOVERER_OK) {
     spdlog::error("[VideoPlayer] Discovery failed for {}: {}", url,
                   err ? err->message : "unknown");
     g_clear_error(&err);
-    if (info)
-      gst_discoverer_info_unref(info);
+    if (disc_info)
+      gst_discoverer_info_unref(disc_info);
     g_object_unref(discoverer);
     return false;
   }
 
-  duration = static_cast<gint64>(gst_discoverer_info_get_duration(info));
+  info.duration =
+      static_cast<gint64>(gst_discoverer_info_get_duration(disc_info));
 
-  if (GList* video_streams = gst_discoverer_info_get_video_streams(info)) {
+  if (GList* video_streams = gst_discoverer_info_get_video_streams(disc_info)) {
     auto* stream_info =
         static_cast<GstDiscovererStreamInfo*>(video_streams->data);
     if (GST_IS_DISCOVERER_VIDEO_INFO(stream_info)) {
       auto* vinfo = GST_DISCOVERER_VIDEO_INFO(stream_info);
-      width = static_cast<int>(gst_discoverer_video_info_get_width(vinfo));
-      height = static_cast<int>(gst_discoverer_video_info_get_height(vinfo));
+      info.width = static_cast<int>(gst_discoverer_video_info_get_width(vinfo));
+      info.height =
+          static_cast<int>(gst_discoverer_video_info_get_height(vinfo));
+      info.has_video = true;
     }
     gst_discoverer_stream_info_list_free(video_streams);
-  } else {
-    spdlog::error("[VideoPlayer] No video stream found in {}", url);
-    gst_discoverer_info_unref(info);
+  }
+
+  if (GList* audio_streams = gst_discoverer_info_get_audio_streams(disc_info)) {
+    info.has_audio = true;
+    info.n_audio_streams = static_cast<gint>(g_list_length(audio_streams));
+    auto* stream_info =
+        static_cast<GstDiscovererStreamInfo*>(audio_streams->data);
+    if (GST_IS_DISCOVERER_AUDIO_INFO(stream_info)) {
+      auto* ainfo = GST_DISCOVERER_AUDIO_INFO(stream_info);
+      info.audio_channels =
+          static_cast<int>(gst_discoverer_audio_info_get_channels(ainfo));
+      info.audio_sample_rate =
+          static_cast<int>(gst_discoverer_audio_info_get_sample_rate(ainfo));
+    }
+    gst_discoverer_stream_info_list_free(audio_streams);
+  }
+
+  if (!info.has_video && !info.has_audio) {
+    spdlog::error("[VideoPlayer] No playable streams in {}", url);
+    gst_discoverer_info_unref(disc_info);
     g_object_unref(discoverer);
     return false;
   }
 
-  SPDLOG_DEBUG("[VideoPlayer] Discovered: {}x{}, duration={}ns", width, height,
-               duration);
+  // Embedded album art + text metadata.
+  if (GstTagList* tags = gst_discoverer_info_get_tags(disc_info)) {
+    GstSample* image_sample = nullptr;
+    if (gst_tag_list_get_sample(tags, GST_TAG_IMAGE, &image_sample) ||
+        gst_tag_list_get_sample(tags, GST_TAG_PREVIEW_IMAGE, &image_sample)) {
+      GstBuffer* buf = gst_sample_get_buffer(image_sample);
+      GstCaps* caps = gst_sample_get_caps(image_sample);
+      GstMapInfo map;
+      if (buf && gst_buffer_map(buf, &map, GST_MAP_READ)) {
+        info.album_art.assign(map.data, map.data + map.size);
+        if (caps) {
+          if (const gchar* name =
+                  gst_structure_get_name(gst_caps_get_structure(caps, 0))) {
+            info.album_art_mime = name;
+          }
+        }
+        gst_buffer_unmap(buf, &map);
+      }
+      gst_sample_unref(image_sample);
+    }
 
-  gst_discoverer_info_unref(info);
+    auto take_string = [&](const char* tag, std::string& dst) {
+      gchar* val = nullptr;
+      if (gst_tag_list_get_string(tags, tag, &val) && val) {
+        dst = val;
+        g_free(val);
+      }
+    };
+    take_string(GST_TAG_TITLE, info.title);
+    take_string(GST_TAG_ARTIST, info.artist);
+    take_string(GST_TAG_ALBUM, info.album);
+    take_string(GST_TAG_ALBUM_ARTIST, info.album_artist);
+    take_string(GST_TAG_GENRE, info.genre);
+    take_string(GST_TAG_AUDIO_CODEC, info.audio_codec);
+    guint track_num = 0;
+    if (gst_tag_list_get_uint(tags, GST_TAG_TRACK_NUMBER, &track_num)) {
+      info.track_number = static_cast<int>(track_num);
+    }
+    // tags owned by disc_info — do not unref
+  }
+
+  SPDLOG_DEBUG(
+      "[VideoPlayer] Discovered: video={} ({}x{}), audio={} ({}ch/{}Hz), "
+      "duration={}ns, art={}B",
+      info.has_video, info.width, info.height, info.has_audio,
+      info.audio_channels, info.audio_sample_rate, info.duration,
+      info.album_art.size());
+
+  gst_discoverer_info_unref(disc_info);
   g_object_unref(discoverer);
   return true;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 1 dispatch — audio control surface
+// ────────────────────────────────────────────────────────────────────────────
+
+ErrorOr<int64_t> VideoPlayerPlugin::GetAudioTrackCount(
+    const int64_t texture_id) {
+  const auto it = videoPlayers.find(texture_id);
+  if (it == videoPlayers.end())
+    return FlutterError("player_not_found", "This player ID was not found");
+  return static_cast<int64_t>(it->second->GetAudioTrackCount());
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetAudioTrack(
+    const int64_t texture_id,
+    const int64_t track_index) {
+  const auto it = videoPlayers.find(texture_id);
+  if (it == videoPlayers.end())
+    return FlutterError("player_not_found", "This player ID was not found");
+  it->second->SetAudioTrack(static_cast<int>(track_index));
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetOutputChannels(
+    const int64_t texture_id,
+    const int64_t channels) {
+  const auto it = videoPlayers.find(texture_id);
+  if (it == videoPlayers.end())
+    return FlutterError("player_not_found", "This player ID was not found");
+  it->second->SetOutputChannels(static_cast<int>(channels));
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetMute(const int64_t texture_id,
+                                                       const bool mute) {
+  const auto it = videoPlayers.find(texture_id);
+  if (it == videoPlayers.end())
+    return FlutterError("player_not_found", "This player ID was not found");
+  it->second->SetMute(mute);
+  return std::nullopt;
+}
+
+ErrorOr<bool> VideoPlayerPlugin::IsAudioOnly(const int64_t texture_id) {
+  const auto it = videoPlayers.find(texture_id);
+  if (it == videoPlayers.end())
+    return FlutterError("player_not_found", "This player ID was not found");
+  return it->second->IsAudioOnly();
 }
 
 }  // namespace video_player_linux

@@ -22,8 +22,12 @@
 #include <flutter/plugin_registrar_homescreen.h>
 #include <flutter/standard_method_codec.h>
 
+#include <atomic>
 #include <climits>
 #include <cstring>
+
+#include <gst/audio/audio.h>
+#include <gst/tag/tag.h>
 
 #include <backend/backend.h>
 #include <plugins/common/common.h>
@@ -43,26 +47,42 @@ typedef enum {
   GST_PLAY_FLAG_TEXT = 1 << 2
 } GstPlayFlags;
 
+// Audio-only synthetic player IDs start at 0x7F000000 to avoid colliding
+// with GL texture IDs (which are small positive integers).
+static std::atomic<int64_t> g_audio_player_id_counter{0x7F000000};
+
 VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
                          std::string uri,
                          std::map<std::string, std::string> http_headers,
-                         const GLsizei width,
-                         const GLsizei height,
-                         const gint64 duration)
+                         const MediaInfo& info)
     : m_registrar(registrar),
       uri_(std::move(uri)),
       http_headers_(std::move(http_headers)),
-      width_(width),
-      height_(height),
-      duration_(duration),
-      event_channel_(nullptr) {
+      width_(info.width),
+      height_(info.height),
+      duration_(info.duration),
+      has_video_(info.has_video),
+      initial_album_art_(info.album_art),
+      initial_album_art_mime_(info.album_art_mime),
+      title_(info.title),
+      artist_(info.artist),
+      album_(info.album),
+      album_artist_(info.album_artist),
+      genre_(info.genre),
+      track_number_(info.track_number),
+      audio_codec_(info.audio_codec),
+      audio_channels_(info.audio_channels),
+      audio_sample_rate_(info.audio_sample_rate) {
   SPDLOG_DEBUG(
-      "[VideoPlayer] uri: {}, http_headers: {}, size: {} x {}, duration: {}",
-      uri.c_str(), http_headers_.size(), width, height, duration);
+      "[VideoPlayer] uri: {}, http_headers: {}, size: {} x {}, duration: {}, "
+      "has_video: {}",
+      uri_.c_str(), http_headers_.size(), width_, height_, duration_,
+      has_video_);
 
   gst_video_info_init(&info_);
 
-  if (width_ <= 0 || height_ <= 0) {
+  // Validate dimensions only when video is expected.
+  if (has_video_ && (width_ <= 0 || height_ <= 0)) {
     SPDLOG_ERROR("[VideoPlayer] Invalid dimensions: {}x{}", width_, height_);
     m_valid = false;
     return;
@@ -70,41 +90,45 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
-  /// Setup OpenGL
+  if (has_video_) {
+    /// Setup OpenGL
+    {
+      std::lock_guard ctx_lock(g_texture_context_mutex);
+      m_registrar->texture_registrar()->TextureMakeCurrent();
+      // Double-buffer can be enabled via env var for flicker-sensitive cases.
+      const bool double_buf =
+          std::getenv("VIDEO_PLAYER_DOUBLE_BUFFER") != nullptr;
+      shader_ = std::make_unique<nv12::Shader>(width_, height_, double_buf);
+      m_texture_id = shader_->textureId;
+      m_registrar->texture_registrar()->TextureClearCurrent();
+    }
 
-  {
-    std::lock_guard ctx_lock(g_texture_context_mutex);
-    m_registrar->texture_registrar()->TextureMakeCurrent();
-    // Double-buffer can be enabled via env var for flicker-sensitive cases.
-    const bool double_buf =
-        std::getenv("VIDEO_PLAYER_DOUBLE_BUFFER") != nullptr;
-    shader_ = std::make_unique<nv12::Shader>(width_, height_, double_buf);
-    m_texture_id = shader_->textureId;
-    m_registrar->texture_registrar()->TextureClearCurrent();
+    /// Setup GL Texture 2D
+    m_descriptor.struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
+    m_descriptor.handle = &m_texture_id;
+    m_descriptor.width = static_cast<size_t>(width_);
+    m_descriptor.height = static_cast<size_t>(height_);
+    m_descriptor.visible_width = static_cast<size_t>(width_);
+    m_descriptor.visible_height = static_cast<size_t>(height_);
+    m_descriptor.format = kFlutterDesktopPixelFormatRGBA8888;
+    m_descriptor.release_callback = [](void* /* release_context */) {};
+    m_descriptor.release_context = this;
+
+    gpu_surface_texture_ = std::make_unique<flutter::GpuSurfaceTexture>(
+        kFlutterDesktopGpuSurfaceTypeGlTexture2D,
+        [&](size_t /* width */, size_t /* height */)
+            -> const FlutterDesktopGpuSurfaceDescriptor* {
+          return &m_descriptor;
+        });
+
+    flutter::TextureVariant texture = *gpu_surface_texture_;
+    m_registrar->texture_registrar()->RegisterTexture(&texture);
+    SPDLOG_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
+  } else {
+    // Audio-only: synthesise a player ID outside the GL texture ID range.
+    m_texture_id = g_audio_player_id_counter.fetch_add(1);
+    SPDLOG_DEBUG("[VideoPlayer] Audio-only player_id={}", m_texture_id);
   }
-
-  /// Setup GL Texture 2D
-
-  m_descriptor.struct_size = sizeof(FlutterDesktopGpuSurfaceDescriptor);
-  m_descriptor.handle = &m_texture_id;
-  m_descriptor.width = static_cast<size_t>(width_);
-  m_descriptor.height = static_cast<size_t>(height_);
-  m_descriptor.visible_width = static_cast<size_t>(width_);
-  m_descriptor.visible_height = static_cast<size_t>(height_);
-  m_descriptor.format = kFlutterDesktopPixelFormatRGBA8888;
-  m_descriptor.release_callback = [](void* /* release_context */) {};
-  m_descriptor.release_context = this;
-
-  gpu_surface_texture_ = std::make_unique<flutter::GpuSurfaceTexture>(
-      kFlutterDesktopGpuSurfaceTypeGlTexture2D,
-      [&](size_t /* width */,
-          size_t /* height */) -> const FlutterDesktopGpuSurfaceDescriptor* {
-        return &m_descriptor;
-      });
-
-  flutter::TextureVariant texture = *gpu_surface_texture_;
-  m_registrar->texture_registrar()->RegisterTexture(&texture);
-  SPDLOG_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
 
   /// Setup GST Pipeline
 
@@ -129,43 +153,37 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
     gst_structure_free(extraHeaders);
   }
 
-  // Try audio sinks in order of preference.  autoaudiosink is avoided
-  // because it can pick ALSA on systems where ALSA devices don't exist
-  // (e.g. WSL2 with PipeWire/PulseAudio over socket), causing the
-  // pipeline to fail during preroll.
-  {
-    GstElement* audio_sink = nullptr;
-    for (const char* name : {"pulsesink", "pipewiresink", "autoaudiosink"}) {
-      audio_sink = gst_element_factory_make(name, nullptr);
-      if (audio_sink) {
-        auto ret = gst_element_set_state(audio_sink, GST_STATE_READY);
-        if (ret != GST_STATE_CHANGE_FAILURE) {
-          gst_element_set_state(audio_sink, GST_STATE_NULL);
-          SPDLOG_DEBUG("[VideoPlayer] Using audio sink: {}", name);
-          audio_upgraded_ = true;  // real sink found, no hotplug needed
-          break;
-        }
-        SPDLOG_DEBUG("[VideoPlayer] Audio sink {} failed READY", name);
-        gst_element_set_state(audio_sink, GST_STATE_NULL);
-        gst_object_unref(audio_sink);
-        audio_sink = nullptr;
-      }
-    }
-    if (!audio_sink) {
-      audio_sink = gst_element_factory_make("fakesink", "fake-audio");
-      if (audio_sink) {
-        g_object_set(audio_sink, "sync", TRUE, nullptr);
-      }
-      spdlog::warn("[VideoPlayer] No audio sink available, using fakesink");
-    }
-    if (audio_sink) {
-      g_object_set(playbin_, "audio-sink", audio_sink, nullptr);
+  // Connect source-setup so we can configure souphttpsrc / rtspsrc as soon
+  // as playbin instantiates the source element. The handler is safe across
+  // source types because it probes for properties before setting them.
+  source_setup_id_ = g_signal_connect(
+      playbin_, "source-setup", reinterpret_cast<GCallback>(OnSourceSetup),
+      this);
+
+  // Custom audio sink bin: audioconvert → audioresample → capsfilter → sink.
+  // Even without app-level controls this improves codec/sample-rate
+  // compatibility and is a prerequisite for channel/EQ work.
+  if (GstElement* audio_bin = BuildAudioSinkBin()) {
+    audio_bin_ = audio_bin;
+    g_object_set(playbin_, "audio-sink", audio_bin_, nullptr);
+    audio_upgraded_ = true;
+  } else {
+    spdlog::warn("[VideoPlayer] Audio sink bin build failed; using fakesink");
+    GstElement* fake = gst_element_factory_make("fakesink", "fake-audio");
+    if (fake) {
+      g_object_set(fake, "sync", TRUE, nullptr);
+      g_object_set(playbin_, "audio-sink", fake, nullptr);
     }
   }
 
   gint flags = 0;
   g_object_get(playbin_, "flags", &flags, nullptr);
-  flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
+  if (has_video_) {
+    flags |= GST_PLAY_FLAG_VIDEO | GST_PLAY_FLAG_AUDIO;
+  } else {
+    flags |= GST_PLAY_FLAG_AUDIO;
+    flags &= ~GST_PLAY_FLAG_VIDEO;
+  }
   flags &= ~GST_PLAY_FLAG_TEXT;
   g_object_set(playbin_, "flags", flags, nullptr);
 
@@ -180,62 +198,64 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_object_set(playbin_, "connection-speed", connection_speed, nullptr);
   g_object_set(playbin_, "volume", volume_, nullptr);
 
-  sink_ = gst_element_factory_make("fakesink", nullptr);
-  if (!sink_) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
-    m_valid = false;
-    return;
+  if (has_video_) {
+    sink_ = gst_element_factory_make("fakesink", nullptr);
+    if (!sink_) {
+      SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
+      m_valid = false;
+      return;
+    }
+    g_object_set(sink_, "sync", TRUE, nullptr);
+    g_object_set(sink_, "signal-handoffs", TRUE, nullptr);
+    g_object_set(sink_, "can-activate-pull", TRUE, nullptr);
+    handoff_handler_id_ = g_signal_connect(
+        sink_, "handoff", reinterpret_cast<GCallback>(handoff_handler), this);
+
+    video_convert_ = gst_element_factory_make("videoconvert", nullptr);
+    if (!video_convert_) {
+      SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
+      m_valid = false;
+      return;
+    }
+
+    GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
+                                        "NV12", nullptr);
+
+    video_scale_ = gst_element_factory_make("videoscale", nullptr);
+    if (!video_scale_) {
+      SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
+      m_valid = false;
+      return;
+    }
+
+    GstCaps* scale =
+        gst_caps_new_simple("video/x-raw", "width", G_TYPE_INT, width_,
+                            "height", G_TYPE_INT, height_, nullptr);
+
+    pipeline_ = gst_bin_new(nullptr);
+
+    gst_bin_add_many(GST_BIN(pipeline_), video_convert_, video_scale_, sink_,
+                     nullptr);
+
+    if (!gst_element_link_filtered(video_convert_, video_scale_, caps)) {
+      SPDLOG_ERROR("[VideoPlayer] Failed to link videoconvert with videoscale");
+    }
+    gst_caps_unref(caps);
+
+    if (!gst_element_link_filtered(video_scale_, sink_, scale)) {
+      SPDLOG_ERROR("[VideoPlayer] Failed to link videoscale with fakesink");
+    }
+    gst_caps_unref(scale);
+
+    // Ghost pad so playbin can link its decoded output into this bin
+    GstPad* pad = gst_element_get_static_pad(video_convert_, "sink");
+    GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
+    gst_pad_set_active(ghost_pad, TRUE);
+    gst_element_add_pad(pipeline_, ghost_pad);
+    gst_object_unref(pad);
+
+    g_object_set(playbin_, "video-sink", pipeline_, nullptr);
   }
-  g_object_set(sink_, "sync", TRUE, nullptr);
-  g_object_set(sink_, "signal-handoffs", TRUE, nullptr);
-  g_object_set(sink_, "can-activate-pull", TRUE, nullptr);
-  handoff_handler_id_ = g_signal_connect(
-      sink_, "handoff", reinterpret_cast<GCallback>(handoff_handler), this);
-
-  video_convert_ = gst_element_factory_make("videoconvert", nullptr);
-  if (!video_convert_) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
-    m_valid = false;
-    return;
-  }
-
-  GstCaps* caps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
-                                      "NV12", nullptr);
-
-  video_scale_ = gst_element_factory_make("videoscale", nullptr);
-  if (!video_scale_) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
-    m_valid = false;
-    return;
-  }
-
-  GstCaps* scale =
-      gst_caps_new_simple("video/x-raw", "width", G_TYPE_INT, width_, "height",
-                          G_TYPE_INT, height_, nullptr);
-
-  pipeline_ = gst_bin_new(nullptr);
-
-  gst_bin_add_many(GST_BIN(pipeline_), video_convert_, video_scale_, sink_,
-                   nullptr);
-
-  if (!gst_element_link_filtered(video_convert_, video_scale_, caps)) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to link videoconvert with videoscale");
-  }
-  gst_caps_unref(caps);
-
-  if (!gst_element_link_filtered(video_scale_, sink_, scale)) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to link videoscale with fakesink");
-  }
-  gst_caps_unref(scale);
-
-  // Ghost pad so playbin can link its decoded output into this bin
-  GstPad* pad = gst_element_get_static_pad(video_convert_, "sink");
-  GstPad* ghost_pad = gst_ghost_pad_new("sink", pad);
-  gst_pad_set_active(ghost_pad, TRUE);
-  gst_element_add_pad(pipeline_, ghost_pad);
-  gst_object_unref(pad);
-
-  g_object_set(playbin_, "video-sink", pipeline_, nullptr);
 
   bus_ = gst_element_get_bus(playbin_);
   GSource* bus_source = gst_bus_create_watch(bus_);
@@ -266,18 +286,22 @@ void VideoPlayer::Dispose() {
 
   std::lock_guard buffer_lock(buffer_mutex_);
 
-  if (bus_) {
+  if (bus_ && on_bus_msg_id_) {
     g_signal_handler_disconnect(G_OBJECT(bus_), on_bus_msg_id_);
   }
-  if (sink_) {
+  if (sink_ && handoff_handler_id_) {
     g_signal_handler_disconnect(G_OBJECT(sink_), handoff_handler_id_);
+  }
+  if (playbin_ && source_setup_id_) {
+    g_signal_handler_disconnect(G_OBJECT(playbin_), source_setup_id_);
+    source_setup_id_ = 0;
   }
 
   if (playbin_) {
     gst_element_set_state(playbin_, GST_STATE_NULL);
   }
 
-  {
+  if (has_video_) {
     // Ensure no in-flight handoff callback is using the shader
     std::lock_guard gst_lock(gst_mutex_);
     if (shader_) {
@@ -288,7 +312,7 @@ void VideoPlayer::Dispose() {
     }
   }
 
-  if (m_texture_id != 0) {
+  if (has_video_ && m_texture_id != 0) {
     SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
     m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
     m_texture_id = 0;
@@ -695,9 +719,25 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
       SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
                    m_texture_id);
       audio_recovery_ = false;
-      prepare(this);
+      if (has_video_) {
+        prepare(this);
+      }
       is_initialized_ = true;
       ApplyPlaybackSpeed();
+
+      // For audio-only there are no video frames, so the handoff path will
+      // never fire SendInitialized — emit it directly on first PLAYING.
+      if (!has_video_ && !sent_initialized_) {
+        sent_initialized_ = true;
+        SendInitialized();
+      }
+      // Forward seeded discoverer metadata + album art on each PLAYING
+      // transition. Idempotent on the Dart side.
+      SendMediaMetadata();
+      if (!initial_album_art_.empty()) {
+        SendAlbumArt(initial_album_art_, initial_album_art_mime_);
+      }
+      SendAudioInfo();
 
       // If audio was initially a fakesink, monitor for real device hotplug.
       if (!audio_upgraded_) {
@@ -756,6 +796,8 @@ void VideoPlayer::SendInitialized() {
   event.insert({flutter::EncodableValue("height"),
                 flutter::EncodableValue(std::in_place_type<int32_t>,
                                         static_cast<int32_t>(height_))});
+  event.insert({flutter::EncodableValue("isAudioOnly"),
+                flutter::EncodableValue(!has_video_)});
 
   event_sink_->Success(flutter::EncodableValue(
       std::in_place_type<flutter::EncodableMap>, std::move(event)));
@@ -801,7 +843,7 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
                                   GstPad* /* pad */,
                                   void* user_data) {
   const auto obj = static_cast<VideoPlayer*>(user_data);
-  if (!obj->m_valid || !obj->is_initialized_) {
+  if (!obj->m_valid || !obj->is_initialized_ || !obj->has_video_) {
     return;
   }
 
@@ -1021,16 +1063,73 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
                    gst_structure_get_name(gst_message_get_structure(msg)));
       break;
     }
+#endif
     case GST_MESSAGE_TAG: {
-#if GSTREAMER_DEBUG
       GstTagList* tags = nullptr;
       gst_message_parse_tag(msg, &tags);
-      gst_tag_list_foreach(tags, VideoPlayer::OnTag, obj);
-      gst_tag_list_unref(tags);
-#endif
+      if (tags) {
+        // Embedded album art (front cover preferred).
+        GstSample* image_sample = nullptr;
+        if (gst_tag_list_get_sample(tags, GST_TAG_IMAGE, &image_sample)) {
+          obj->HandleAlbumArt(image_sample);
+          gst_sample_unref(image_sample);
+        } else if (gst_tag_list_get_sample(tags, GST_TAG_PREVIEW_IMAGE,
+                                           &image_sample)) {
+          obj->HandleAlbumArt(image_sample);
+          gst_sample_unref(image_sample);
+        }
+
+        // Update text metadata if present and re-emit.
+        bool changed = false;
+        gchar* val = nullptr;
+        if (gst_tag_list_get_string(tags, GST_TAG_TITLE, &val) && val) {
+          obj->title_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        if (gst_tag_list_get_string(tags, GST_TAG_ARTIST, &val) && val) {
+          obj->artist_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        if (gst_tag_list_get_string(tags, GST_TAG_ALBUM, &val) && val) {
+          obj->album_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        if (gst_tag_list_get_string(tags, GST_TAG_ALBUM_ARTIST, &val) && val) {
+          obj->album_artist_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        if (gst_tag_list_get_string(tags, GST_TAG_GENRE, &val) && val) {
+          obj->genre_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        if (gst_tag_list_get_string(tags, GST_TAG_AUDIO_CODEC, &val) && val) {
+          obj->audio_codec_ = val;
+          g_free(val);
+          val = nullptr;
+          changed = true;
+        }
+        guint track_num = 0;
+        if (gst_tag_list_get_uint(tags, GST_TAG_TRACK_NUMBER, &track_num)) {
+          obj->track_number_ = static_cast<int>(track_num);
+          changed = true;
+        }
+        if (changed) {
+          obj->SendMediaMetadata();
+        }
+        gst_tag_list_unref(tags);
+      }
       break;
     }
-#endif
     default:
 #if GSTREAMER_DEBUG
     {
@@ -1079,6 +1178,249 @@ void VideoPlayer::prepare(VideoPlayer* user_data) {
                                  static_cast<guint>(user_data->height_))) {
     SPDLOG_ERROR("[VideoPlayer] Failed to set the video info to target NV12");
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 1 — Foundation: audio sink bin, audio control, source-setup, album art
+// ────────────────────────────────────────────────────────────────────────────
+
+GstElement* VideoPlayer::BuildAudioSinkBin() {
+  // Pick the real sink. Env var override allows passthrough deployments.
+  const char* sink_name =
+      std::getenv("VIDEO_PLAYER_AUDIO_SINK") ?: "autoaudiosink";
+  GstElement* real_sink = gst_element_factory_make(sink_name, "real-audiosink");
+  if (!real_sink) {
+    // Fallback chain mirroring the legacy behaviour.
+    for (const char* name : {"pulsesink", "pipewiresink", "autoaudiosink"}) {
+      real_sink = gst_element_factory_make(name, "real-audiosink");
+      if (real_sink)
+        break;
+    }
+  }
+  if (!real_sink) {
+    return nullptr;
+  }
+  if (const char* dev = std::getenv("VIDEO_PLAYER_AUDIO_DEVICE")) {
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(real_sink), "device")) {
+      g_object_set(real_sink, "device", dev, nullptr);
+    }
+  }
+
+  audio_convert_ = gst_element_factory_make("audioconvert", "audio-convert");
+  audio_resample_ = gst_element_factory_make("audioresample", "audio-resample");
+  audio_capsfilter_ = gst_element_factory_make("capsfilter", "audio-caps");
+  if (!audio_convert_ || !audio_resample_ || !audio_capsfilter_) {
+    spdlog::error("[VideoPlayer] Failed to create audio sink bin elements");
+    if (audio_convert_)
+      gst_object_unref(audio_convert_);
+    if (audio_resample_)
+      gst_object_unref(audio_resample_);
+    if (audio_capsfilter_)
+      gst_object_unref(audio_capsfilter_);
+    audio_convert_ = audio_resample_ = audio_capsfilter_ = nullptr;
+    gst_object_unref(real_sink);
+    return nullptr;
+  }
+
+  // Output channel count from env var (Phase 1 default 2).
+  output_channels_ = 2;
+  if (const char* env = std::getenv("VIDEO_PLAYER_AUDIO_CHANNELS")) {
+    char* end = nullptr;
+    long val = std::strtol(env, &end, 10);
+    if (end != env && val >= 1 && val <= 8) {
+      output_channels_ = static_cast<int>(val);
+    }
+  }
+  GstCaps* caps = gst_caps_new_simple("audio/x-raw", "channels", G_TYPE_INT,
+                                      output_channels_, nullptr);
+  g_object_set(audio_capsfilter_, "caps", caps, nullptr);
+  gst_caps_unref(caps);
+
+  GstElement* bin = gst_bin_new("audio-sink-bin");
+  gst_bin_add_many(GST_BIN(bin), audio_convert_, audio_resample_,
+                   audio_capsfilter_, real_sink, nullptr);
+  if (!gst_element_link_many(audio_convert_, audio_resample_, audio_capsfilter_,
+                             real_sink, nullptr)) {
+    spdlog::error("[VideoPlayer] Failed to link audio sink bin");
+    gst_object_unref(bin);
+    audio_convert_ = audio_resample_ = audio_capsfilter_ = nullptr;
+    return nullptr;
+  }
+
+  GstPad* pad = gst_element_get_static_pad(audio_convert_, "sink");
+  GstPad* ghost = gst_ghost_pad_new("sink", pad);
+  gst_pad_set_active(ghost, TRUE);
+  gst_element_add_pad(bin, ghost);
+  gst_object_unref(pad);
+
+  SPDLOG_DEBUG("[VideoPlayer] Built audio sink bin (sink={}, channels={})",
+               sink_name, output_channels_);
+  return bin;
+}
+
+void VideoPlayer::OnSourceSetup(GstElement* /*playbin*/,
+                                GstElement* source,
+                                gpointer /*user_data*/) {
+  if (!source)
+    return;
+  GObjectClass* klass = G_OBJECT_GET_CLASS(source);
+
+  // HTTP timeout (souphttpsrc): default 30s prevents indefinite hangs.
+  if (g_object_class_find_property(klass, "timeout")) {
+    guint timeout = 30;
+    if (const char* env = std::getenv("VIDEO_PLAYER_HTTP_TIMEOUT")) {
+      char* end = nullptr;
+      const long val = std::strtol(env, &end, 10);
+      if (end != env && val >= 0 && val < 3600) {
+        timeout = static_cast<guint>(val);
+      }
+    }
+    g_object_set(source, "timeout", timeout, nullptr);
+    SPDLOG_DEBUG("[VideoPlayer] source timeout={}s", timeout);
+  }
+  if (g_object_class_find_property(klass, "user-agent")) {
+    if (const char* ua = std::getenv("VIDEO_PLAYER_USER_AGENT")) {
+      g_object_set(source, "user-agent", ua, nullptr);
+    }
+  }
+  if (g_object_class_find_property(klass, "proxy")) {
+    if (const char* proxy = std::getenv("VIDEO_PLAYER_PROXY")) {
+      g_object_set(source, "proxy", proxy, nullptr);
+    }
+  }
+}
+
+void VideoPlayer::HandleAlbumArt(GstSample* sample) {
+  if (!sample)
+    return;
+  GstBuffer* buffer = gst_sample_get_buffer(sample);
+  GstCaps* caps = gst_sample_get_caps(sample);
+  if (!buffer || !caps)
+    return;
+
+  const GstStructure* s = gst_caps_get_structure(caps, 0);
+  const gchar* mime = s ? gst_structure_get_name(s) : "image/jpeg";
+
+  // Filter to front cover (or undefined, which is typically the cover).
+  const GstStructure* sample_info = gst_sample_get_info(sample);
+  GstTagImageType image_type = GST_TAG_IMAGE_TYPE_UNDEFINED;
+  if (sample_info) {
+    gst_structure_get_enum(sample_info, "image-type", GST_TYPE_TAG_IMAGE_TYPE,
+                           reinterpret_cast<gint*>(&image_type));
+  }
+  if (image_type != GST_TAG_IMAGE_TYPE_FRONT_COVER &&
+      image_type != GST_TAG_IMAGE_TYPE_UNDEFINED) {
+    return;
+  }
+
+  GstMapInfo map;
+  if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
+    return;
+  std::vector<uint8_t> bytes(map.data, map.data + map.size);
+  gst_buffer_unmap(buffer, &map);
+
+  SendAlbumArt(bytes, mime ? mime : "image/jpeg");
+}
+
+void VideoPlayer::SendAlbumArt(const std::vector<uint8_t>& bytes,
+                               const std::string& mime) {
+  std::lock_guard event_lock(event_mutex_);
+  if (!event_sink_)
+    return;
+  auto map = flutter::EncodableMap{
+      {flutter::EncodableValue("event"), flutter::EncodableValue("albumArt")},
+      {flutter::EncodableValue("mimeType"), flutter::EncodableValue(mime)},
+      {flutter::EncodableValue("data"), flutter::EncodableValue(bytes)},
+  };
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(map)));
+}
+
+void VideoPlayer::SendMediaMetadata() {
+  std::lock_guard event_lock(event_mutex_);
+  if (!event_sink_)
+    return;
+  auto map = flutter::EncodableMap{
+      {flutter::EncodableValue("event"),
+       flutter::EncodableValue("mediaMetadata")},
+      {flutter::EncodableValue("title"), flutter::EncodableValue(title_)},
+      {flutter::EncodableValue("artist"), flutter::EncodableValue(artist_)},
+      {flutter::EncodableValue("album"), flutter::EncodableValue(album_)},
+      {flutter::EncodableValue("albumArtist"),
+       flutter::EncodableValue(album_artist_)},
+      {flutter::EncodableValue("genre"), flutter::EncodableValue(genre_)},
+      {flutter::EncodableValue("trackNumber"),
+       flutter::EncodableValue(track_number_)},
+  };
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(map)));
+}
+
+void VideoPlayer::SendAudioInfo() {
+  std::lock_guard event_lock(event_mutex_);
+  if (!event_sink_)
+    return;
+  auto map = flutter::EncodableMap{
+      {flutter::EncodableValue("event"), flutter::EncodableValue("audioInfo")},
+      {flutter::EncodableValue("codec"),
+       flutter::EncodableValue(audio_codec_)},
+      {flutter::EncodableValue("channels"),
+       flutter::EncodableValue(audio_channels_)},
+      {flutter::EncodableValue("sampleRate"),
+       flutter::EncodableValue(audio_sample_rate_)},
+  };
+  event_sink_->Success(flutter::EncodableValue(
+      std::in_place_type<flutter::EncodableMap>, std::move(map)));
+}
+
+int VideoPlayer::GetAudioTrackCount() {
+  if (!playbin_)
+    return 0;
+  gint n = 0;
+  g_object_get(playbin_, "n-audio", &n, nullptr);
+  return n;
+}
+
+void VideoPlayer::SetAudioTrack(int index) {
+  if (!playbin_)
+    return;
+  gint n = 0;
+  g_object_get(playbin_, "n-audio", &n, nullptr);
+  if (index < 0 || index >= n) {
+    spdlog::warn("[VideoPlayer] SetAudioTrack({}) out of range (n={})", index,
+                 n);
+    return;
+  }
+  g_object_set(playbin_, "current-audio", index, nullptr);
+}
+
+void VideoPlayer::SetOutputChannels(int channels) {
+  if (channels < 1 || channels > 8) {
+    spdlog::warn("[VideoPlayer] SetOutputChannels({}) out of range", channels);
+    return;
+  }
+  output_channels_ = channels;
+  if (!audio_capsfilter_)
+    return;
+  GstCaps* caps =
+      gst_caps_new_simple("audio/x-raw", "channels", G_TYPE_INT, channels,
+                          nullptr);
+  g_object_set(audio_capsfilter_, "caps", caps, nullptr);
+  gst_caps_unref(caps);
+  // The capsfilter change requires a quick READY round-trip on the audio
+  // chain to take effect mid-stream. Acceptable known dropout.
+  if (playbin_) {
+    GstState cur = GST_STATE_NULL;
+    gst_element_get_state(playbin_, &cur, nullptr, 0);
+    gst_element_set_state(playbin_, GST_STATE_READY);
+    gst_element_set_state(playbin_, cur);
+  }
+}
+
+void VideoPlayer::SetMute(bool mute) {
+  if (!playbin_)
+    return;
+  g_object_set(playbin_, "mute", mute ? TRUE : FALSE, nullptr);
 }
 
 }  // namespace video_player_linux

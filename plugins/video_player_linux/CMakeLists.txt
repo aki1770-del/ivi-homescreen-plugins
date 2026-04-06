@@ -31,7 +31,12 @@ target_compile_features(${PLUGIN_NAME} PRIVATE cxx_std_17)
 
 # System-level dependencies.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0>=1.4 gstreamer-video-1.0 gstreamer-pbutils-1.0)
+pkg_check_modules(GST IMPORTED_TARGET REQUIRED
+        gstreamer-1.0>=1.4
+        gstreamer-video-1.0
+        gstreamer-audio-1.0
+        gstreamer-tag-1.0
+        gstreamer-pbutils-1.0)
 pkg_check_modules(UDEV IMPORTED_TARGET REQUIRED libudev)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 

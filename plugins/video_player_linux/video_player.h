@@ -16,12 +16,15 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <flutter/event_channel.h>
 #include <flutter/event_stream_handler_functions.h>
@@ -41,14 +44,39 @@ class Backend;
 
 namespace video_player_linux {
 
+/// Media stream information populated by `GstDiscoverer` before player
+/// construction. Carries everything required to decide between A/V and
+/// audio-only modes and to seed the initial Flutter event payloads.
+struct MediaInfo {
+  int width = 0;
+  int height = 0;
+  gint64 duration = 0;
+  bool has_video = false;
+  bool has_audio = false;
+  gint n_audio_streams = 0;
+  std::string audio_codec;
+  int audio_channels = 0;
+  int audio_sample_rate = 0;
+
+  // Embedded album art (typically front cover) extracted from tags.
+  std::vector<uint8_t> album_art;
+  std::string album_art_mime;
+
+  // Text metadata extracted from tags.
+  std::string title;
+  std::string artist;
+  std::string album;
+  std::string album_artist;
+  std::string genre;
+  int track_number = 0;
+};
+
 class VideoPlayer {
  public:
   VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
               std::string uri,
               std::map<std::string, std::string> http_headers,
-              GLsizei width,
-              GLsizei height,
-              gint64 duration);
+              const MediaInfo& info);
   ~VideoPlayer();
 
   void Dispose();
@@ -62,6 +90,13 @@ class VideoPlayer {
   void SeekTo(int64_t seek);
   int64_t GetTextureId() const { return m_texture_id; };
   bool IsValid();
+  bool IsAudioOnly() const { return !has_video_; }
+
+  // Phase 1 — audio control surface
+  int GetAudioTrackCount();
+  void SetAudioTrack(int index);
+  void SetOutputChannels(int channels);
+  void SetMute(bool mute);
 
   // Initializes the video player.
   void Init(flutter::BinaryMessenger* messenger);
@@ -73,8 +108,23 @@ class VideoPlayer {
   GLsizei width_{};
   GLsizei height_{};
   gint64 duration_{};
+  bool has_video_{true};
 
-  GLuint m_texture_id{};
+  // Initial album art / metadata captured at discovery time. Forwarded to
+  // Dart via the event channel as soon as the event sink is attached.
+  std::vector<uint8_t> initial_album_art_;
+  std::string initial_album_art_mime_;
+  std::string title_;
+  std::string artist_;
+  std::string album_;
+  std::string album_artist_;
+  std::string genre_;
+  int track_number_{0};
+  std::string audio_codec_;
+  int audio_channels_{0};
+  int audio_sample_rate_{0};
+
+  int64_t m_texture_id{};
   std::atomic<bool> m_valid = true;
   std::unique_ptr<flutter::GpuSurfaceTexture> gpu_surface_texture_;
 
@@ -92,8 +142,17 @@ class VideoPlayer {
   gdouble pending_rate_ = 1.0;
   GstBus* bus_{};
 
-  gulong handoff_handler_id_;
-  gulong on_bus_msg_id_;
+  // Custom audio sink bin elements (audioconvert → audioresample →
+  // capsfilter → real sink). Owned by the bin once added.
+  GstElement* audio_bin_{};
+  GstElement* audio_convert_{};
+  GstElement* audio_resample_{};
+  GstElement* audio_capsfilter_{};
+  int output_channels_{2};
+
+  gulong handoff_handler_id_{};
+  gulong on_bus_msg_id_{};
+  gulong source_setup_id_{};
 
   std::atomic<GstState> target_state_{GST_STATE_PAUSED};
 
@@ -134,10 +193,28 @@ class VideoPlayer {
   void OnMediaError(GstMessage* msg);
   void OnMediaDurationChange();
   void SendInitialized();
+  void SendMediaMetadata();
+  void SendAlbumArt(const std::vector<uint8_t>& bytes,
+                    const std::string& mime);
+  void SendAudioInfo();
+
+  // Build the audio sink bin (audioconvert → audioresample → capsfilter →
+  // real sink). Returns nullptr on failure.
+  GstElement* BuildAudioSinkBin();
+
+  // Bus tag handling: extract embedded GST_TAG_IMAGE on the fly.
+  void HandleAlbumArt(GstSample* sample);
 
   static void OnTag(const GstTagList* list,
                     const gchar* tag,
                     gpointer user_data);
+
+  // Connected to playbin's `source-setup` signal so souphttpsrc / rtspsrc
+  // properties (timeout, user-agent, proxy, latency, …) can be configured
+  // before the source is linked.
+  static void OnSourceSetup(GstElement* playbin,
+                            GstElement* source,
+                            gpointer user_data);
 
   // The Surface Descriptor sent to Flutter when a texture frame is available.
   FlutterDesktopGpuSurfaceDescriptor m_descriptor{};
