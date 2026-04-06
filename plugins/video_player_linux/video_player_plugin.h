@@ -86,6 +86,23 @@ class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
       int64_t texture_id,
       const std::string& preset) override;
 
+  // Phase 3 — premium features.
+  std::optional<FlutterError> SetEqualizer(
+      int64_t texture_id,
+      const flutter::EncodableList& bands) override;
+  std::optional<FlutterError> SetVideoBalance(int64_t texture_id,
+                                              double brightness,
+                                              double contrast,
+                                              double saturation,
+                                              double hue) override;
+  std::optional<FlutterError> SetAudioPassthrough(int64_t texture_id,
+                                                  bool enabled) override;
+  std::optional<FlutterError> SetChannelMixMatrix(
+      int64_t texture_id,
+      int64_t in_channels,
+      int64_t out_channels,
+      const flutter::EncodableList& matrix) override;
+
  private:
   // A list of all the video players instantiated by this plugin.
   std::map<int64_t, std::unique_ptr<VideoPlayer>> videoPlayers;

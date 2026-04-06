@@ -1645,4 +1645,176 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
   SPDLOG_DEBUG("[VideoPlayer] Applied channel mix preset '{}'", preset);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 3 — Premium features: equalizer, video balance, passthrough, custom
+// downmix matrix
+// ────────────────────────────────────────────────────────────────────────────
+
+void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
+  if (bands.size() != 10) {
+    spdlog::warn("[VideoPlayer] SetEqualizer: expected 10 bands, got {}",
+                 bands.size());
+    return;
+  }
+  // Lazily insert equalizer-10bands between audio_resample_ and capsfilter
+  // on first call. Inserted in PAUSED state with a brief PLAYING dropout.
+  if (!equalizer_) {
+    if (!audio_bin_ || !audio_resample_ || !audio_capsfilter_) {
+      spdlog::warn("[VideoPlayer] SetEqualizer: audio bin not available");
+      return;
+    }
+    GstElement* eq = gst_element_factory_make("equalizer-10bands", "audio-eq");
+    if (!eq) {
+      spdlog::warn(
+          "[VideoPlayer] equalizer-10bands element unavailable; install "
+          "gst-plugins-good");
+      return;
+    }
+    GstState cur = GST_STATE_NULL;
+    if (playbin_)
+      gst_element_get_state(playbin_, &cur, nullptr, 0);
+    if (playbin_)
+      gst_element_set_state(playbin_, GST_STATE_READY);
+
+    gst_element_unlink(audio_resample_, audio_capsfilter_);
+    gst_bin_add(GST_BIN(audio_bin_), eq);
+    if (!gst_element_link_many(audio_resample_, eq, audio_capsfilter_,
+                               nullptr)) {
+      spdlog::error("[VideoPlayer] Failed to splice equalizer into audio bin");
+      gst_bin_remove(GST_BIN(audio_bin_), eq);
+      if (playbin_)
+        gst_element_set_state(playbin_, cur);
+      return;
+    }
+    gst_element_sync_state_with_parent(eq);
+    equalizer_ = eq;
+    if (playbin_)
+      gst_element_set_state(playbin_, cur);
+  }
+
+  for (size_t i = 0; i < bands.size(); ++i) {
+    char prop[8];
+    std::snprintf(prop, sizeof(prop), "band%zu", i);
+    double v = bands[i];
+    if (v < -24.0)
+      v = -24.0;
+    if (v > 12.0)
+      v = 12.0;
+    g_object_set(equalizer_, prop, v, nullptr);
+  }
+}
+
+void VideoPlayer::SetVideoBalance(double brightness,
+                                  double contrast,
+                                  double saturation,
+                                  double hue) {
+  if (!has_video_) {
+    return;
+  }
+  // Lazily insert videobalance between videoconvert and videoscale on
+  // the first non-default call.
+  const bool is_default = brightness == 0.0 && contrast == 1.0 &&
+                          saturation == 1.0 && hue == 0.0;
+  if (!videobalance_) {
+    if (is_default || !pipeline_ || !video_convert_ || !video_scale_) {
+      return;
+    }
+    GstElement* vb = gst_element_factory_make("videobalance", "video-balance");
+    if (!vb) {
+      spdlog::warn("[VideoPlayer] videobalance element unavailable");
+      return;
+    }
+    GstState cur = GST_STATE_NULL;
+    if (playbin_)
+      gst_element_get_state(playbin_, &cur, nullptr, 0);
+    if (playbin_)
+      gst_element_set_state(playbin_, GST_STATE_READY);
+
+    gst_element_unlink(video_convert_, video_scale_);
+    gst_bin_add(GST_BIN(pipeline_), vb);
+    if (!gst_element_link_many(video_convert_, vb, video_scale_, nullptr)) {
+      spdlog::error("[VideoPlayer] Failed to splice videobalance");
+      gst_bin_remove(GST_BIN(pipeline_), vb);
+      if (playbin_)
+        gst_element_set_state(playbin_, cur);
+      return;
+    }
+    gst_element_sync_state_with_parent(vb);
+    videobalance_ = vb;
+    if (playbin_)
+      gst_element_set_state(playbin_, cur);
+  }
+  if (videobalance_) {
+    g_object_set(videobalance_, "brightness", brightness, "contrast", contrast,
+                 "saturation", saturation, "hue", hue, nullptr);
+  }
+}
+
+void VideoPlayer::SetAudioPassthrough(bool enabled) {
+  // Passthrough requires the playbin to forward encoded audio to a sink that
+  // accepts encoded caps. autoaudiosink does not. The plugin can't safely
+  // hot-swap the sink mid-stream, so this method updates a flag that takes
+  // effect on the next media load. Document the env-var fallback as the
+  // recommended deployment configuration.
+  if (!playbin_)
+    return;
+  // The most we can do at runtime: tweak the playbin flags to permit
+  // native (non-decoded) audio paths via GST_PLAY_FLAG_NATIVE_AUDIO (1<<5).
+  constexpr int kNativeAudio = 1 << 5;
+  gint flags = 0;
+  g_object_get(playbin_, "flags", &flags, nullptr);
+  if (enabled) {
+    flags |= kNativeAudio;
+  } else {
+    flags &= ~kNativeAudio;
+  }
+  g_object_set(playbin_, "flags", flags, nullptr);
+}
+
+void VideoPlayer::SetChannelMixMatrix(int in_channels,
+                                      int out_channels,
+                                      const std::vector<double>& matrix) {
+  if (!audio_convert_) {
+    spdlog::warn("[VideoPlayer] SetChannelMixMatrix: audio bin not built");
+    return;
+  }
+  if (in_channels <= 0 || out_channels <= 0 || in_channels > 8 ||
+      out_channels > 8) {
+    spdlog::warn("[VideoPlayer] SetChannelMixMatrix: invalid dimensions {}x{}",
+                 in_channels, out_channels);
+    return;
+  }
+  if (static_cast<int>(matrix.size()) != in_channels * out_channels) {
+    spdlog::warn(
+        "[VideoPlayer] SetChannelMixMatrix: matrix size mismatch (got {}, "
+        "expected {})",
+        matrix.size(), in_channels * out_channels);
+    return;
+  }
+  if (!g_object_class_find_property(G_OBJECT_GET_CLASS(audio_convert_),
+                                    "mix-matrix")) {
+    spdlog::warn("[VideoPlayer] audioconvert mix-matrix unsupported");
+    return;
+  }
+
+  GValue mat = G_VALUE_INIT;
+  g_value_init(&mat, GST_TYPE_ARRAY);
+  for (int row = 0; row < out_channels; ++row) {
+    GValue gst_row = G_VALUE_INIT;
+    g_value_init(&gst_row, GST_TYPE_ARRAY);
+    for (int col = 0; col < in_channels; ++col) {
+      GValue cell = G_VALUE_INIT;
+      g_value_init(&cell, G_TYPE_DOUBLE);
+      g_value_set_double(&cell, matrix[row * in_channels + col]);
+      gst_value_array_append_value(&gst_row, &cell);
+      g_value_unset(&cell);
+    }
+    gst_value_array_append_value(&mat, &gst_row);
+    g_value_unset(&gst_row);
+  }
+  g_object_set_property(G_OBJECT(audio_convert_), "mix-matrix", &mat);
+  g_value_unset(&mat);
+  SetOutputChannels(out_channels);
+}
+
 }  // namespace video_player_linux

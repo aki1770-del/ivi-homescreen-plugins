@@ -496,6 +496,67 @@ std::optional<FlutterError> VideoPlayerPlugin::SetChannelMixPreset(
   return std::nullopt;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 3 dispatch — premium features
+// ────────────────────────────────────────────────────────────────────────────
+
+static std::vector<double> EncodableListToDoubles(
+    const flutter::EncodableList& list) {
+  std::vector<double> out;
+  out.reserve(list.size());
+  for (const auto& v : list) {
+    if (std::holds_alternative<double>(v)) {
+      out.push_back(std::get<double>(v));
+    } else if (std::holds_alternative<int32_t>(v)) {
+      out.push_back(static_cast<double>(std::get<int32_t>(v)));
+    } else if (std::holds_alternative<int64_t>(v)) {
+      out.push_back(static_cast<double>(std::get<int64_t>(v)));
+    } else {
+      out.push_back(0.0);
+    }
+  }
+  return out;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetEqualizer(
+    const int64_t texture_id,
+    const flutter::EncodableList& bands) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetEqualizer(EncodableListToDoubles(bands));
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetVideoBalance(
+    const int64_t texture_id,
+    const double brightness,
+    const double contrast,
+    const double saturation,
+    const double hue) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetVideoBalance(brightness, contrast, saturation, hue);
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetAudioPassthrough(
+    const int64_t texture_id,
+    const bool enabled) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetAudioPassthrough(enabled);
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetChannelMixMatrix(
+    const int64_t texture_id,
+    const int64_t in_channels,
+    const int64_t out_channels,
+    const flutter::EncodableList& matrix) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetChannelMixMatrix(static_cast<int>(in_channels),
+                                  static_cast<int>(out_channels),
+                                  EncodableListToDoubles(matrix));
+  return std::nullopt;
+}
+
 #undef VPL_LOOKUP
 
 }  // namespace video_player_linux

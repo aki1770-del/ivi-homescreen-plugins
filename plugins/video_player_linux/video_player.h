@@ -108,6 +108,17 @@ class VideoPlayer {
   void SetSubtitleFont(const std::string& font_desc);
   void SetChannelMixPreset(const std::string& preset);
 
+  // Phase 3 — premium features
+  void SetEqualizer(const std::vector<double>& bands);
+  void SetVideoBalance(double brightness,
+                       double contrast,
+                       double saturation,
+                       double hue);
+  void SetAudioPassthrough(bool enabled);
+  void SetChannelMixMatrix(int in_channels,
+                           int out_channels,
+                           const std::vector<double>& matrix);
+
   // Initializes the video player.
   void Init(flutter::BinaryMessenger* messenger);
 
@@ -158,6 +169,8 @@ class VideoPlayer {
   GstElement* audio_convert_{};
   GstElement* audio_resample_{};
   GstElement* audio_capsfilter_{};
+  GstElement* equalizer_{};  // optional, inserted on first SetEqualizer
+  GstElement* videobalance_{};  // optional, inserted on first SetVideoBalance
   int output_channels_{2};
 
   gulong handoff_handler_id_{};
