@@ -67,6 +67,25 @@ class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
   std::optional<FlutterError> SetMute(int64_t texture_id, bool mute) override;
   ErrorOr<bool> IsAudioOnly(int64_t texture_id) override;
 
+  // Phase 2 — quality & tuning.
+  std::optional<FlutterError> SetScaleMethod(int64_t texture_id,
+                                             int64_t method) override;
+  std::optional<FlutterError> SetAVOffset(int64_t texture_id,
+                                          int64_t offset_ms) override;
+  std::optional<FlutterError> SetSubtitlesEnabled(int64_t texture_id,
+                                                  bool enabled) override;
+  ErrorOr<int64_t> GetSubtitleTrackCount(int64_t texture_id) override;
+  std::optional<FlutterError> SetSubtitleTrack(int64_t texture_id,
+                                               int64_t track_index) override;
+  std::optional<FlutterError> SetSubtitleUri(int64_t texture_id,
+                                             const std::string& uri) override;
+  std::optional<FlutterError> SetSubtitleFont(
+      int64_t texture_id,
+      const std::string& font_desc) override;
+  std::optional<FlutterError> SetChannelMixPreset(
+      int64_t texture_id,
+      const std::string& preset) override;
+
  private:
   // A list of all the video players instantiated by this plugin.
   std::map<int64_t, std::unique_ptr<VideoPlayer>> videoPlayers;

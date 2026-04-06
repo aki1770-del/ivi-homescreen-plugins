@@ -425,4 +425,77 @@ ErrorOr<bool> VideoPlayerPlugin::IsAudioOnly(const int64_t texture_id) {
   return it->second->IsAudioOnly();
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2 dispatch — quality & tuning
+// ────────────────────────────────────────────────────────────────────────────
+
+#define VPL_LOOKUP(id)                                                  \
+  const auto it = videoPlayers.find(id);                                \
+  if (it == videoPlayers.end())                                         \
+    return FlutterError("player_not_found", "This player ID was not found")
+
+std::optional<FlutterError> VideoPlayerPlugin::SetScaleMethod(
+    const int64_t texture_id,
+    const int64_t method) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetScaleMethod(static_cast<int>(method));
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetAVOffset(
+    const int64_t texture_id,
+    const int64_t offset_ms) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetAVOffset(offset_ms);
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetSubtitlesEnabled(
+    const int64_t texture_id,
+    const bool enabled) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetSubtitlesEnabled(enabled);
+  return std::nullopt;
+}
+
+ErrorOr<int64_t> VideoPlayerPlugin::GetSubtitleTrackCount(
+    const int64_t texture_id) {
+  VPL_LOOKUP(texture_id);
+  return static_cast<int64_t>(it->second->GetSubtitleTrackCount());
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetSubtitleTrack(
+    const int64_t texture_id,
+    const int64_t track_index) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetSubtitleTrack(static_cast<int>(track_index));
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetSubtitleUri(
+    const int64_t texture_id,
+    const std::string& uri) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetSubtitleUri(uri);
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetSubtitleFont(
+    const int64_t texture_id,
+    const std::string& font_desc) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetSubtitleFont(font_desc);
+  return std::nullopt;
+}
+
+std::optional<FlutterError> VideoPlayerPlugin::SetChannelMixPreset(
+    const int64_t texture_id,
+    const std::string& preset) {
+  VPL_LOOKUP(texture_id);
+  it->second->SetChannelMixPreset(preset);
+  return std::nullopt;
+}
+
+#undef VPL_LOOKUP
+
 }  // namespace video_player_linux

@@ -198,6 +198,24 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   g_object_set(playbin_, "connection-speed", connection_speed, nullptr);
   g_object_set(playbin_, "volume", volume_, nullptr);
 
+  // Buffer tuning (Phase 2). Defaults are GStreamer's; only override on
+  // explicit env vars to keep behaviour stable for unconstrained targets.
+  if (const char* env = std::getenv("VIDEO_PLAYER_BUFFER_SIZE")) {
+    char* end = nullptr;
+    const long val = std::strtol(env, &end, 10);
+    if (end != env && val > 0) {
+      g_object_set(playbin_, "buffer-size", static_cast<int>(val), nullptr);
+    }
+  }
+  if (const char* env = std::getenv("VIDEO_PLAYER_BUFFER_DURATION")) {
+    char* end = nullptr;
+    const long long val = std::strtoll(env, &end, 10);
+    if (end != env && val > 0) {
+      g_object_set(playbin_, "buffer-duration",
+                   static_cast<gint64>(val) * GST_SECOND, nullptr);
+    }
+  }
+
   if (has_video_) {
     sink_ = gst_element_factory_make("fakesink", nullptr);
     if (!sink_) {
@@ -226,6 +244,18 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
       SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
       m_valid = false;
       return;
+    }
+    // Phase 2: scaling algorithm via env var. 1=bilinear (default).
+    int scale_method = 1;
+    if (const char* env = std::getenv("VIDEO_PLAYER_SCALE_METHOD")) {
+      char* end = nullptr;
+      const long v = std::strtol(env, &end, 10);
+      if (end != env && v >= 0 && v <= 9)
+        scale_method = static_cast<int>(v);
+    }
+    if (g_object_class_find_property(G_OBJECT_GET_CLASS(video_scale_),
+                                     "method")) {
+      g_object_set(video_scale_, "method", scale_method, nullptr);
     }
 
     GstCaps* scale =
@@ -1236,6 +1266,27 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
   g_object_set(audio_capsfilter_, "caps", caps, nullptr);
   gst_caps_unref(caps);
 
+  // Channel reordering defaults — fixes media with broken position metadata.
+  if (g_object_class_find_property(G_OBJECT_GET_CLASS(audio_convert_),
+                                   "input-channels-reorder-mode")) {
+    int reorder_mode = 0;
+    int reorder_layout = 1;  // SMPTE
+    if (const char* env = std::getenv("VIDEO_PLAYER_AUDIO_REORDER_MODE")) {
+      char* end = nullptr;
+      const long v = std::strtol(env, &end, 10);
+      if (end != env && v >= 0 && v <= 2)
+        reorder_mode = static_cast<int>(v);
+    }
+    if (const char* env = std::getenv("VIDEO_PLAYER_AUDIO_REORDER")) {
+      char* end = nullptr;
+      const long v = std::strtol(env, &end, 10);
+      if (end != env && v >= 0 && v <= 4)
+        reorder_layout = static_cast<int>(v);
+    }
+    g_object_set(audio_convert_, "input-channels-reorder-mode", reorder_mode,
+                 "input-channels-reorder", reorder_layout, nullptr);
+  }
+
   GstElement* bin = gst_bin_new("audio-sink-bin");
   gst_bin_add_many(GST_BIN(bin), audio_convert_, audio_resample_,
                    audio_capsfilter_, real_sink, nullptr);
@@ -1287,6 +1338,18 @@ void VideoPlayer::OnSourceSetup(GstElement* /*playbin*/,
     if (const char* proxy = std::getenv("VIDEO_PLAYER_PROXY")) {
       g_object_set(source, "proxy", proxy, nullptr);
     }
+  }
+  // RTSP latency (rtspsrc) — IVI camera streams typically want low latency.
+  if (g_object_class_find_property(klass, "latency")) {
+    guint latency = 200;
+    if (const char* env = std::getenv("VIDEO_PLAYER_RTSP_LATENCY")) {
+      char* end = nullptr;
+      const long val = std::strtol(env, &end, 10);
+      if (end != env && val >= 0 && val < 60000) {
+        latency = static_cast<guint>(val);
+      }
+    }
+    g_object_set(source, "latency", latency, nullptr);
   }
 }
 
@@ -1421,6 +1484,165 @@ void VideoPlayer::SetMute(bool mute) {
   if (!playbin_)
     return;
   g_object_set(playbin_, "mute", mute ? TRUE : FALSE, nullptr);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2 — Quality & Tuning: scale, A/V offset, subtitles, channel presets
+// ────────────────────────────────────────────────────────────────────────────
+
+void VideoPlayer::SetScaleMethod(int method) {
+  if (!has_video_ || !video_scale_) {
+    return;
+  }
+  if (method < 0 || method > 9) {
+    spdlog::warn("[VideoPlayer] SetScaleMethod({}) out of range", method);
+    return;
+  }
+  if (g_object_class_find_property(G_OBJECT_GET_CLASS(video_scale_),
+                                   "method")) {
+    g_object_set(video_scale_, "method", method, nullptr);
+  }
+}
+
+void VideoPlayer::SetAVOffset(int64_t offset_ms) {
+  if (!playbin_)
+    return;
+  if (g_object_class_find_property(G_OBJECT_GET_CLASS(playbin_), "av-offset")) {
+    g_object_set(playbin_, "av-offset",
+                 static_cast<gint64>(offset_ms) * GST_MSECOND, nullptr);
+  }
+}
+
+void VideoPlayer::SetSubtitlesEnabled(bool enabled) {
+  if (!playbin_)
+    return;
+  gint flags = 0;
+  g_object_get(playbin_, "flags", &flags, nullptr);
+  if (enabled) {
+    flags |= GST_PLAY_FLAG_TEXT;
+  } else {
+    flags &= ~GST_PLAY_FLAG_TEXT;
+  }
+  g_object_set(playbin_, "flags", flags, nullptr);
+}
+
+int VideoPlayer::GetSubtitleTrackCount() {
+  if (!playbin_)
+    return 0;
+  gint n = 0;
+  g_object_get(playbin_, "n-text", &n, nullptr);
+  return n;
+}
+
+void VideoPlayer::SetSubtitleTrack(int index) {
+  if (!playbin_)
+    return;
+  gint n = 0;
+  g_object_get(playbin_, "n-text", &n, nullptr);
+  if (index < 0 || index >= n) {
+    spdlog::warn("[VideoPlayer] SetSubtitleTrack({}) out of range (n={})",
+                 index, n);
+    return;
+  }
+  g_object_set(playbin_, "current-text", index, nullptr);
+}
+
+void VideoPlayer::SetSubtitleUri(const std::string& uri) {
+  if (!playbin_)
+    return;
+  if (g_object_class_find_property(G_OBJECT_GET_CLASS(playbin_), "suburi")) {
+    g_object_set(playbin_, "suburi", uri.empty() ? nullptr : uri.c_str(),
+                 nullptr);
+  }
+}
+
+void VideoPlayer::SetSubtitleFont(const std::string& font_desc) {
+  if (!playbin_)
+    return;
+  if (g_object_class_find_property(G_OBJECT_GET_CLASS(playbin_),
+                                   "subtitle-font-desc")) {
+    g_object_set(playbin_, "subtitle-font-desc", font_desc.c_str(), nullptr);
+  }
+}
+
+void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
+  if (!audio_convert_) {
+    spdlog::warn("[VideoPlayer] SetChannelMixPreset: audio bin not built");
+    return;
+  }
+  if (!g_object_class_find_property(G_OBJECT_GET_CLASS(audio_convert_),
+                                    "mix-matrix")) {
+    spdlog::warn(
+        "[VideoPlayer] audioconvert mix-matrix unsupported (GStreamer < 1.20)");
+    return;
+  }
+
+  // Standard 5.1 input order (SMPTE): FL, FR, FC, LFE, RL, RR
+  // Each preset defines two output rows (stereo) × six input columns.
+  // Coefficients are applied as a flat row-major GValueArray of GValueArrays.
+  struct Preset {
+    const char* name;
+    int out_channels;
+    double matrix[2][6];
+  };
+  static constexpr Preset kPresets[] = {
+      // ITU-R BS.775 standard stereo downmix.
+      {"stereo", 2, {{1.0, 0.0, 0.707, 0.707, 0.707, 0.0},
+                     {0.0, 1.0, 0.707, 0.707, 0.0, 0.707}}},
+      // Boosted dialog (FC) for the driver, modest LFE bleed.
+      {"driver", 2, {{1.0, 0.0, 0.85, 0.5, 0.5, 0.0},
+                     {0.0, 1.0, 0.85, 0.5, 0.0, 0.5}}},
+      // Reduced dynamic range for night listening.
+      {"night",  2, {{1.0, 0.0, 0.707, 0.1, 0.5, 0.0},
+                     {0.0, 1.0, 0.707, 0.1, 0.0, 0.5}}},
+      // Rear-cabin optimised — emphasise rear channels.
+      {"rear",   2, {{1.0, 0.0, 0.5, 0.3, 1.0, 0.0},
+                     {0.0, 1.0, 0.5, 0.3, 0.0, 1.0}}},
+  };
+
+  if (preset == "surround") {
+    // Identity-ish: clear matrix, force 5.1 output.
+    GValue empty = G_VALUE_INIT;
+    g_value_init(&empty, GST_TYPE_ARRAY);
+    g_object_set_property(G_OBJECT(audio_convert_), "mix-matrix", &empty);
+    g_value_unset(&empty);
+    SetOutputChannels(6);
+    return;
+  }
+
+  const Preset* match = nullptr;
+  for (const auto& p : kPresets) {
+    if (preset == p.name) {
+      match = &p;
+      break;
+    }
+  }
+  if (!match) {
+    spdlog::warn("[VideoPlayer] Unknown channel mix preset '{}'", preset);
+    return;
+  }
+
+  // Build a GST_TYPE_ARRAY of GST_TYPE_ARRAY of doubles.
+  GValue matrix = G_VALUE_INIT;
+  g_value_init(&matrix, GST_TYPE_ARRAY);
+  for (int row = 0; row < match->out_channels; ++row) {
+    GValue gst_row = G_VALUE_INIT;
+    g_value_init(&gst_row, GST_TYPE_ARRAY);
+    for (int col = 0; col < 6; ++col) {
+      GValue cell = G_VALUE_INIT;
+      g_value_init(&cell, G_TYPE_DOUBLE);
+      g_value_set_double(&cell, match->matrix[row][col]);
+      gst_value_array_append_value(&gst_row, &cell);
+      g_value_unset(&cell);
+    }
+    gst_value_array_append_value(&matrix, &gst_row);
+    g_value_unset(&gst_row);
+  }
+  g_object_set_property(G_OBJECT(audio_convert_), "mix-matrix", &matrix);
+  g_value_unset(&matrix);
+
+  SetOutputChannels(match->out_channels);
+  SPDLOG_DEBUG("[VideoPlayer] Applied channel mix preset '{}'", preset);
 }
 
 }  // namespace video_player_linux

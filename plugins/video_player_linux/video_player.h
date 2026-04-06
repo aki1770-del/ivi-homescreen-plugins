@@ -98,6 +98,16 @@ class VideoPlayer {
   void SetOutputChannels(int channels);
   void SetMute(bool mute);
 
+  // Phase 2 — quality & tuning
+  void SetScaleMethod(int method);
+  void SetAVOffset(int64_t offset_ms);
+  void SetSubtitlesEnabled(bool enabled);
+  int GetSubtitleTrackCount();
+  void SetSubtitleTrack(int index);
+  void SetSubtitleUri(const std::string& uri);
+  void SetSubtitleFont(const std::string& font_desc);
+  void SetChannelMixPreset(const std::string& preset);
+
   // Initializes the video player.
   void Init(flutter::BinaryMessenger* messenger);
 
