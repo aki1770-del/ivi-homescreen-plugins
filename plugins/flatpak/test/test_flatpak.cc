@@ -288,7 +288,7 @@ TEST_F(FlatpakPluginTest, ApplicationInstallTest) {
 
   auto shim = std::make_shared<FlatpakShim>(nullptr, messenger, strand.get());
 
-  auto app_id = "org.telegram.desktop";
+  auto app_id = "org.libreoffice.LibreOffice";
 
   shim->ApplicationInstall(app_id, [guard](const ErrorOr<bool>& result) {
     guard->set_value(result);

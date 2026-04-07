@@ -360,7 +360,6 @@ void FlatpakPlugin::HandleMethodCall(
   const auto& method_name = method.method_name();
   spdlog::debug("[FlatpakPlugin] HandleMethodCall {}", method_name);
 
-  // --- NEW: System Storage request (df -h equivalent) ---
   if (method_name == "getSystemStorage") {
     std::error_code ec;
     auto space_info = std::filesystem::space("/", ec);

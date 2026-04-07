@@ -4396,7 +4396,6 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
     return false;
   }
 
-  // Fix logging bug to show total required space
   guint64 total_requirement = min_free_space + estimated_download;
   spdlog::info(
       "[FlatpakPlugin] Total storage requirement (buffer + download): {} MB",
@@ -4438,7 +4437,9 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
 
     flutter::EncodableMap disk_usage_event;
     disk_usage_event[flutter::EncodableValue("type")] =
-        flutter::EncodableValue("free_space_error");
+        flutter::EncodableValue("insufficient_space");
+    disk_usage_event[flutter::EncodableValue("app_id")] =
+        flutter::EncodableValue(app_id);
     disk_usage_event[flutter::EncodableValue("available_mb")] =
         flutter::EncodableValue(
             static_cast<int64_t>(effective_free_space / 1024 / 1024));
