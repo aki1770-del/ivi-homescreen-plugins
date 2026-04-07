@@ -28,7 +28,8 @@ namespace video_player_linux {
 
 #define GSTREAMER_DEBUG 1
 
-class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
+class VideoPlayerPlugin final : public flutter::Plugin,
+                                public LinuxVideoPlayerApi {
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrarDesktop* registrar);
 
@@ -58,16 +59,61 @@ class VideoPlayerPlugin final : public flutter::Plugin, public VideoPlayerApi {
                                      int64_t position) override;
   std::optional<FlutterError> Pause(int64_t texture_id) override;
 
+  // Phase 1 — audio control surface.
+  ErrorOr<int64_t> GetAudioTrackCount(int64_t texture_id) override;
+  std::optional<FlutterError> SetAudioTrack(int64_t texture_id,
+                                            int64_t track_index) override;
+  std::optional<FlutterError> SetOutputChannels(int64_t texture_id,
+                                                int64_t channels) override;
+  std::optional<FlutterError> SetMute(int64_t texture_id, bool mute) override;
+  ErrorOr<bool> IsAudioOnly(int64_t texture_id) override;
+
+  // Phase 2 — quality & tuning.
+  std::optional<FlutterError> SetScaleMethod(int64_t texture_id,
+                                             int64_t method) override;
+  std::optional<FlutterError> SetAVOffset(int64_t texture_id,
+                                          int64_t offset_ms) override;
+  std::optional<FlutterError> SetSubtitlesEnabled(int64_t texture_id,
+                                                  bool enabled) override;
+  ErrorOr<int64_t> GetSubtitleTrackCount(int64_t texture_id) override;
+  std::optional<FlutterError> SetSubtitleTrack(int64_t texture_id,
+                                               int64_t track_index) override;
+  std::optional<FlutterError> SetSubtitleUri(int64_t texture_id,
+                                             const std::string& uri) override;
+  std::optional<FlutterError> SetSubtitleFont(
+      int64_t texture_id,
+      const std::string& font_desc) override;
+  std::optional<FlutterError> SetChannelMixPreset(
+      int64_t texture_id,
+      const std::string& preset) override;
+
+  // Phase 3 — premium features.
+  std::optional<FlutterError> SetEqualizer(
+      int64_t texture_id,
+      const flutter::EncodableList& bands) override;
+  std::optional<FlutterError> SetVideoBalance(int64_t texture_id,
+                                              double brightness,
+                                              double contrast,
+                                              double saturation,
+                                              double hue) override;
+  std::optional<FlutterError> SetAudioPassthrough(int64_t texture_id,
+                                                  bool enabled) override;
+  std::optional<FlutterError> SetChannelMixMatrix(
+      int64_t texture_id,
+      int64_t in_channels,
+      int64_t out_channels,
+      const flutter::EncodableList& matrix) override;
+
  private:
   // A list of all the video players instantiated by this plugin.
   std::map<int64_t, std::unique_ptr<VideoPlayer>> videoPlayers;
 
   flutter::PluginRegistrarDesktop* registrar_{};
 
-  static bool discover_video_info(const char* url,
-                                  int& width,
-                                  int& height,
-                                  gint64& duration);
+  // Probes the media at [url] for video, audio, embedded album art and
+  // text metadata. Returns false only when neither audio nor video streams
+  // can be found (i.e. nothing playable).
+  static bool discover_media_info(const char* url, MediaInfo& info);
 };
 
 }  // namespace video_player_linux
