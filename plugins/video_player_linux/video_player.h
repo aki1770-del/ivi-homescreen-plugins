@@ -163,8 +163,11 @@ class VideoPlayer {
   // call always sends a real seek to the pipeline — otherwise a fresh
   // playbin can inherit a stray segment rate from a previous instance and
   // play the first second or two too fast before correcting itself.
-  gdouble rate_ = -2.0;
-  gdouble pending_rate_ = 1.0;
+  // Both fields are touched from the GLib main loop, the GStreamer
+  // streaming thread (audio recovery / upgrade idle callbacks) and the
+  // Flutter platform thread (Pigeon dispatchers), so they're atomic.
+  std::atomic<double> rate_{-2.0};
+  std::atomic<double> pending_rate_{1.0};
   GstBus* bus_{};
 
   // Custom audio sink bin elements (audioconvert → audioresample →
@@ -174,7 +177,7 @@ class VideoPlayer {
   GstElement* audio_resample_{};
   GstElement* audio_scaletempo_{};  // time-stretch for playback rate changes
   GstElement* audio_capsfilter_{};
-  GstElement* equalizer_{};  // optional, inserted on first SetEqualizer
+  GstElement* equalizer_{};     // optional, inserted on first SetEqualizer
   GstElement* videobalance_{};  // optional, inserted on first SetVideoBalance
   int output_channels_{2};
 
@@ -206,6 +209,10 @@ class VideoPlayer {
   struct udev_monitor* udev_mon_{};
   GIOChannel* udev_channel_{};
   guint udev_watch_id_{};
+  // GSource id for the pending OnAudioUpgrade idle callback (if any).
+  // Tracked so it can be cancelled in StopAudioMonitor / Dispose to
+  // prevent the callback from firing after `this` has been destroyed.
+  guint audio_upgrade_idle_id_{};
   void StartAudioMonitor();
   void StopAudioMonitor();
   static gboolean OnUdevEvent(GIOChannel* channel,
@@ -222,8 +229,7 @@ class VideoPlayer {
   void OnMediaDurationChange();
   void SendInitialized();
   void SendMediaMetadata();
-  void SendAlbumArt(const std::vector<uint8_t>& bytes,
-                    const std::string& mime);
+  void SendAlbumArt(const std::vector<uint8_t>& bytes, const std::string& mime);
   void SendAudioInfo();
 
   // Build the audio sink bin (audioconvert → audioresample → capsfilter →

@@ -133,8 +133,7 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
   try {
     MediaInfo info;
     if (!discover_media_info(asset_to_load.c_str(), info)) {
-      return FlutterError("media_info_failed",
-                          "No playable streams found");
+      return FlutterError("media_info_failed", "No playable streams found");
     }
     if (info.has_video && (info.width <= 0 || info.height <= 0 ||
                            info.width > 16384 || info.height > 16384)) {
@@ -333,12 +332,26 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
       GstCaps* caps = gst_sample_get_caps(image_sample);
       GstMapInfo map;
       if (buf && gst_buffer_map(buf, &map, GST_MAP_READ)) {
-        info.album_art.assign(map.data, map.data + map.size);
-        if (caps) {
-          if (const gchar* name =
-                  gst_structure_get_name(gst_caps_get_structure(caps, 0))) {
-            info.album_art_mime = name;
+        // Cap embedded album art at 10 MB to defend against malformed
+        // / malicious media files with absurdly large embedded images.
+        // Real-world cover art is typically 200-500 KB; anything beyond
+        // a few MB is almost certainly garbage we don't want to ferry
+        // through the platform channel.
+        constexpr size_t kMaxAlbumArtBytes =
+            static_cast<size_t>(10) * 1024 * 1024;
+        if (map.size > 0 && map.size <= kMaxAlbumArtBytes) {
+          info.album_art.assign(map.data, map.data + map.size);
+          if (caps) {
+            if (const gchar* name =
+                    gst_structure_get_name(gst_caps_get_structure(caps, 0))) {
+              info.album_art_mime = name;
+            }
           }
+        } else if (map.size > kMaxAlbumArtBytes) {
+          spdlog::warn(
+              "[VideoPlayer] Embedded album art is {} bytes (>{} MB cap); "
+              "ignoring.",
+              map.size, kMaxAlbumArtBytes / (static_cast<size_t>(1024) * 1024));
         }
         gst_buffer_unmap(buf, &map);
       }
@@ -429,10 +442,10 @@ ErrorOr<bool> VideoPlayerPlugin::IsAudioOnly(const int64_t texture_id) {
 // Phase 2 dispatch — quality & tuning
 // ────────────────────────────────────────────────────────────────────────────
 
-#define VPL_LOOKUP(id)                                                  \
-  const auto it = videoPlayers.find(id);                                \
-  if (it == videoPlayers.end())                                         \
-    return FlutterError("player_not_found", "This player ID was not found")
+#define VPL_LOOKUP(id)                   \
+  const auto it = videoPlayers.find(id); \
+  if (it == videoPlayers.end())          \
+  return FlutterError("player_not_found", "This player ID was not found")
 
 std::optional<FlutterError> VideoPlayerPlugin::SetScaleMethod(
     const int64_t texture_id,
@@ -476,6 +489,14 @@ std::optional<FlutterError> VideoPlayerPlugin::SetSubtitleUri(
     const int64_t texture_id,
     const std::string& uri) {
   VPL_LOOKUP(texture_id);
+  // Apply the same scheme allowlist used for the main media URI so a
+  // hostile caller can't smuggle a subtitle load through gio:// or
+  // similar back-channels.
+  if (!uri.empty() && !is_allowed_uri_scheme(uri)) {
+    return FlutterError("invalid_subtitle_uri",
+                        "Subtitle URI scheme not allowed. "
+                        "Supported: file, http, https, rtsp");
+  }
   it->second->SetSubtitleUri(uri);
   return std::nullopt;
 }

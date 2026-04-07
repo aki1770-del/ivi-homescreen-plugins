@@ -17,17 +17,17 @@
 
 namespace video_player_linux {
 
-
 // Generated class from Pigeon.
 
 class FlutterError {
  public:
-  explicit FlutterError(const std::string& code)
-    : code_(code) {}
+  explicit FlutterError(const std::string& code) : code_(code) {}
   explicit FlutterError(const std::string& code, const std::string& message)
-    : code_(code), message_(message) {}
-  explicit FlutterError(const std::string& code, const std::string& message, const flutter::EncodableValue& details)
-    : code_(code), message_(message), details_(details) {}
+      : code_(code), message_(message) {}
+  explicit FlutterError(const std::string& code,
+                        const std::string& message,
+                        const flutter::EncodableValue& details)
+      : code_(code), message_(message), details_(details) {}
 
   const std::string& code() const { return code_; }
   const std::string& message() const { return message_; }
@@ -39,7 +39,8 @@ class FlutterError {
   flutter::EncodableValue details_;
 };
 
-template<class T> class ErrorOr {
+template <class T>
+class ErrorOr {
  public:
   ErrorOr(const T& rhs) : v_(rhs) {}
   ErrorOr(const T&& rhs) : v_(std::move(rhs)) {}
@@ -58,7 +59,8 @@ template<class T> class ErrorOr {
   std::variant<T, FlutterError> v_;
 };
 
-// Generated interface from Pigeon that represents a handler of messages from Flutter.
+// Generated interface from Pigeon that represents a handler of messages from
+// Flutter.
 class LinuxVideoPlayerApi {
  public:
   LinuxVideoPlayerApi(const LinuxVideoPlayerApi&) = delete;
@@ -69,23 +71,20 @@ class LinuxVideoPlayerApi {
   // Creates a new instance of the video player.
   // Returns the textureId of the created player.
   virtual ErrorOr<int64_t> Create(
-    const std::string* asset,
-    const std::string* uri,
-    const flutter::EncodableMap& http_headers) = 0;
+      const std::string* asset,
+      const std::string* uri,
+      const flutter::EncodableMap& http_headers) = 0;
   // Disposes the video player with the given textureId.
   virtual std::optional<FlutterError> Dispose(int64_t texture_id) = 0;
   // Sets the looping state of the video player with the given textureId.
-  virtual std::optional<FlutterError> SetLooping(
-    int64_t texture_id,
-    bool is_looping) = 0;
+  virtual std::optional<FlutterError> SetLooping(int64_t texture_id,
+                                                 bool is_looping) = 0;
   // Sets the volume of the video player with the given textureId.
-  virtual std::optional<FlutterError> SetVolume(
-    int64_t texture_id,
-    double volume) = 0;
+  virtual std::optional<FlutterError> SetVolume(int64_t texture_id,
+                                                double volume) = 0;
   // Sets the playback speed of the video player with the given textureId.
-  virtual std::optional<FlutterError> SetPlaybackSpeed(
-    int64_t texture_id,
-    double speed) = 0;
+  virtual std::optional<FlutterError> SetPlaybackSpeed(int64_t texture_id,
+                                                       double speed) = 0;
   // Starts playing the video in the video player with the given textureId.
   virtual std::optional<FlutterError> Play(int64_t texture_id) = 0;
   // Gets the current position of the video player with the given textureId.
@@ -93,95 +92,84 @@ class LinuxVideoPlayerApi {
   virtual ErrorOr<int64_t> GetPosition(int64_t texture_id) = 0;
   // Seeks to the given position in the video player with the given textureId.
   // The position is in milliseconds.
-  virtual std::optional<FlutterError> SeekTo(
-    int64_t texture_id,
-    int64_t position) = 0;
+  virtual std::optional<FlutterError> SeekTo(int64_t texture_id,
+                                             int64_t position) = 0;
   // Pauses the video in the video player with the given textureId.
   virtual std::optional<FlutterError> Pause(int64_t texture_id) = 0;
   // Returns the number of audio tracks in the current media.
   virtual ErrorOr<int64_t> GetAudioTrackCount(int64_t texture_id) = 0;
   // Switches to the audio track at [trackIndex].
-  virtual std::optional<FlutterError> SetAudioTrack(
-    int64_t texture_id,
-    int64_t track_index) = 0;
+  virtual std::optional<FlutterError> SetAudioTrack(int64_t texture_id,
+                                                    int64_t track_index) = 0;
   // Sets the output channel count (1=mono, 2=stereo, 6=5.1, 8=7.1).
-  virtual std::optional<FlutterError> SetOutputChannels(
-    int64_t texture_id,
-    int64_t channels) = 0;
+  virtual std::optional<FlutterError> SetOutputChannels(int64_t texture_id,
+                                                        int64_t channels) = 0;
   // Toggles native mute (preserves volume level for unmute).
-  virtual std::optional<FlutterError> SetMute(
-    int64_t texture_id,
-    bool mute) = 0;
+  virtual std::optional<FlutterError> SetMute(int64_t texture_id,
+                                              bool mute) = 0;
   // Returns true if the media has no video stream.
   virtual ErrorOr<bool> IsAudioOnly(int64_t texture_id) = 0;
   // Sets the video scaling algorithm (0=nearest, 1=bilinear, 4=lanczos).
-  virtual std::optional<FlutterError> SetScaleMethod(
-    int64_t texture_id,
-    int64_t method) = 0;
+  virtual std::optional<FlutterError> SetScaleMethod(int64_t texture_id,
+                                                     int64_t method) = 0;
   // Sets the A/V sync offset in milliseconds. Positive delays audio.
-  virtual std::optional<FlutterError> SetAVOffset(
-    int64_t texture_id,
-    int64_t offset_ms) = 0;
+  virtual std::optional<FlutterError> SetAVOffset(int64_t texture_id,
+                                                  int64_t offset_ms) = 0;
   // Enables or disables subtitle rendering.
-  virtual std::optional<FlutterError> SetSubtitlesEnabled(
-    int64_t texture_id,
-    bool enabled) = 0;
+  virtual std::optional<FlutterError> SetSubtitlesEnabled(int64_t texture_id,
+                                                          bool enabled) = 0;
   // Returns the number of subtitle tracks in the current media.
   virtual ErrorOr<int64_t> GetSubtitleTrackCount(int64_t texture_id) = 0;
   // Switches to the subtitle track at [trackIndex].
-  virtual std::optional<FlutterError> SetSubtitleTrack(
-    int64_t texture_id,
-    int64_t track_index) = 0;
+  virtual std::optional<FlutterError> SetSubtitleTrack(int64_t texture_id,
+                                                       int64_t track_index) = 0;
   // Sets an external subtitle file URI (.srt, .sub, .vtt). Pass an empty
   // string to clear.
   virtual std::optional<FlutterError> SetSubtitleUri(
-    int64_t texture_id,
-    const std::string& uri) = 0;
+      int64_t texture_id,
+      const std::string& uri) = 0;
   // Sets the subtitle font (Pango format, e.g., "Sans Bold 18").
   virtual std::optional<FlutterError> SetSubtitleFont(
-    int64_t texture_id,
-    const std::string& font_desc) = 0;
+      int64_t texture_id,
+      const std::string& font_desc) = 0;
   // Sets a named channel mix preset
   // ("stereo" | "driver" | "night" | "rear" | "surround").
   virtual std::optional<FlutterError> SetChannelMixPreset(
-    int64_t texture_id,
-    const std::string& preset) = 0;
+      int64_t texture_id,
+      const std::string& preset) = 0;
   // Sets the 10-band equalizer. [bands] must have 10 elements,
   // each clamped to -24.0..+12.0 dB.
   virtual std::optional<FlutterError> SetEqualizer(
-    int64_t texture_id,
-    const flutter::EncodableList& bands) = 0;
+      int64_t texture_id,
+      const flutter::EncodableList& bands) = 0;
   // Sets video brightness, contrast, saturation, hue (each -1.0..+1.0
   // except contrast/saturation which are 0..2 with 1 = identity).
-  virtual std::optional<FlutterError> SetVideoBalance(
-    int64_t texture_id,
-    double brightness,
-    double contrast,
-    double saturation,
-    double hue) = 0;
+  virtual std::optional<FlutterError> SetVideoBalance(int64_t texture_id,
+                                                      double brightness,
+                                                      double contrast,
+                                                      double saturation,
+                                                      double hue) = 0;
   // Enables/disables encoded audio passthrough (AC3/DTS over HDMI).
-  virtual std::optional<FlutterError> SetAudioPassthrough(
-    int64_t texture_id,
-    bool enabled) = 0;
+  virtual std::optional<FlutterError> SetAudioPassthrough(int64_t texture_id,
+                                                          bool enabled) = 0;
   // Sets a custom downmix matrix (row-major, [outChannels] × [inChannels]).
   virtual std::optional<FlutterError> SetChannelMixMatrix(
-    int64_t texture_id,
-    int64_t in_channels,
-    int64_t out_channels,
-    const flutter::EncodableList& matrix) = 0;
+      int64_t texture_id,
+      int64_t in_channels,
+      int64_t out_channels,
+      const flutter::EncodableList& matrix) = 0;
 
   // The codec used by LinuxVideoPlayerApi.
   static const flutter::StandardMessageCodec& GetCodec();
-  // Sets up an instance of `LinuxVideoPlayerApi` to handle messages through the `binary_messenger`.
-  static void SetUp(
-    flutter::BinaryMessenger* binary_messenger,
-    LinuxVideoPlayerApi* api);
+  // Sets up an instance of `LinuxVideoPlayerApi` to handle messages through the
+  // `binary_messenger`.
+  static void SetUp(flutter::BinaryMessenger* binary_messenger,
+                    LinuxVideoPlayerApi* api);
   static flutter::EncodableValue WrapError(std::string_view error_message);
   static flutter::EncodableValue WrapError(const FlutterError& error);
 
  protected:
   LinuxVideoPlayerApi() = default;
-
 };
 }  // namespace video_player_linux
 #endif  // PIGEON_MESSAGES_H_

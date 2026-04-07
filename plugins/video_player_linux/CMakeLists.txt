@@ -48,3 +48,109 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 target_include_directories(${PLUGIN_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PUBLIC platform_homescreen flutter PkgConfig::GST PkgConfig::UDEV PkgConfig::GLES plugin_common_glib)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional Pigeon regeneration target.
+#
+# The Pigeon-generated messages.g.{h,cc} files in this directory are owned
+# by the upstream Dart package at tcna-packages/packages/video_player/
+# video_player_linux/. Regenerating them is a multi-step process:
+#
+#   1. Run `dart run pigeon` against pigeons/messages.dart in the Dart pkg
+#   2. clang-format the generated linux_cpp/messages.{h,cpp} output
+#   3. Patch a few Pigeon-emitted constructs that fail this repo's
+#      clang-tidy gate (push_back → emplace_back, by-value string param
+#      → const ref)
+#   4. Copy the result to messages.g.{h,cc} in this directory
+#   5. Patch the cpp #include from "messages.h" to "messages.g.h"
+#
+# Off by default — only opted into when the Dart-side IDL has actually
+# changed. Requires `dart`, `clang-format`, and `sed` on PATH, plus the
+# tcna-packages checkout next to ivi-homescreen-plugins (override the
+# path with -DVIDEO_PLAYER_LINUX_PIGEON_DIR=...).
+# ─────────────────────────────────────────────────────────────────────────────
+option(BUILD_PLUGIN_VIDEO_PLAYER_LINUX_PIGEON_REGEN
+        "Add a 'regen_video_player_linux_pigeon' make target that re-runs Pigeon"
+        OFF)
+
+if (BUILD_PLUGIN_VIDEO_PLAYER_LINUX_PIGEON_REGEN)
+    set(VIDEO_PLAYER_LINUX_PIGEON_DIR
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../tcna-packages/packages/video_player/video_player_linux"
+            CACHE PATH
+            "Path to the tcna-packages video_player_linux Dart package")
+
+    find_program(DART_EXECUTABLE dart)
+    # Prefer clang-format-18 because that's what the CI lint job runs;
+    # different major versions of clang-format wrap long parameter lists
+    # differently and using a newer one locally produces diffs that CI
+    # then rejects. Fall back to plain `clang-format` if -18 isn't on
+    # PATH (the developer is responsible for ensuring it matches CI).
+    # Unset the cache var first so re-runs pick up the explicit version
+    # preference even if a previous configure cached a different binary.
+    unset(CLANG_FORMAT_EXECUTABLE CACHE)
+    find_program(CLANG_FORMAT_EXECUTABLE
+            NAMES clang-format-18 clang-format)
+    find_program(SED_EXECUTABLE sed)
+
+    if (NOT DART_EXECUTABLE OR NOT CLANG_FORMAT_EXECUTABLE OR NOT SED_EXECUTABLE)
+        message(WARNING
+                "[video_player_linux] regen_video_player_linux_pigeon target "
+                "requires dart, clang-format and sed on PATH; target disabled.")
+    elseif (NOT EXISTS "${VIDEO_PLAYER_LINUX_PIGEON_DIR}/pigeons/messages.dart")
+        message(WARNING
+                "[video_player_linux] VIDEO_PLAYER_LINUX_PIGEON_DIR "
+                "(${VIDEO_PLAYER_LINUX_PIGEON_DIR}) does not contain "
+                "pigeons/messages.dart; regen target disabled.")
+    else()
+        set(_pigeon_dart "${VIDEO_PLAYER_LINUX_PIGEON_DIR}")
+        set(_pigeon_h    "${_pigeon_dart}/linux_cpp/messages.h")
+        set(_pigeon_cpp  "${_pigeon_dart}/linux_cpp/messages.cpp")
+        set(_plugin_h    "${CMAKE_CURRENT_SOURCE_DIR}/messages.g.h")
+        set(_plugin_cc   "${CMAKE_CURRENT_SOURCE_DIR}/messages.g.cc")
+
+        add_custom_target(regen_video_player_linux_pigeon
+                COMMENT "Regenerating Pigeon bindings for video_player_linux"
+
+                # 1. Run pigeon in the Dart package directory.
+                COMMAND ${DART_EXECUTABLE} run pigeon
+                        --input pigeons/messages.dart
+                WORKING_DIRECTORY "${_pigeon_dart}"
+
+                # 2. clang-format the Dart-side copy under THAT package's
+                #    .clang-format (Google / 80 col).
+                COMMAND ${CLANG_FORMAT_EXECUTABLE} -i
+                        "${_pigeon_h}" "${_pigeon_cpp}"
+
+                # 3. Patch Pigeon-emitted constructs that trip clang-tidy:
+                #    push_back(EncodableValue(x))  → emplace_back(x)
+                #    push_back(EncodableValue())   → emplace_back()
+                #    const std::string channel_name → const std::string&
+                COMMAND ${SED_EXECUTABLE} -i
+                        -e "s|wrapped\\.push_back(EncodableValue())|wrapped.emplace_back()|g"
+                        -e "s|wrapped\\.push_back(EncodableValue(\\(.*\\)))|wrapped.emplace_back(\\1)|g"
+                        -e "s|FlutterError CreateConnectionError(const std::string channel_name)|FlutterError CreateConnectionError(const std::string\\& channel_name)|g"
+                        "${_pigeon_cpp}"
+
+                # 4. Copy the result over the plugin's messages.g.{h,cc}.
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_pigeon_h}" "${_plugin_h}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_pigeon_cpp}" "${_plugin_cc}"
+
+                # 5. Fix the cpp #include — Pigeon emits "messages.h" but
+                #    the plugin needs "messages.g.h" to avoid a clash with
+                #    GStreamer's <gst/gstmessage.h>.
+                COMMAND ${SED_EXECUTABLE} -i
+                        -e "s|^#include \"messages.h\"|#include \"messages.g.h\"|"
+                        "${_plugin_cc}"
+
+                # 6. Re-format the destination files under the plugin
+                #    repo's own .clang-format (Chromium / 100 col). The
+                #    Dart package and plugin repo use different styles,
+                #    so the same file content has to be formatted twice.
+                COMMAND ${CLANG_FORMAT_EXECUTABLE} -i
+                        "${_plugin_h}" "${_plugin_cc}"
+
+                VERBATIM)
+    endif()
+endif()

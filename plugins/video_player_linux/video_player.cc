@@ -116,8 +116,8 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
     gpu_surface_texture_ = std::make_unique<flutter::GpuSurfaceTexture>(
         kFlutterDesktopGpuSurfaceTypeGlTexture2D,
-        [&](size_t /* width */, size_t /* height */)
-            -> const FlutterDesktopGpuSurfaceDescriptor* {
+        [&](size_t /* width */,
+            size_t /* height */) -> const FlutterDesktopGpuSurfaceDescriptor* {
           return &m_descriptor;
         });
 
@@ -156,9 +156,9 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   // Connect source-setup so we can configure souphttpsrc / rtspsrc as soon
   // as playbin instantiates the source element. The handler is safe across
   // source types because it probes for properties before setting them.
-  source_setup_id_ = g_signal_connect(
-      playbin_, "source-setup", reinterpret_cast<GCallback>(OnSourceSetup),
-      this);
+  source_setup_id_ =
+      g_signal_connect(playbin_, "source-setup",
+                       reinterpret_cast<GCallback>(OnSourceSetup), this);
 
   // Custom audio sink bin: audioconvert → audioresample → capsfilter → sink.
   // Even without app-level controls this improves codec/sample-rate
@@ -386,7 +386,7 @@ void VideoPlayer::SetVolume(const double volume) {
 
 void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
   // Store the desired rate so it can be applied when the pipeline is ready
-  pending_rate_ = playbackSpeed;
+  pending_rate_.store(playbackSpeed);
 
   // Seek events require the pipeline to be in PAUSED or PLAYING state
   GstState state;
@@ -495,8 +495,9 @@ void VideoPlayer::SeekTo(const int64_t seek) {
   // gst_element_seek_simple resets the segment rate to 1.0. If the user
   // had set a non-default rate, re-apply it now so dragging the scrubber
   // doesn't silently drop the rate back to 1×.
-  if (pending_rate_ != 1.0) {
-    rate_ = -2.0;  // sentinel; forces ApplyPlaybackSpeed to send a real seek
+  if (pending_rate_.load() != 1.0) {
+    rate_.store(
+        -2.0);  // sentinel; forces ApplyPlaybackSpeed to send a real seek
     ApplyPlaybackSpeed();
   }
 }
@@ -566,11 +567,12 @@ void VideoPlayer::SetBuffering(const bool buffering) {
 }
 
 void VideoPlayer::ApplyPlaybackSpeed() {
-  if (pending_rate_ == rate_) {
+  const double pending = pending_rate_.load();
+  if (pending == rate_.load()) {
     return;
   }
 
-  const auto playbackSpeed = pending_rate_;
+  const auto playbackSpeed = pending;
   gint64 pos = 0;
   if (!gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
     pos = position_.load();
@@ -579,12 +581,13 @@ void VideoPlayer::ApplyPlaybackSpeed() {
   // the stop. Earlier we passed END/0 for the stop which on some sinks
   // collapses the segment to zero length and silently squashes the rate
   // change.
-  GstEvent* seek_event;
+  GstEvent* seek_event = nullptr;
   if (playbackSpeed > 0) {
     seek_event = gst_event_new_seek(
         playbackSpeed, GST_FORMAT_TIME,
         static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE),
-        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_NONE, GST_CLOCK_TIME_NONE);
+        GST_SEEK_TYPE_SET, pos, GST_SEEK_TYPE_NONE,
+        static_cast<gint64>(GST_CLOCK_TIME_NONE));
   } else {
     // Reverse playback: walk from start to the current position.
     seek_event = gst_event_new_seek(
@@ -598,10 +601,8 @@ void VideoPlayer::ApplyPlaybackSpeed() {
                  playbackSpeed);
     return;
   }
-  rate_ = playbackSpeed;
-  SPDLOG_DEBUG("[VideoPlayer] Playback speed -> {}", rate_);
-
-  SPDLOG_DEBUG("[VideoPlayer] Playback speed: {}", rate_);
+  rate_.store(playbackSpeed);
+  SPDLOG_DEBUG("[VideoPlayer] Playback speed -> {}", playbackSpeed);
 }
 
 gboolean VideoPlayer::OnAudioRecovery(gpointer user_data) {
@@ -619,7 +620,7 @@ gboolean VideoPlayer::OnAudioRecovery(gpointer user_data) {
 
   // Pipeline restart resets segment rate; force ApplyPlaybackSpeed to
   // re-seek when we reach PLAYING again.
-  self->rate_ = -2.0;
+  self->rate_.store(-2.0);
   gst_element_set_state(self->playbin_, GST_STATE_NULL);
   gst_element_set_state(self->playbin_,
                         static_cast<GstState>(self->target_state_.load()));
@@ -664,11 +665,14 @@ void VideoPlayer::StartAudioMonitor() {
       if (sysname && strncmp(sysname, "pcmC", 4) == 0) {
         SPDLOG_DEBUG("[VideoPlayer] Audio device already present: {}", sysname);
         udev_device_unref(dev);
-        // Schedule upgrade immediately
-        GSource* idle = g_idle_source_new();
-        g_source_set_callback(idle, OnAudioUpgrade, this, nullptr);
-        g_source_attach(idle, context_);
-        g_source_unref(idle);
+        // Schedule upgrade immediately. Track the GSource id so we can
+        // cancel it in StopAudioMonitor if Dispose runs first.
+        if (!audio_upgrade_idle_id_) {
+          GSource* idle = g_idle_source_new();
+          g_source_set_callback(idle, OnAudioUpgrade, this, nullptr);
+          audio_upgrade_idle_id_ = g_source_attach(idle, context_);
+          g_source_unref(idle);
+        }
         break;
       }
       udev_device_unref(dev);
@@ -678,6 +682,12 @@ void VideoPlayer::StartAudioMonitor() {
 }
 
 void VideoPlayer::StopAudioMonitor() {
+  // Cancel any pending OnAudioUpgrade idle source first so it can't fire
+  // on a half-torn-down player.
+  if (audio_upgrade_idle_id_) {
+    g_source_remove(audio_upgrade_idle_id_);
+    audio_upgrade_idle_id_ = 0;
+  }
   if (udev_watch_id_) {
     g_source_remove(udev_watch_id_);
     udev_watch_id_ = 0;
@@ -708,12 +718,14 @@ gboolean VideoPlayer::OnUdevEvent(GIOChannel* /*channel*/,
   const char* sysname = udev_device_get_sysname(dev);
 
   if (action && sysname && strcmp(action, "add") == 0 &&
-      strncmp(sysname, "pcmC", 4) == 0 && !self->audio_upgraded_) {
+      strncmp(sysname, "pcmC", 4) == 0 && !self->audio_upgraded_ &&
+      !self->audio_upgrade_idle_id_) {
     SPDLOG_DEBUG("[VideoPlayer] Audio device hotplugged: {}", sysname);
-    // Schedule the upgrade on an idle callback to avoid reentrancy
+    // Schedule the upgrade on an idle callback to avoid reentrancy.
+    // Track the source id so it can be cancelled if Dispose runs first.
     GSource* idle = g_idle_source_new();
     g_source_set_callback(idle, OnAudioUpgrade, self, nullptr);
-    g_source_attach(idle, self->context_);
+    self->audio_upgrade_idle_id_ = g_source_attach(idle, self->context_);
     g_source_unref(idle);
   }
 
@@ -723,6 +735,10 @@ gboolean VideoPlayer::OnUdevEvent(GIOChannel* /*channel*/,
 
 gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
   auto* self = static_cast<VideoPlayer*>(user_data);
+  // Clear the tracked source id first — once we return REMOVE, the
+  // GSource is gone, and StopAudioMonitor must not call g_source_remove
+  // on a stale id.
+  self->audio_upgrade_idle_id_ = 0;
   if (self->audio_upgraded_ || !self->m_valid) {
     return G_SOURCE_REMOVE;
   }
@@ -750,7 +766,7 @@ gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
 
   // READY round-trip resets segment rate; invalidate cache so the next
   // PLAYING transition re-applies pending_rate_.
-  self->rate_ = -2.0;
+  self->rate_.store(-2.0);
   gst_element_set_state(self->playbin_, GST_STATE_READY);
   gst_element_get_state(self->playbin_, nullptr, nullptr, 2 * GST_SECOND);
 
@@ -771,7 +787,7 @@ void VideoPlayer::OnPlaybackEnded() {
     // Invalidate our cached rate so the next ApplyPlaybackSpeed call
     // (fired from OnMediaStateChange on PLAYING) re-sends the user's
     // chosen pending_rate_.
-    rate_ = -2.0;
+    rate_.store(-2.0);
     gst_element_set_state(playbin_, GST_STATE_READY);
     gst_element_set_state(playbin_, GST_STATE_PLAYING);
     return;
@@ -1148,13 +1164,11 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
       GstTagList* tags = nullptr;
       gst_message_parse_tag(msg, &tags);
       if (tags) {
-        // Embedded album art (front cover preferred).
+        // Embedded album art (front cover preferred, then preview).
         GstSample* image_sample = nullptr;
-        if (gst_tag_list_get_sample(tags, GST_TAG_IMAGE, &image_sample)) {
-          obj->HandleAlbumArt(image_sample);
-          gst_sample_unref(image_sample);
-        } else if (gst_tag_list_get_sample(tags, GST_TAG_PREVIEW_IMAGE,
-                                           &image_sample)) {
+        if (gst_tag_list_get_sample(tags, GST_TAG_IMAGE, &image_sample) ||
+            gst_tag_list_get_sample(tags, GST_TAG_PREVIEW_IMAGE,
+                                    &image_sample)) {
           obj->HandleAlbumArt(image_sample);
           gst_sample_unref(image_sample);
         }
@@ -1289,9 +1303,8 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
     // and a state-change probe triggers a noisy "thread-loop recurse"
     // warning from PipeWire. Only the unreliable fallbacks
     // (alsasink, autoaudiosink, env-var override) get the READY probe.
-    const bool trusted =
-        std::strcmp(name, "pipewiresink") == 0 ||
-        std::strcmp(name, "pulsesink") == 0;
+    const bool trusted = std::strcmp(name, "pipewiresink") == 0 ||
+                         std::strcmp(name, "pulsesink") == 0;
     if (!trusted) {
       GstStateChangeReturn ret =
           gst_element_set_state(candidate, GST_STATE_READY);
@@ -1323,7 +1336,8 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
   // scaletempo time-stretches audio when the segment rate isn't 1.0 so the
   // pitch stays correct. Without it, rate-change seeks make the audio drop
   // out / pitch-shift. Ships in gst-plugins-good.
-  audio_scaletempo_ = gst_element_factory_make("scaletempo", "audio-scaletempo");
+  audio_scaletempo_ =
+      gst_element_factory_make("scaletempo", "audio-scaletempo");
   audio_capsfilter_ = gst_element_factory_make("capsfilter", "audio-caps");
   if (!audio_convert_ || !audio_resample_ || !audio_capsfilter_) {
     spdlog::error("[VideoPlayer] Failed to create audio sink bin elements");
@@ -1492,6 +1506,17 @@ void VideoPlayer::HandleAlbumArt(GstSample* sample) {
   GstMapInfo map;
   if (!gst_buffer_map(buffer, &map, GST_MAP_READ))
     return;
+  // 10 MB cap (see discover_media_info for rationale).
+  constexpr size_t kMaxAlbumArtBytes = static_cast<size_t>(10) * 1024 * 1024;
+  if (map.size == 0 || map.size > kMaxAlbumArtBytes) {
+    if (map.size > kMaxAlbumArtBytes) {
+      spdlog::warn(
+          "[VideoPlayer] Runtime album art is {} bytes (>{} MB cap); ignoring.",
+          map.size, kMaxAlbumArtBytes / (static_cast<size_t>(1024) * 1024));
+    }
+    gst_buffer_unmap(buffer, &map);
+    return;
+  }
   std::vector<uint8_t> bytes(map.data, map.data + map.size);
   gst_buffer_unmap(buffer, &map);
 
@@ -1538,8 +1563,7 @@ void VideoPlayer::SendAudioInfo() {
     return;
   auto map = flutter::EncodableMap{
       {flutter::EncodableValue("event"), flutter::EncodableValue("audioInfo")},
-      {flutter::EncodableValue("codec"),
-       flutter::EncodableValue(audio_codec_)},
+      {flutter::EncodableValue("codec"), flutter::EncodableValue(audio_codec_)},
       {flutter::EncodableValue("channels"),
        flutter::EncodableValue(audio_channels_)},
       {flutter::EncodableValue("sampleRate"),
@@ -1578,9 +1602,8 @@ void VideoPlayer::SetOutputChannels(int channels) {
   output_channels_ = channels;
   if (!audio_capsfilter_)
     return;
-  GstCaps* caps =
-      gst_caps_new_simple("audio/x-raw", "channels", G_TYPE_INT, channels,
-                          nullptr);
+  GstCaps* caps = gst_caps_new_simple("audio/x-raw", "channels", G_TYPE_INT,
+                                      channels, nullptr);
   g_object_set(audio_capsfilter_, "caps", caps, nullptr);
   gst_caps_unref(caps);
   // The capsfilter change requires a quick READY round-trip on the audio
@@ -1589,7 +1612,7 @@ void VideoPlayer::SetOutputChannels(int channels) {
   if (playbin_) {
     GstState cur = GST_STATE_NULL;
     gst_element_get_state(playbin_, &cur, nullptr, 0);
-    rate_ = -2.0;
+    rate_.store(-2.0);
     gst_element_set_state(playbin_, GST_STATE_READY);
     gst_element_set_state(playbin_, cur);
   }
@@ -1741,17 +1764,22 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
   };
   static constexpr Preset kPresets[] = {
       // ITU-R BS.775 standard stereo downmix.
-      {"stereo", 2, {{1.0, 0.0, 0.707, 0.707, 0.707, 0.0},
-                     {0.0, 1.0, 0.707, 0.707, 0.0, 0.707}}},
+      {"stereo",
+       2,
+       {{1.0, 0.0, 0.707, 0.707, 0.707, 0.0},
+        {0.0, 1.0, 0.707, 0.707, 0.0, 0.707}}},
       // Boosted dialog (FC) for the driver, modest LFE bleed.
-      {"driver", 2, {{1.0, 0.0, 0.85, 0.5, 0.5, 0.0},
-                     {0.0, 1.0, 0.85, 0.5, 0.0, 0.5}}},
+      {"driver",
+       2,
+       {{1.0, 0.0, 0.85, 0.5, 0.5, 0.0}, {0.0, 1.0, 0.85, 0.5, 0.0, 0.5}}},
       // Reduced dynamic range for night listening.
-      {"night",  2, {{1.0, 0.0, 0.707, 0.1, 0.5, 0.0},
-                     {0.0, 1.0, 0.707, 0.1, 0.0, 0.5}}},
+      {"night",
+       2,
+       {{1.0, 0.0, 0.707, 0.1, 0.5, 0.0}, {0.0, 1.0, 0.707, 0.1, 0.0, 0.5}}},
       // Rear-cabin optimised — emphasise rear channels.
-      {"rear",   2, {{1.0, 0.0, 0.5, 0.3, 1.0, 0.0},
-                     {0.0, 1.0, 0.5, 0.3, 0.0, 1.0}}},
+      {"rear",
+       2,
+       {{1.0, 0.0, 0.5, 0.3, 1.0, 0.0}, {0.0, 1.0, 0.5, 0.3, 0.0, 1.0}}},
   };
 
   if (preset == "surround") {
@@ -1810,11 +1838,22 @@ void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
                  bands.size());
     return;
   }
-  // Lazily insert equalizer-10bands between audio_resample_ and capsfilter
-  // on first call. Inserted in PAUSED state with a brief PLAYING dropout.
+  // Lazily insert equalizer-10bands into the audio sink bin on first
+  // call. The current chain is:
+  //   convert → resample → [scaletempo] → capsfilter → real_sink
+  // We splice the EQ between scaletempo (or resample, when scaletempo
+  // wasn't available) and capsfilter so it operates on the time-stretched
+  // PCM that the user actually hears. Inserted in READY with a brief
+  // audio dropout.
   if (!equalizer_) {
-    if (!audio_bin_ || !audio_resample_ || !audio_capsfilter_) {
+    if (!audio_bin_ || !audio_capsfilter_) {
       spdlog::warn("[VideoPlayer] SetEqualizer: audio bin not available");
+      return;
+    }
+    GstElement* upstream =
+        audio_scaletempo_ ? audio_scaletempo_ : audio_resample_;
+    if (!upstream) {
+      spdlog::warn("[VideoPlayer] SetEqualizer: upstream element missing");
       return;
     }
     GstElement* eq = gst_element_factory_make("equalizer-10bands", "audio-eq");
@@ -1829,16 +1868,19 @@ void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
       gst_element_get_state(playbin_, &cur, nullptr, 0);
     // READY round-trip resets segment rate; invalidate so the next
     // PLAYING re-applies pending_rate_.
-    rate_ = -2.0;
+    rate_.store(-2.0);
     if (playbin_)
       gst_element_set_state(playbin_, GST_STATE_READY);
 
-    gst_element_unlink(audio_resample_, audio_capsfilter_);
+    gst_element_unlink(upstream, audio_capsfilter_);
     gst_bin_add(GST_BIN(audio_bin_), eq);
-    if (!gst_element_link_many(audio_resample_, eq, audio_capsfilter_,
-                               nullptr)) {
+    if (!gst_element_link_many(upstream, eq, audio_capsfilter_, nullptr)) {
       spdlog::error("[VideoPlayer] Failed to splice equalizer into audio bin");
+      gst_element_unlink(upstream, eq);
+      gst_element_unlink(eq, audio_capsfilter_);
       gst_bin_remove(GST_BIN(audio_bin_), eq);
+      // Restore the original direct link.
+      gst_element_link(upstream, audio_capsfilter_);
       if (playbin_)
         gst_element_set_state(playbin_, cur);
       return;
@@ -1851,7 +1893,9 @@ void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
 
   for (size_t i = 0; i < bands.size(); ++i) {
     char prop[16];
-    std::snprintf(prop, sizeof(prop), "band%d", static_cast<int>(i));
+    // Buffer is 16 bytes, output is "band0".."band9" (max 6 bytes), so
+    // truncation is impossible. Cast to void to silence cert-err33-c.
+    (void)std::snprintf(prop, sizeof(prop), "band%d", static_cast<int>(i));
     double v = bands[i];
     if (v < -24.0)
       v = -24.0;
@@ -1870,8 +1914,8 @@ void VideoPlayer::SetVideoBalance(double brightness,
   }
   // Lazily insert videobalance between videoconvert and videoscale on
   // the first non-default call.
-  const bool is_default = brightness == 0.0 && contrast == 1.0 &&
-                          saturation == 1.0 && hue == 0.0;
+  const bool is_default =
+      brightness == 0.0 && contrast == 1.0 && saturation == 1.0 && hue == 0.0;
   if (!videobalance_) {
     if (is_default || !pipeline_ || !video_convert_ || !video_scale_) {
       return;
@@ -1886,7 +1930,7 @@ void VideoPlayer::SetVideoBalance(double brightness,
       gst_element_get_state(playbin_, &cur, nullptr, 0);
     // READY round-trip resets segment rate; invalidate so the next
     // PLAYING re-applies pending_rate_.
-    rate_ = -2.0;
+    rate_.store(-2.0);
     if (playbin_)
       gst_element_set_state(playbin_, GST_STATE_READY);
 
@@ -1896,9 +1940,8 @@ void VideoPlayer::SetVideoBalance(double brightness,
     // downstream fakesink's handoff_handler still receives NV12 frames.
     GstCaps* nv12 = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING,
                                         "NV12", nullptr);
-    const bool ok =
-        gst_element_link(video_convert_, vb) &&
-        gst_element_link_filtered(vb, video_scale_, nv12);
+    const bool ok = gst_element_link(video_convert_, vb) &&
+                    gst_element_link_filtered(vb, video_scale_, nv12);
     gst_caps_unref(nv12);
     if (!ok) {
       spdlog::error("[VideoPlayer] Failed to splice videobalance");
@@ -1906,8 +1949,8 @@ void VideoPlayer::SetVideoBalance(double brightness,
       gst_element_unlink(vb, video_scale_);
       gst_bin_remove(GST_BIN(pipeline_), vb);
       // Restore the original direct link.
-      GstCaps* restore = gst_caps_new_simple(
-          "video/x-raw", "format", G_TYPE_STRING, "NV12", nullptr);
+      GstCaps* restore = gst_caps_new_simple("video/x-raw", "format",
+                                             G_TYPE_STRING, "NV12", nullptr);
       gst_element_link_filtered(video_convert_, video_scale_, restore);
       gst_caps_unref(restore);
       if (playbin_)
@@ -1980,7 +2023,10 @@ void VideoPlayer::SetChannelMixMatrix(int in_channels,
     for (int col = 0; col < in_channels; ++col) {
       GValue cell = G_VALUE_INIT;
       g_value_init(&cell, G_TYPE_DOUBLE);
-      g_value_set_double(&cell, matrix[row * in_channels + col]);
+      g_value_set_double(
+          &cell,
+          matrix[static_cast<size_t>(row) * static_cast<size_t>(in_channels) +
+                 static_cast<size_t>(col)]);
       gst_value_array_append_value(&gst_row, &cell);
       g_value_unset(&cell);
     }
