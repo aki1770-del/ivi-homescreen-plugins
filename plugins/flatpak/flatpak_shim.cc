@@ -302,6 +302,16 @@ void FlatpakShim::format_time_iso8601(const time_t raw_time,
            timezone_offset / 3600, (timezone_offset % 3600) / 60);
 }
 
+std::string FlatpakShim::convert_gbytes_to_string(GBytes* bytes) {
+  if (!bytes)
+    return {};
+
+  gsize size;
+  const auto* data = static_cast<const char*>(g_bytes_get_data(bytes, &size));
+
+  return {static_cast<const char*>(data), size};
+}
+
 flutter::EncodableList FlatpakShim::installation_get_default_languages(
     FlatpakInstallation* installation) {
   flutter::EncodableList languages;
@@ -2556,10 +2566,21 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
         continue;
       }
 
-      auto app_component = create_component(app_ref, catalog);
-      if (app_component.has_value()) {
-        result.emplace_back(
-            flutter::CustomEncodableValue(app_component.value()));
+      // Skip x11 only apps
+      auto metadata = flatpak_remote_ref_get_metadata(app_ref);
+      const FlatpakShim::sandbox sandbox =
+          parse_metadata(convert_gbytes_to_string(metadata));
+      bool has_wayland = false;
+      for (const auto& it : sandbox.context.sockets) {
+        if (it == "wayland")
+          has_wayland = true;
+      }
+      if (has_wayland) {
+        auto app_component = create_component(app_ref, catalog);
+        if (app_component.has_value()) {
+          result.emplace_back(
+              flutter::CustomEncodableValue(app_component.value()));
+        }
       }
     } catch (const std::exception& e) {
       spdlog::error("[FlatpakPlugin] Received exception {}", e.what());
@@ -4396,7 +4417,6 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
     return false;
   }
 
-  // Fix logging bug to show total required space
   guint64 total_requirement = min_free_space + estimated_download;
   spdlog::info(
       "[FlatpakPlugin] Total storage requirement (buffer + download): {} MB",
@@ -4438,7 +4458,9 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
 
     flutter::EncodableMap disk_usage_event;
     disk_usage_event[flutter::EncodableValue("type")] =
-        flutter::EncodableValue("free_space_error");
+        flutter::EncodableValue("insufficient_space");
+    disk_usage_event[flutter::EncodableValue("app_id")] =
+        flutter::EncodableValue(app_id);
     disk_usage_event[flutter::EncodableValue("available_mb")] =
         flutter::EncodableValue(
             static_cast<int64_t>(effective_free_space / 1024 / 1024));
