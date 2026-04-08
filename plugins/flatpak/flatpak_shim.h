@@ -520,6 +520,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
 
   static std::string create_metadata(const Component& component);
 
+  static std::string convert_gbytes_to_string(GBytes* bytes);
+
   static std::string create_appdata(const Component& component);
 
   static void create_sandbox(FlatpakInstalledRef* installed_ref,
