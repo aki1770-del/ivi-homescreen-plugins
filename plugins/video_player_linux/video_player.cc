@@ -1432,7 +1432,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
   gst_object_unref(pad);
 
   SPDLOG_DEBUG("[VideoPlayer] Built audio sink bin (sink={}, channels={})",
-               sink_name, output_channels_);
+               picked, output_channels_);
   return bin;
 }
 
