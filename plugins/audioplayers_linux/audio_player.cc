@@ -5,9 +5,14 @@
 #include <flutter/standard_method_codec.h>
 #include <spdlog/spdlog.h>
 
+extern "C" {
+#include <gst/pbutils/gstdiscoverer.h>
+}
+
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <thread>
 #include <unistd.h>
 
 #define STR_LINK_TROUBLESHOOTING \
@@ -119,13 +124,11 @@ void AudioPlayer::SendEvent(const EncodableValue& value) {
 }
 
 void AudioPlayer::SourceSetup(GstElement* /* playbin */,
-                              GstElement* source,
+                              GstElement* /* source */,
                               GstElement** /* p_src */) {
-  // Allow sources from unencrypted / misconfigured connections
-  if (g_object_class_find_property(G_OBJECT_GET_CLASS(source), "ssl-strict") !=
-      nullptr) {
-    g_object_set(G_OBJECT(source), "ssl-strict", FALSE, NULL);
-  }
+  // No source-level overrides. The previous implementation set
+  // ssl-strict=FALSE on souphttpsrc, which disabled certificate verification
+  // on every HTTPS source — a MITM hole. GStreamer's defaults are correct.
 }
 
 void AudioPlayer::AboutToFinish(GstElement* /* playbin */, AudioPlayer* self) {
@@ -144,7 +147,32 @@ void AudioPlayer::AboutToFinish(GstElement* /* playbin */, AudioPlayer* self) {
   self->SendEvent(value);
 }
 
+// Returns true if `url` starts with one of the schemes we permit playbin to
+// consume. Anything else (rtsp://, smb://, gst-pipeline://, etc.) lets the
+// caller drive arbitrary GStreamer source elements, which is too much
+// authority for a plugin that takes URLs from Dart.
+static bool IsAllowedSourceUrl(const std::string& url) {
+  static constexpr std::string_view kAllowedSchemes[] = {
+      "file://", "http://", "https://", "data:",
+  };
+  for (const auto& scheme : kAllowedSchemes) {
+    if (url.compare(0, scheme.size(), scheme) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void AudioPlayer::SetSourceUrl(const std::string& url) {
+  if (!url.empty() && !IsAllowedSourceUrl(url)) {
+    spdlog::warn("[audioplayers] rejecting setSourceUrl with disallowed scheme "
+                 "channel={} url={}",
+                 eventChannelName_, url);
+    OnError("LinuxAudioError",
+            "URL scheme not permitted (allowed: file, http, https, data).",
+            nullptr, nullptr);
+    return;
+  }
   // Always reset: Dart's setSource contract is "prepare this source from
   // scratch". A "same URL → no-op" shortcut would leave the pipeline wherever
   // the last playback left it (typically at EOS), so a subsequent resume of
@@ -153,14 +181,17 @@ void AudioPlayer::SetSourceUrl(const std::string& url) {
   gst_element_set_state(playbin_, GST_STATE_NULL);
   isInitialized_ = false;
   isPlaying_ = false;
+  discovered_duration_ms_.store(-1, std::memory_order_relaxed);
   if (url_.empty()) {
     return;
   }
   g_object_set(GST_OBJECT(playbin_), "uri", url_.c_str(), NULL);
+  StartDurationDiscovery(url_);
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_READY);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    throw std::runtime_error("Unable to set the pipeline to GST_STATE_READY.");
+    OnError("LinuxAudioError",
+            "Unable to set the pipeline to GST_STATE_READY.", nullptr, nullptr);
   }
 }
 
@@ -216,8 +247,10 @@ void AudioPlayer::ReleaseMediaSource() {
     isInitialized_ = false;
   url_.clear();
 
+  // Bounded wait: the original GST_CLOCK_TIME_NONE could hang the caller
+  // forever if the pipeline got wedged.
   GstState playbinState;
-  gst_element_get_state(playbin_, &playbinState, nullptr, GST_CLOCK_TIME_NONE);
+  gst_element_get_state(playbin_, &playbinState, nullptr, 2 * GST_SECOND);
   if (playbinState > GST_STATE_NULL) {
     gst_element_set_state(playbin_, GST_STATE_NULL);
   }
@@ -531,14 +564,59 @@ std::optional<int64_t> AudioPlayer::GetPosition() {
  * @return int64_t the duration in milliseconds
  */
 std::optional<int64_t> AudioPlayer::GetDuration() {
+  // Prefer the GstDiscoverer result when available — gst_element_query_duration
+  // is unreliable for variable-bitrate MP3s (the original FIXME).
+  const int64_t discovered =
+      discovered_duration_ms_.load(std::memory_order_relaxed);
+  if (discovered >= 0) {
+    return std::make_optional(discovered);
+  }
   gint64 duration = 0;
   if (!gst_element_query_duration(playbin_, GST_FORMAT_TIME, &duration)) {
-    // FIXME: Get duration for MP3 with variable bit rate with gst-discoverer:
-    // https://gstreamer.freedesktop.org/documentation/pbutils/gstdiscoverer.html?gi-language=c#gst_discoverer_info_get_duration
     OnLog("Could not query current duration.");
     return std::nullopt;
   }
   return std::make_optional(duration / 1000000);
+}
+
+void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
+  // GstDiscoverer runs a brief synchronous probe (5s timeout) on a worker
+  // thread so we don't stall the calling thread. Store the result back on the
+  // AudioPlayer for GetDuration() to consume. We intentionally use the sync
+  // API on a detached thread rather than the async signal-based one to avoid
+  // wiring another GLib source into our main loop.
+  struct DiscoverCtx {
+    std::string uri;
+    std::atomic<int64_t>* sink;
+  };
+  auto* ctx = new DiscoverCtx{uri, &discovered_duration_ms_};
+  std::thread([ctx]() {
+    GError* err = nullptr;
+    GstDiscoverer* discoverer = gst_discoverer_new(5 * GST_SECOND, &err);
+    if (!discoverer) {
+      spdlog::warn("[audioplayers] gst_discoverer_new failed: {}",
+                   err ? err->message : "unknown");
+      if (err) g_error_free(err);
+      delete ctx;
+      return;
+    }
+    GstDiscovererInfo* info =
+        gst_discoverer_discover_uri(discoverer, ctx->uri.c_str(), &err);
+    if (info) {
+      const GstClockTime dur = gst_discoverer_info_get_duration(info);
+      if (GST_CLOCK_TIME_IS_VALID(dur)) {
+        ctx->sink->store(static_cast<int64_t>(dur / GST_MSECOND),
+                         std::memory_order_relaxed);
+      }
+      gst_discoverer_info_unref(info);
+    } else if (err) {
+      spdlog::warn("[audioplayers] gst_discoverer probe failed for {}: {}",
+                   ctx->uri, err->message);
+      g_error_free(err);
+    }
+    g_object_unref(discoverer);
+    delete ctx;
+  }).detach();
 }
 
 void AudioPlayer::Play() {
@@ -556,7 +634,9 @@ void AudioPlayer::Pause() {
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_PAUSED);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    throw std::runtime_error("Unable to set the pipeline to GST_STATE_PAUSED.");
+    OnError("LinuxAudioError",
+            "Unable to set the pipeline to GST_STATE_PAUSED.", nullptr,
+            nullptr);
   }
 }
 
@@ -566,13 +646,20 @@ void AudioPlayer::Stop() {
     return;
   }
   SetPosition(0);
-  // Block thread to wait for state, as it is not expected to be waited to
-  // "seek complete" event on the dart side.
+  // Wait for the seek/state-change to settle. Bounded so a wedged element
+  // can't hang the calling thread (GST_CLOCK_TIME_NONE would).
+  constexpr GstClockTime kStopTimeout = 2 * GST_SECOND;
   const GstStateChangeReturn ret =
-      gst_element_get_state(playbin_, nullptr, nullptr, GST_CLOCK_TIME_NONE);
+      gst_element_get_state(playbin_, nullptr, nullptr, kStopTimeout);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    throw std::runtime_error(
-        "Unable to seek playback to '0' while stopping the player.");
+    OnError("LinuxAudioError",
+            "Unable to seek playback to '0' while stopping the player.",
+            nullptr, nullptr);
+  } else if (ret == GST_STATE_CHANGE_ASYNC) {
+    spdlog::warn(
+        "[audioplayers] Stop timed out after 2s waiting for state settle "
+        "channel={}",
+        eventChannelName_);
   }
 }
 
@@ -589,14 +676,19 @@ void AudioPlayer::Resume() {
     // Update duration when start playing, as no event is emitted elsewhere
     OnDurationUpdate();
   } else if (ret == GST_STATE_CHANGE_FAILURE) {
-    throw std::runtime_error(
-        "Unable to set the pipeline to GST_STATE_PLAYING.");
+    OnError("LinuxAudioError",
+            "Unable to set the pipeline to GST_STATE_PLAYING.", nullptr,
+            nullptr);
   }
 }
 
 void AudioPlayer::Dispose() {
-  if (!playbin_)
-    throw std::runtime_error("Player was already disposed (Dispose)");
+  if (!playbin_) {
+    spdlog::warn("[audioplayers] Dispose() called on already-disposed player "
+                 "channel={}",
+                 eventChannelName_);
+    return;
+  }
 
   ReleaseMediaSource();
   CleanupByteSource();

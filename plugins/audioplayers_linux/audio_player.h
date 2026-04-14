@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -90,7 +91,15 @@ class AudioPlayer {
   std::mutex event_sink_mutex_;
   std::unique_ptr<flutter::EventSink<>> event_sink_;
 
+  // Cached duration discovered out-of-band via GstDiscoverer. Populated when
+  // SetSourceUrl runs, since gst_element_query_duration on playbin returns
+  // wrong values for variable-bitrate MP3s. -1 means "no value, fall back to
+  // the playbin query".
+  std::atomic<int64_t> discovered_duration_ms_{-1};
+
   void SendEvent(const EncodableValue& value);
+
+  void StartDurationDiscovery(const std::string& uri);
 
   void CleanupByteSource();
 

@@ -18,6 +18,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include <flutter/plugin_registrar.h>
@@ -27,7 +28,11 @@
 
 namespace audioplayers_linux_plugin {
 
+// Method calls dispatch on the Flutter platform thread; bus-watch / idle
+// callbacks (DisposePlayer indirectly) run on the GLib main-loop thread.
+// All access to audioPlayers_ goes through this mutex.
 static std::map<std::string, std::unique_ptr<AudioPlayer>> audioPlayers_;
+static std::mutex audioPlayers_mutex_;
 
 // static
 void AudioplayersLinuxPlugin::RegisterWithRegistrar(
@@ -44,7 +49,10 @@ void AudioplayersLinuxPlugin::RegisterWithRegistrar(
 
 AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(BinaryMessenger* messenger)
     : messenger_(messenger) {
-  audioPlayers_.clear();
+  {
+    std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
+    audioPlayers_.clear();
+  }
 
   // GStreamer lib only needs to be initialized once.  Calling it multiple times
   // is fine.
@@ -57,6 +65,7 @@ AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(BinaryMessenger* messenger)
 AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;
 
 AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
+  std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
   const auto searchPlayer = audioPlayers_.find(playerId);
   if (searchPlayer == audioPlayers_.end()) {
     return nullptr;
@@ -65,17 +74,26 @@ AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
 }
 
 void AudioplayersLinuxPlugin::DisposePlayer(const std::string& playerId) {
-  const auto it = audioPlayers_.find(playerId);
-  if (it == audioPlayers_.end()) {
-    return;
+  // Move the player out of the map under the lock, then drop the lock before
+  // calling Dispose — Dispose can take a few seconds (GStreamer state-change
+  // wait) and we don't want to block other method calls in the meantime.
+  std::unique_ptr<AudioPlayer> player;
+  {
+    std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
+    const auto it = audioPlayers_.find(playerId);
+    if (it == audioPlayers_.end()) {
+      return;
+    }
+    player = std::move(it->second);
+    audioPlayers_.erase(it);
   }
-  it->second->Dispose();
-  audioPlayers_.erase(it);
+  player->Dispose();
 }
 
 AudioPlayer* AudioplayersLinuxPlugin::CreatePlayer(
     const std::string& playerId,
     flutter::BinaryMessenger* messenger) {
+  std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
   if (const auto existing = audioPlayers_.find(playerId);
       existing != audioPlayers_.end()) {
     return existing->second.get();
