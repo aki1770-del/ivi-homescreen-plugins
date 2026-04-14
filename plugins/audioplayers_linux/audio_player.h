@@ -115,7 +115,7 @@ class AudioPlayer {
 
   void SetPlayback(int64_t seekTo, double rate);
 
-  void OnMediaError(GError* error, gchar* debug);
+  void OnMediaError(GstObject* src, GError* error, gchar* debug);
 
   void OnMediaStateChange(const GstObject* src,
                           const GstState* old_state,

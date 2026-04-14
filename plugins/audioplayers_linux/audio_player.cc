@@ -9,19 +9,18 @@ extern "C" {
 #include <gst/pbutils/gstdiscoverer.h>
 }
 
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <thread>
-#include <unistd.h>
 
 #define STR_LINK_TROUBLESHOOTING \
   "https://github.com/bluefireteam/audioplayers/blob/main/troubleshooting.md"
 
 AudioPlayer::AudioPlayer(const std::string& playerId,
                          BinaryMessenger* messenger)
-    : eventChannelName_(playerId),
-      media_state_(GST_STATE_VOID_PENDING) {
+    : eventChannelName_(playerId), media_state_(GST_STATE_VOID_PENDING) {
   event_channel_ = std::make_unique<flutter::EventChannel<>>(
       messenger, eventChannelName_,
       &flutter::StandardMethodCodec::GetInstance());
@@ -136,6 +135,13 @@ void AudioPlayer::AboutToFinish(GstElement* playbin, AudioPlayer* self) {
   // they take GStreamer state-change locks and deadlock the thread driving
   // the pipeline.
   //
+  // Note on EOS: GST_MESSAGE_EOS does fire reliably now (see OnBusMessage,
+  // and OnPlaybackEnded handles it). We still hook about-to-finish because
+  // it's the only way to get GAPLESS looping — EOS fires after pulsesink
+  // drains, which means there's a perceptible silent gap before Play()
+  // would restart. Setting playbin's uri from this handler tells playbin
+  // to queue the next source before the current one finishes.
+  //
   // If looping is enabled, set the uri again on playbin. This is the
   // documented gapless-transition pattern for this signal: playbin starts
   // the next source immediately after the current one drains. We stay in
@@ -165,7 +171,10 @@ void AudioPlayer::AboutToFinish(GstElement* playbin, AudioPlayer* self) {
 // authority for a plugin that takes URLs from Dart.
 static bool IsAllowedSourceUrl(const std::string& url) {
   static constexpr std::string_view kAllowedSchemes[] = {
-      "file://", "http://", "https://", "data:",
+      "file://",
+      "http://",
+      "https://",
+      "data:",
   };
   for (const auto& scheme : kAllowedSchemes) {
     if (url.compare(0, scheme.size(), scheme) == 0) {
@@ -177,9 +186,10 @@ static bool IsAllowedSourceUrl(const std::string& url) {
 
 void AudioPlayer::SetSourceUrl(const std::string& url) {
   if (!url.empty() && !IsAllowedSourceUrl(url)) {
-    spdlog::warn("[audioplayers] rejecting setSourceUrl with disallowed scheme "
-                 "channel={} url={}",
-                 eventChannelName_, url);
+    spdlog::warn(
+        "[audioplayers] rejecting setSourceUrl with disallowed scheme "
+        "channel={} url={}",
+        eventChannelName_, url);
     OnError("LinuxAudioError",
             "URL scheme not permitted (allowed: file, http, https, data).",
             nullptr, nullptr);
@@ -202,8 +212,8 @@ void AudioPlayer::SetSourceUrl(const std::string& url) {
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_READY);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    OnError("LinuxAudioError",
-            "Unable to set the pipeline to GST_STATE_READY.", nullptr, nullptr);
+    OnError("LinuxAudioError", "Unable to set the pipeline to GST_STATE_READY.",
+            nullptr, nullptr);
   }
 }
 
@@ -216,12 +226,13 @@ void AudioPlayer::SetSourceBytes(const std::vector<uint8_t>& bytes) {
   }
   std::string path_template =
       std::string(tmpdir) + "/audioplayers_linux_XXXXXX";
-  std::vector<char> mutable_template(path_template.begin(), path_template.end());
+  std::vector<char> mutable_template(path_template.begin(),
+                                     path_template.end());
   mutable_template.push_back('\0');
   const int fd = mkstemp(mutable_template.data());
   if (fd < 0) {
-    OnError("LinuxAudioError",
-            "Failed to create temp file for setSourceBytes.", nullptr, nullptr);
+    OnError("LinuxAudioError", "Failed to create temp file for setSourceBytes.",
+            nullptr, nullptr);
     return;
   }
 
@@ -232,8 +243,8 @@ void AudioPlayer::SetSourceBytes(const std::vector<uint8_t>& bytes) {
     if (n < 0) {
       close(fd);
       unlink(mutable_template.data());
-      OnError("LinuxAudioError",
-              "Failed to write bytes for setSourceBytes.", nullptr, nullptr);
+      OnError("LinuxAudioError", "Failed to write bytes for setSourceBytes.",
+              nullptr, nullptr);
       return;
     }
     data += n;
@@ -281,7 +292,7 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
           "debug={}",
           data->eventChannelName_, g_quark_to_string(err->domain), err->code,
           err->message ? err->message : "", debug ? debug : "");
-      data->OnMediaError(err, debug);
+      data->OnMediaError(GST_MESSAGE_SRC(message), err, debug);
       g_error_free(err);
       g_free(debug);
       break;
@@ -338,7 +349,27 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
   return TRUE;
 }
 
-void AudioPlayer::OnMediaError(GError* error, gchar* /* debug */) {
+void AudioPlayer::OnMediaError(GstObject* src,
+                               GError* error,
+                               gchar* /* debug */) {
+  // Suppress errors from elements no longer attached to playbin_. These are
+  // transient artifacts of source transitions — when setSourceUrl tears down
+  // the old uridecodebin or about-to-finish swaps the URI for gapless loop,
+  // the old decoder chain keeps pushing buffers briefly and its srcpad has
+  // no peer, producing GST_STREAM_ERROR "streaming stopped, reason
+  // not-linked". Real errors come from elements still inside playbin and
+  // reach Dart normally.
+  if (src && playbin_ &&
+      !gst_object_has_as_ancestor(src, GST_OBJECT(playbin_))) {
+    spdlog::debug(
+        "[audioplayers] suppressing orphaned error channel={} src={} "
+        "message={}",
+        eventChannelName_,
+        GST_OBJECT_NAME(src) ? GST_OBJECT_NAME(src) : "(null)",
+        error->message ? error->message : "");
+    return;
+  }
+
   const auto code = "LinuxAudioError";
   gchar const* message;
   const auto details_str = std::string(error->message) + " (Domain: " +
@@ -591,7 +622,17 @@ void AudioPlayer::SetPosition(const int64_t position) {
   if (!isInitialized_) {
     return;
   }
-  SetPlayback(position, playbackRate_);
+  // Clamp to [0, duration]. gst_event_new_seek accepts out-of-range values
+  // but their behavior depends on the source — some elements reject, some
+  // clamp silently, some seek past EOS. Normalize here so Dart gets
+  // consistent behavior regardless of the format.
+  int64_t clamped = position < 0 ? 0 : position;
+  if (const auto duration = GetDuration(); duration.has_value()) {
+    if (clamped > *duration) {
+      clamped = *duration;
+    }
+  }
+  SetPlayback(clamped, playbackRate_);
 }
 
 /**
@@ -600,7 +641,10 @@ void AudioPlayer::SetPosition(const int64_t position) {
 std::optional<int64_t> AudioPlayer::GetPosition() {
   gint64 current = 0;
   if (!gst_element_query_position(playbin_, GST_FORMAT_TIME, &current)) {
-    OnLog("Could not query current position.");
+    // Position queries fail transiently while the pipeline preroll/seek is
+    // in flight. Dart polls several times per second; firing OnLog here
+    // floods the app log for no actionable benefit. Return nullopt and let
+    // the caller fall back to its cached value.
     return std::nullopt;
   }
   return std::make_optional(current / 1000000);
@@ -619,7 +663,9 @@ std::optional<int64_t> AudioPlayer::GetDuration() {
   }
   gint64 duration = 0;
   if (!gst_element_query_duration(playbin_, GST_FORMAT_TIME, &duration)) {
-    OnLog("Could not query current duration.");
+    // Duration queries are unreliable before PAUSED/PLAYING and for some
+    // formats. GstDiscoverer result (cached above) is the preferred path;
+    // if we got here, just return nullopt instead of log-spamming Dart.
     return std::nullopt;
   }
   return std::make_optional(duration / 1000000);
@@ -642,7 +688,8 @@ void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
     if (!discoverer) {
       spdlog::warn("[audioplayers] gst_discoverer_new failed: {}",
                    err ? err->message : "unknown");
-      if (err) g_error_free(err);
+      if (err)
+        g_error_free(err);
       delete ctx;
       return;
     }
@@ -730,9 +777,10 @@ void AudioPlayer::Resume() {
 
 void AudioPlayer::Dispose() {
   if (!playbin_) {
-    spdlog::warn("[audioplayers] Dispose() called on already-disposed player "
-                 "channel={}",
-                 eventChannelName_);
+    spdlog::warn(
+        "[audioplayers] Dispose() called on already-disposed player "
+        "channel={}",
+        eventChannelName_);
     return;
   }
 
