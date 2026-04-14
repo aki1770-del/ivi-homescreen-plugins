@@ -131,11 +131,23 @@ void AudioPlayer::SourceSetup(GstElement* /* playbin */,
   // on every HTTPS source — a MITM hole. GStreamer's defaults are correct.
 }
 
-void AudioPlayer::AboutToFinish(GstElement* /* playbin */, AudioPlayer* self) {
+void AudioPlayer::AboutToFinish(GstElement* playbin, AudioPlayer* self) {
   // Fires on the playbin streaming thread. Do not call Stop()/Pause() here —
   // they take GStreamer state-change locks and deadlock the thread driving
-  // the pipeline. Just emit the completion event so Dart's state machine
-  // advances; SendEvent already marshals to the main loop.
+  // the pipeline.
+  //
+  // If looping is enabled, set the uri again on playbin. This is the
+  // documented gapless-transition pattern for this signal: playbin starts
+  // the next source immediately after the current one drains. We stay in
+  // PLAYING the whole time and isPlaying_ remains true; EOS will not fire
+  // because we gave playbin a next URI.
+  if (self->isLooping_ && !self->url_.empty()) {
+    g_object_set(G_OBJECT(playbin), "uri", self->url_.c_str(), nullptr);
+    return;
+  }
+
+  // Non-loop path: emit the completion event so Dart's state machine
+  // advances. SendEvent already marshals to the main loop.
   if (!self->isPlaying_) {
     return;
   }
@@ -346,12 +358,46 @@ void AudioPlayer::OnMediaError(GError* error, gchar* /* debug */) {
 
 void AudioPlayer::OnError(const gchar* code,
                           const gchar* message,
-                          EncodableValue* /* details */,
+                          EncodableValue* details,
                           GError** /* error */) {
-  const EncodableValue value(
-      EncodableMap{{EncodableValue("code"), EncodableValue(code)},
-                   {EncodableValue("message"), EncodableValue(message)}});
-  SendEvent(value);
+  // Errors must go through EventSink::Error, NOT Success with a map. Dart's
+  // EventChannel parser delivers Success(value) through .listen().map() and
+  // Error(code, msg, details) through the stream's onError. Sending a
+  // {"code", "message"} map via Success made Dart's event-type dispatch
+  // throw UnimplementedError because there was no "event" key.
+  struct Ctx {
+    AudioPlayer* self;
+    std::string code;
+    std::string message;
+    EncodableValue* details;  // owned
+  };
+  auto* ctx = new Ctx{
+      this,
+      code ? code : "",
+      message ? message : "",
+      details ? new EncodableValue(*details) : nullptr,
+  };
+  g_idle_add_full(
+      G_PRIORITY_DEFAULT,
+      [](gpointer user_data) -> gboolean {
+        auto* c = static_cast<Ctx*>(user_data);
+        flutter::EventSink<>* sink;
+        {
+          std::lock_guard<std::mutex> lock(c->self->event_sink_mutex_);
+          sink = c->self->event_sink_.get();
+        }
+        if (sink) {
+          if (c->details) {
+            sink->Error(c->code, c->message, *c->details);
+          } else {
+            sink->Error(c->code, c->message);
+          }
+        }
+        delete c->details;
+        delete c;
+        return G_SOURCE_REMOVE;
+      },
+      ctx, nullptr);
 }
 
 void AudioPlayer::OnMediaStateChange(const GstObject* src,
