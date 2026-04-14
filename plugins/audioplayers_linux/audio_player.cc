@@ -1,21 +1,40 @@
 
 #include "audio_player.h"
 
-#include <flutter/standard_message_codec.h>
+#include <flutter/event_stream_handler_functions.h>
+#include <flutter/standard_method_codec.h>
+#include <spdlog/spdlog.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <unistd.h>
 
 #define STR_LINK_TROUBLESHOOTING \
   "https://github.com/bluefireteam/audioplayers/blob/main/troubleshooting.md"
 
 AudioPlayer::AudioPlayer(const std::string& playerId,
                          BinaryMessenger* messenger)
-    : BasicMessageChannel(messenger,
-                          playerId,
-                          &StandardMessageCodec::GetInstance()),
+    : eventChannelName_(playerId),
       media_state_(GST_STATE_VOID_PENDING) {
-  SetMessageHandler([&](const EncodableValue& /* message */,
-                        const MessageReply<EncodableValue>& reply) {
-    reply(EncodableValue());
-  });
+  event_channel_ = std::make_unique<flutter::EventChannel<>>(
+      messenger, eventChannelName_,
+      &flutter::StandardMethodCodec::GetInstance());
+  event_channel_->SetStreamHandler(
+      std::make_unique<flutter::StreamHandlerFunctions<>>(
+          [this](const EncodableValue* /* arguments */,
+                 std::unique_ptr<flutter::EventSink<>>&& events)
+              -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard<std::mutex> lock(event_sink_mutex_);
+            event_sink_ = std::move(events);
+            return nullptr;
+          },
+          [this](const EncodableValue* /* arguments */)
+              -> std::unique_ptr<flutter::StreamHandlerError<>> {
+            std::lock_guard<std::mutex> lock(event_sink_mutex_);
+            event_sink_.reset();
+            return nullptr;
+          }));
 
   // Get the calling context.
   context_ = g_main_context_get_thread_default();
@@ -47,6 +66,12 @@ AudioPlayer::AudioPlayer(const std::string& playerId,
   g_signal_connect(playbin_, "source-setup",
                    G_CALLBACK(AudioPlayer::SourceSetup), &source_);
 
+  // playbin fires about-to-finish when the current source is draining.
+  // This is more reliable than waiting for GST_MESSAGE_EOS (which we have
+  // observed to not fire in some pipeline configurations).
+  g_signal_connect(playbin_, "about-to-finish",
+                   G_CALLBACK(AudioPlayer::AboutToFinish), this);
+
   bus_ = gst_element_get_bus(playbin_);
 
   // Watch bus messages for one time events
@@ -54,7 +79,43 @@ AudioPlayer::AudioPlayer(const std::string& playerId,
 }
 
 AudioPlayer::~AudioPlayer() {
-  gst_element_set_state(playbin_, GST_STATE_NULL);
+  if (event_channel_) {
+    event_channel_->SetStreamHandler(nullptr);
+  }
+  if (playbin_) {
+    gst_element_set_state(playbin_, GST_STATE_NULL);
+  }
+}
+
+void AudioPlayer::SendEvent(const EncodableValue& value) {
+  // EventSink::Success internally needs the Flutter platform thread to
+  // deliver the message. Calling it from arbitrary threads (GStreamer bus
+  // thread, streaming thread inside about-to-finish, or the platform thread
+  // itself while it is in another callback) deadlocks. Marshal every
+  // emission to the GLib main loop so exactly one thread ever drives the
+  // sink, and never hold the sink mutex while calling Success().
+  struct Ctx {
+    AudioPlayer* self;
+    EncodableValue* value;
+  };
+  auto* ctx = new Ctx{this, new EncodableValue(value)};
+  g_idle_add_full(
+      G_PRIORITY_DEFAULT,
+      [](gpointer user_data) -> gboolean {
+        auto* c = static_cast<Ctx*>(user_data);
+        flutter::EventSink<>* sink;
+        {
+          std::lock_guard<std::mutex> lock(c->self->event_sink_mutex_);
+          sink = c->self->event_sink_.get();
+        }
+        if (sink) {
+          sink->Success(*c->value);
+        }
+        delete c->value;
+        delete c;
+        return G_SOURCE_REMOVE;
+      },
+      ctx, nullptr);
 }
 
 void AudioPlayer::SourceSetup(GstElement* /* playbin */,
@@ -67,26 +128,84 @@ void AudioPlayer::SourceSetup(GstElement* /* playbin */,
   }
 }
 
+void AudioPlayer::AboutToFinish(GstElement* /* playbin */, AudioPlayer* self) {
+  // Fires on the playbin streaming thread. Do not call Stop()/Pause() here —
+  // they take GStreamer state-change locks and deadlock the thread driving
+  // the pipeline. Just emit the completion event so Dart's state machine
+  // advances; SendEvent already marshals to the main loop.
+  if (!self->isPlaying_) {
+    return;
+  }
+  self->isPlaying_ = false;
+  const EncodableValue value(EncodableMap{
+      {EncodableValue("event"), EncodableValue("audio.onComplete")},
+      {EncodableValue("value"), flutter::EncodableValue(true)},
+  });
+  self->SendEvent(value);
+}
+
 void AudioPlayer::SetSourceUrl(const std::string& url) {
-  if (url_ != url) {
-    url_ = url;
-    // clear source
-    gst_element_set_state(playbin_, GST_STATE_NULL);
-    isInitialized_ = false;
-    isPlaying_ = false;
-    if (!url_.empty()) {
-      g_object_set(GST_OBJECT(playbin_), "uri", url_.c_str(), NULL);
-      if (playbin_ && playbin_->current_state != GST_STATE_READY) {
-        const GstStateChangeReturn ret =
-            gst_element_set_state(playbin_, GST_STATE_READY);
-        if (ret == GST_STATE_CHANGE_FAILURE) {
-          throw std::runtime_error(
-              "Unable to set the pipeline to GST_STATE_READY.");
-        }
-      }
+  // Always reset: Dart's setSource contract is "prepare this source from
+  // scratch". A "same URL → no-op" shortcut would leave the pipeline wherever
+  // the last playback left it (typically at EOS), so a subsequent resume of
+  // the same clip would produce no audio.
+  url_ = url;
+  gst_element_set_state(playbin_, GST_STATE_NULL);
+  isInitialized_ = false;
+  isPlaying_ = false;
+  if (url_.empty()) {
+    return;
+  }
+  g_object_set(GST_OBJECT(playbin_), "uri", url_.c_str(), NULL);
+  const GstStateChangeReturn ret =
+      gst_element_set_state(playbin_, GST_STATE_READY);
+  if (ret == GST_STATE_CHANGE_FAILURE) {
+    throw std::runtime_error("Unable to set the pipeline to GST_STATE_READY.");
+  }
+}
+
+void AudioPlayer::SetSourceBytes(const std::vector<uint8_t>& bytes) {
+  CleanupByteSource();
+
+  const char* tmpdir = std::getenv("XDG_RUNTIME_DIR");
+  if (!tmpdir || !*tmpdir) {
+    tmpdir = "/tmp";
+  }
+  std::string path_template =
+      std::string(tmpdir) + "/audioplayers_linux_XXXXXX";
+  std::vector<char> mutable_template(path_template.begin(), path_template.end());
+  mutable_template.push_back('\0');
+  const int fd = mkstemp(mutable_template.data());
+  if (fd < 0) {
+    OnError("LinuxAudioError",
+            "Failed to create temp file for setSourceBytes.", nullptr, nullptr);
+    return;
+  }
+
+  const char* data = reinterpret_cast<const char*>(bytes.data());
+  size_t remaining = bytes.size();
+  while (remaining > 0) {
+    const ssize_t n = write(fd, data, remaining);
+    if (n < 0) {
+      close(fd);
+      unlink(mutable_template.data());
+      OnError("LinuxAudioError",
+              "Failed to write bytes for setSourceBytes.", nullptr, nullptr);
+      return;
     }
-  } else {
-    OnPrepared(true);
+    data += n;
+    remaining -= static_cast<size_t>(n);
+  }
+  close(fd);
+
+  byte_source_path_ = mutable_template.data();
+  SetSourceUrl(std::string("file://") + byte_source_path_);
+}
+
+void AudioPlayer::CleanupByteSource() {
+  if (!byte_source_path_.empty()) {
+    unlink(byte_source_path_.c_str());
+    byte_source_path_.clear();
   }
 }
 
@@ -111,9 +230,26 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
     case GST_MESSAGE_ERROR: {
       GError* err;
       gchar* debug;
-
       gst_message_parse_error(message, &err, &debug);
+      spdlog::error(
+          "[audioplayers] gst error channel={} domain={} code={} message={} "
+          "debug={}",
+          data->eventChannelName_, g_quark_to_string(err->domain), err->code,
+          err->message ? err->message : "", debug ? debug : "");
       data->OnMediaError(err, debug);
+      g_error_free(err);
+      g_free(debug);
+      break;
+    }
+    case GST_MESSAGE_WARNING: {
+      GError* err;
+      gchar* debug;
+      gst_message_parse_warning(message, &err, &debug);
+      spdlog::warn(
+          "[audioplayers] gst warning channel={} domain={} code={} message={} "
+          "debug={}",
+          data->eventChannelName_, g_quark_to_string(err->domain), err->code,
+          err->message ? err->message : "", debug ? debug : "");
       g_error_free(err);
       g_free(debug);
       break;
@@ -123,18 +259,17 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
         data->OnDurationUpdate();
       }
       break;
-    case GST_MESSAGE_STATE_CHANGED:
+    case GST_MESSAGE_STATE_CHANGED: {
       GstState old_state, new_state;
-
       gst_message_parse_state_changed(message, &old_state, &new_state, nullptr);
       data->OnMediaStateChange(GST_MESSAGE_SRC(message), &old_state,
                                &new_state);
       break;
+    }
     case GST_MESSAGE_EOS:
-      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
-        if (data->isPlaying_) {
-          data->OnPlaybackEnded();
-        }
+      if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_) &&
+          data->isPlaying_) {
+        data->OnPlaybackEnded();
       }
       break;
     case GST_MESSAGE_DURATION_CHANGED:
@@ -183,7 +318,7 @@ void AudioPlayer::OnError(const gchar* code,
   const EncodableValue value(
       EncodableMap{{EncodableValue("code"), EncodableValue(code)},
                    {EncodableValue("message"), EncodableValue(message)}});
-  Send(value);
+  SendEvent(value);
 }
 
 void AudioPlayer::OnMediaStateChange(const GstObject* src,
@@ -238,14 +373,11 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
 }
 
 void AudioPlayer::OnPrepared(bool isPrepared) {
-  if (media_state_ != GST_STATE_PLAYING) {
-    Resume();
-  }
   const EncodableValue value(EncodableMap{
       {EncodableValue("event"), EncodableValue("audio.onPrepared")},
       {EncodableValue("value"), flutter::EncodableValue(isPrepared)},
   });
-  Send(value);
+  SendEvent(value);
 }
 
 void AudioPlayer::OnDurationUpdate() {
@@ -254,7 +386,7 @@ void AudioPlayer::OnDurationUpdate() {
       {EncodableValue("value"),
        flutter::EncodableValue(GetDuration().value_or(0))},
   });
-  Send(value);
+  SendEvent(value);
 }
 
 void AudioPlayer::OnSeekCompleted() {
@@ -262,7 +394,7 @@ void AudioPlayer::OnSeekCompleted() {
       {EncodableValue("event"), EncodableValue("audio.onSeekComplete")},
       {EncodableValue("value"), flutter::EncodableValue(true)},
   });
-  Send(value);
+  SendEvent(value);
 }
 
 void AudioPlayer::OnPlaybackEnded() {
@@ -270,7 +402,7 @@ void AudioPlayer::OnPlaybackEnded() {
       {EncodableValue("event"), EncodableValue("audio.onComplete")},
       {EncodableValue("value"), flutter::EncodableValue(true)},
   });
-  Send(value);
+  SendEvent(value);
 
   if (GetLooping()) {
     Play();
@@ -284,7 +416,7 @@ void AudioPlayer::OnLog(const gchar* message) {
       {EncodableValue("event"), EncodableValue("audio.onLog")},
       {EncodableValue("value"), flutter::EncodableValue(std::string(message))},
   });
-  Send(value);
+  SendEvent(value);
 }
 
 void AudioPlayer::SetBalance(float balance) {
@@ -421,12 +553,10 @@ void AudioPlayer::Pause() {
   if (!isInitialized_) {
     return;
   }
-  if (const GstStateChangeReturn ret =
-          gst_element_set_state(playbin_, GST_STATE_PAUSED);
-      ret == GST_STATE_CHANGE_SUCCESS) {
-  } else if (ret == GST_STATE_CHANGE_FAILURE) {
-    throw std::runtime_error(
-        std::runtime_error("Unable to set the pipeline to GST_STATE_PAUSED."));
+  const GstStateChangeReturn ret =
+      gst_element_set_state(playbin_, GST_STATE_PAUSED);
+  if (ret == GST_STATE_CHANGE_FAILURE) {
+    throw std::runtime_error("Unable to set the pipeline to GST_STATE_PAUSED.");
   }
 }
 
@@ -453,9 +583,9 @@ void AudioPlayer::Resume() {
   if (!isInitialized_) {
     return;
   }
-  if (const GstStateChangeReturn ret =
-          gst_element_set_state(playbin_, GST_STATE_PLAYING);
-      ret == GST_STATE_CHANGE_SUCCESS) {
+  const GstStateChangeReturn ret =
+      gst_element_set_state(playbin_, GST_STATE_PLAYING);
+  if (ret == GST_STATE_CHANGE_SUCCESS) {
     // Update duration when start playing, as no event is emitted elsewhere
     OnDurationUpdate();
   } else if (ret == GST_STATE_CHANGE_FAILURE) {
@@ -469,6 +599,7 @@ void AudioPlayer::Dispose() {
     throw std::runtime_error("Player was already disposed (Dispose)");
 
   ReleaseMediaSource();
+  CleanupByteSource();
 
   if (bus_) {
     gst_bus_remove_watch(bus_);

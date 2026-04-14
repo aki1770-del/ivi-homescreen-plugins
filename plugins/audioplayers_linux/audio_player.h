@@ -1,12 +1,16 @@
 #pragma once
 
 #include <future>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <vector>
 
-#include <flutter/basic_message_channel.h>
+#include <flutter/binary_messenger.h>
 #include <flutter/encodable_value.h>
 #include <flutter/event_channel.h>
+#include <flutter/event_sink.h>
 
 extern "C" {
 #include <gst/gst.h>
@@ -14,7 +18,7 @@ extern "C" {
 
 using namespace flutter;
 
-class AudioPlayer : public BasicMessageChannel<> {
+class AudioPlayer {
  public:
   AudioPlayer(const std::string& playerId, BinaryMessenger* messenger);
 
@@ -48,6 +52,8 @@ class AudioPlayer : public BasicMessageChannel<> {
 
   void SetSourceUrl(const std::string& url);
 
+  void SetSourceBytes(const std::vector<uint8_t>& bytes);
+
   void ReleaseMediaSource();
 
   void OnError(const gchar* code,
@@ -78,10 +84,21 @@ class AudioPlayer : public BasicMessageChannel<> {
   double playbackRate_ = 1.0;
 
   std::string url_;
+  std::string byte_source_path_;
+
+  std::unique_ptr<flutter::EventChannel<>> event_channel_;
+  std::mutex event_sink_mutex_;
+  std::unique_ptr<flutter::EventSink<>> event_sink_;
+
+  void SendEvent(const EncodableValue& value);
+
+  void CleanupByteSource();
 
   static void SourceSetup(GstElement* playbin,
                           GstElement* source,
                           GstElement** p_src);
+
+  static void AboutToFinish(GstElement* playbin, AudioPlayer* self);
 
   static gboolean OnBusMessage(GstBus* bus,
                                GstMessage* message,
