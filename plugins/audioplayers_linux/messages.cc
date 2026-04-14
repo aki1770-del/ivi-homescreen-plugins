@@ -113,8 +113,7 @@ void SetupMethodChannel(flutter::BinaryMessenger* messenger) {
         }
 
         if (valueUrl.IsNull()) {
-          result->Error("LinuxAudioError",
-                        "Null URL received on setSourceUrl.",
+          result->Error("LinuxAudioError", "Null URL received on setSourceUrl.",
                         EncodableValue());
           return;
         }
@@ -183,8 +182,8 @@ void SetupMethodChannel(flutter::BinaryMessenger* messenger) {
             break;
           }
         }
-        std::string releaseMode =
-            valueReleaseMode.IsNull() ? std::string()
+        std::string releaseMode = valueReleaseMode.IsNull()
+                                      ? std::string()
                                       : std::get<std::string>(valueReleaseMode);
         if (releaseMode.empty()) {
           result->Error(
@@ -263,13 +262,12 @@ void SetupGlobalMethodChannel(flutter::BinaryMessenger* messenger) {
       messenger, "xyz.luan/audioplayers.global",
       &StandardMethodCodec::GetInstance());
 
-  channel->SetMethodCallHandler(
-      [](const MethodCall<>& /* call */,
-         std::unique_ptr<MethodResult<>> result) {
-        // Global audio context is currently a no-op on Linux. Always reply
-        // success or Dart's setAudioContext future hangs forever.
-        result->Success();
-      });
+  channel->SetMethodCallHandler([](const MethodCall<>& /* call */,
+                                   std::unique_ptr<MethodResult<>> result) {
+    // Global audio context is currently a no-op on Linux. Always reply
+    // success or Dart's setAudioContext future hangs forever.
+    result->Success();
+  });
 }
 
 void SetupGlobalEventChannel(flutter::BinaryMessenger* messenger) {
@@ -279,17 +277,14 @@ void SetupGlobalEventChannel(flutter::BinaryMessenger* messenger) {
       messenger, "xyz.luan/audioplayers.global/events",
       &StandardMethodCodec::GetInstance());
 
-  channel->SetStreamHandler(
-      std::make_unique<flutter::StreamHandlerFunctions<>>(
-          [](const EncodableValue* /* arguments */,
-             std::unique_ptr<flutter::EventSink<>>&& /* events */)
-              -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            return nullptr;
-          },
-          [](const EncodableValue* /* arguments */)
-              -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            return nullptr;
-          }));
+  channel->SetStreamHandler(std::make_unique<flutter::StreamHandlerFunctions<>>(
+      [](const EncodableValue* /* arguments */,
+         std::unique_ptr<flutter::EventSink<>>&& /* events */)
+          -> std::unique_ptr<flutter::StreamHandlerError<>> { return nullptr; },
+      [](const EncodableValue* /* arguments */)
+          -> std::unique_ptr<flutter::StreamHandlerError<>> {
+        return nullptr;
+      }));
 }
 
 }  // namespace audioplayers_linux_plugin

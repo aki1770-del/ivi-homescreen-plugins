@@ -10,45 +10,73 @@ extern "C" {
 }
 
 #include <unistd.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
 #include <thread>
+#include <utility>
 
 #define STR_LINK_TROUBLESHOOTING \
   "https://github.com/bluefireteam/audioplayers/blob/main/troubleshooting.md"
 
-AudioPlayer::AudioPlayer(const std::string& playerId,
-                         BinaryMessenger* messenger)
-    : eventChannelName_(playerId), media_state_(GST_STATE_VOID_PENDING) {
+namespace {
+
+// Post a task to the GLib main-loop thread. Used to marshal event delivery
+// from GStreamer threads (bus, streaming) onto the thread that owns the
+// Flutter engine's BinaryMessenger.
+void PostToMainLoop(std::function<void()> task) {
+  auto* heap = new std::function<void()>(std::move(task));
+  g_idle_add_full(
+      G_PRIORITY_DEFAULT,
+      [](gpointer user_data) -> gboolean {
+        auto* t = static_cast<std::function<void()>*>(user_data);
+        (*t)();
+        delete t;
+        return G_SOURCE_REMOVE;
+      },
+      heap, nullptr);
+}
+
+}  // namespace
+
+// static
+void AudioPlayer::PostToMainLoop(std::function<void()> task) {
+  ::PostToMainLoop(std::move(task));
+}
+
+AudioPlayer::AudioPlayer(std::string playerId, BinaryMessenger* messenger)
+    : state_(std::make_shared<SharedState>()),
+      media_state_(GST_STATE_VOID_PENDING) {
+  state_->event_channel_name = std::move(playerId);
+
+  auto state = state_;  // captured by stream handlers
   event_channel_ = std::make_unique<flutter::EventChannel<>>(
-      messenger, eventChannelName_,
+      messenger, state_->event_channel_name,
       &flutter::StandardMethodCodec::GetInstance());
   event_channel_->SetStreamHandler(
       std::make_unique<flutter::StreamHandlerFunctions<>>(
-          [this](const EncodableValue* /* arguments */,
-                 std::unique_ptr<flutter::EventSink<>>&& events)
+          [state](const EncodableValue* /* arguments */,
+                  std::unique_ptr<flutter::EventSink<>>&& events)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            std::lock_guard<std::mutex> lock(event_sink_mutex_);
-            event_sink_ = std::move(events);
+            std::lock_guard<std::mutex> lock(state->sink_mu);
+            if (!state->cancelled) {
+              state->sink = std::move(events);
+            }
             return nullptr;
           },
-          [this](const EncodableValue* /* arguments */)
+          [state](const EncodableValue* /* arguments */)
               -> std::unique_ptr<flutter::StreamHandlerError<>> {
-            std::lock_guard<std::mutex> lock(event_sink_mutex_);
-            event_sink_.reset();
+            std::lock_guard<std::mutex> lock(state->sink_mu);
+            state->sink.reset();
             return nullptr;
           }));
-
-  // Get the calling context.
-  context_ = g_main_context_get_thread_default();
 
   playbin_ = gst_element_factory_make("playbin", nullptr);
   if (!playbin_) {
     throw std::runtime_error("Not all elements could be created.");
   }
 
-  // Setup stereo balance controller
+  // Setup stereo balance controller.
   panorama_ = gst_element_factory_make("audiopanorama", nullptr);
   if (panorama_) {
     audiobin_ = gst_bin_new(nullptr);
@@ -66,23 +94,29 @@ AudioPlayer::AudioPlayer(const std::string& playerId,
     g_object_set(G_OBJECT(panorama_), "method", 1, nullptr);
   }
 
-  // Setup source options
-  g_signal_connect(playbin_, "source-setup",
-                   G_CALLBACK(AudioPlayer::SourceSetup), &source_);
-
-  // playbin fires about-to-finish when the current source is draining.
-  // This is more reliable than waiting for GST_MESSAGE_EOS (which we have
-  // observed to not fire in some pipeline configurations).
+  // playbin fires about-to-finish when the current source is draining. We
+  // use it for gapless looping (see AboutToFinish). EOS also fires reliably
+  // now and is handled separately for completion notification.
   g_signal_connect(playbin_, "about-to-finish",
                    G_CALLBACK(AudioPlayer::AboutToFinish), this);
 
   bus_ = gst_element_get_bus(playbin_);
 
-  // Watch bus messages for one time events
+  // Watch bus messages.
   gst_bus_add_watch(bus_, reinterpret_cast<GstBusFunc>(OnBusMessage), this);
 }
 
 AudioPlayer::~AudioPlayer() {
+  // Cancel event delivery BEFORE tearing down the pipeline. Any idle
+  // callbacks that were queued before this point and haven't fired yet will
+  // see cancelled=true on the shared state and become no-ops. The detached
+  // GstDiscoverer thread also observes this via the shared state ref.
+  {
+    std::lock_guard<std::mutex> lock(state_->sink_mu);
+    state_->cancelled = true;
+    state_->sink.reset();
+  }
+
   if (event_channel_) {
     event_channel_->SetStreamHandler(nullptr);
   }
@@ -92,42 +126,18 @@ AudioPlayer::~AudioPlayer() {
 }
 
 void AudioPlayer::SendEvent(const EncodableValue& value) {
-  // EventSink::Success internally needs the Flutter platform thread to
-  // deliver the message. Calling it from arbitrary threads (GStreamer bus
-  // thread, streaming thread inside about-to-finish, or the platform thread
-  // itself while it is in another callback) deadlocks. Marshal every
-  // emission to the GLib main loop so exactly one thread ever drives the
-  // sink, and never hold the sink mutex while calling Success().
-  struct Ctx {
-    AudioPlayer* self;
-    EncodableValue* value;
-  };
-  auto* ctx = new Ctx{this, new EncodableValue(value)};
-  g_idle_add_full(
-      G_PRIORITY_DEFAULT,
-      [](gpointer user_data) -> gboolean {
-        auto* c = static_cast<Ctx*>(user_data);
-        flutter::EventSink<>* sink;
-        {
-          std::lock_guard<std::mutex> lock(c->self->event_sink_mutex_);
-          sink = c->self->event_sink_.get();
-        }
-        if (sink) {
-          sink->Success(*c->value);
-        }
-        delete c->value;
-        delete c;
-        return G_SOURCE_REMOVE;
-      },
-      ctx, nullptr);
-}
-
-void AudioPlayer::SourceSetup(GstElement* /* playbin */,
-                              GstElement* /* source */,
-                              GstElement** /* p_src */) {
-  // No source-level overrides. The previous implementation set
-  // ssl-strict=FALSE on souphttpsrc, which disabled certificate verification
-  // on every HTTPS source — a MITM hole. GStreamer's defaults are correct.
+  // Marshal to the GLib main loop. Capturing state_ by value takes a shared
+  // ref; the callback can safely check state->cancelled without touching the
+  // AudioPlayer itself (which may have been destroyed by then).
+  auto state = state_;
+  auto payload = std::make_shared<EncodableValue>(value);
+  ::PostToMainLoop([state, payload]() {
+    std::lock_guard<std::mutex> lock(state->sink_mu);
+    if (state->cancelled || !state->sink) {
+      return;
+    }
+    state->sink->Success(*payload);
+  });
 }
 
 void AudioPlayer::AboutToFinish(GstElement* playbin, AudioPlayer* self) {
@@ -135,34 +145,34 @@ void AudioPlayer::AboutToFinish(GstElement* playbin, AudioPlayer* self) {
   // they take GStreamer state-change locks and deadlock the thread driving
   // the pipeline.
   //
-  // Note on EOS: GST_MESSAGE_EOS does fire reliably now (see OnBusMessage,
-  // and OnPlaybackEnded handles it). We still hook about-to-finish because
-  // it's the only way to get GAPLESS looping — EOS fires after pulsesink
-  // drains, which means there's a perceptible silent gap before Play()
-  // would restart. Setting playbin's uri from this handler tells playbin
-  // to queue the next source before the current one finishes.
-  //
-  // If looping is enabled, set the uri again on playbin. This is the
-  // documented gapless-transition pattern for this signal: playbin starts
-  // the next source immediately after the current one drains. We stay in
-  // PLAYING the whole time and isPlaying_ remains true; EOS will not fire
-  // because we gave playbin a next URI.
-  if (self->isLooping_ && !self->url_.empty()) {
-    g_object_set(G_OBJECT(playbin), "uri", self->url_.c_str(), nullptr);
+  // Note on EOS: GST_MESSAGE_EOS also fires reliably (see OnBusMessage).
+  // We still hook about-to-finish because it's the only way to get GAPLESS
+  // looping — EOS fires after pulsesink drains, producing a perceptible
+  // silent gap before any Play() would restart. Setting playbin's uri from
+  // this handler queues the next source before the current one finishes.
+  if (!self->isLooping_.load(std::memory_order_relaxed)) {
+    // Non-loop path: emit completion so Dart's state machine advances.
+    if (!self->isPlaying_.exchange(false, std::memory_order_relaxed)) {
+      return;
+    }
+    const EncodableValue value(EncodableMap{
+        {EncodableValue("event"), EncodableValue("audio.onComplete")},
+        {EncodableValue("value"), flutter::EncodableValue(true)},
+    });
+    self->SendEvent(value);
     return;
   }
 
-  // Non-loop path: emit the completion event so Dart's state machine
-  // advances. SendEvent already marshals to the main loop.
-  if (!self->isPlaying_) {
-    return;
+  // Loop path: snapshot url_ under the mutex before touching playbin so we
+  // don't race with SetSourceUrl on the platform thread.
+  std::string url_copy;
+  {
+    std::lock_guard<std::mutex> lock(self->url_mu_);
+    url_copy = self->url_;
   }
-  self->isPlaying_ = false;
-  const EncodableValue value(EncodableMap{
-      {EncodableValue("event"), EncodableValue("audio.onComplete")},
-      {EncodableValue("value"), flutter::EncodableValue(true)},
-  });
-  self->SendEvent(value);
+  if (!url_copy.empty()) {
+    g_object_set(G_OBJECT(playbin), "uri", url_copy.c_str(), nullptr);
+  }
 }
 
 // Returns true if `url` starts with one of the schemes we permit playbin to
@@ -176,12 +186,10 @@ static bool IsAllowedSourceUrl(const std::string& url) {
       "https://",
       "data:",
   };
-  for (const auto& scheme : kAllowedSchemes) {
-    if (url.compare(0, scheme.size(), scheme) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return std::any_of(std::begin(kAllowedSchemes), std::end(kAllowedSchemes),
+                     [&url](const std::string_view scheme) {
+                       return url.compare(0, scheme.size(), scheme) == 0;
+                     });
 }
 
 void AudioPlayer::SetSourceUrl(const std::string& url) {
@@ -189,7 +197,7 @@ void AudioPlayer::SetSourceUrl(const std::string& url) {
     spdlog::warn(
         "[audioplayers] rejecting setSourceUrl with disallowed scheme "
         "channel={} url={}",
-        eventChannelName_, url);
+        state_->event_channel_name, url);
     OnError("LinuxAudioError",
             "URL scheme not permitted (allowed: file, http, https, data).",
             nullptr, nullptr);
@@ -199,16 +207,19 @@ void AudioPlayer::SetSourceUrl(const std::string& url) {
   // scratch". A "same URL → no-op" shortcut would leave the pipeline wherever
   // the last playback left it (typically at EOS), so a subsequent resume of
   // the same clip would produce no audio.
-  url_ = url;
+  {
+    std::lock_guard<std::mutex> lock(url_mu_);
+    url_ = url;
+  }
   gst_element_set_state(playbin_, GST_STATE_NULL);
-  isInitialized_ = false;
-  isPlaying_ = false;
-  discovered_duration_ms_.store(-1, std::memory_order_relaxed);
-  if (url_.empty()) {
+  isInitialized_.store(false, std::memory_order_relaxed);
+  isPlaying_.store(false, std::memory_order_relaxed);
+  state_->discovered_duration_ms.store(-1, std::memory_order_relaxed);
+  if (url.empty()) {
     return;
   }
-  g_object_set(GST_OBJECT(playbin_), "uri", url_.c_str(), NULL);
-  StartDurationDiscovery(url_);
+  g_object_set(GST_OBJECT(playbin_), "uri", url.c_str(), NULL);
+  StartDurationDiscovery(url);
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_READY);
   if (ret == GST_STATE_CHANGE_FAILURE) {
@@ -264,14 +275,15 @@ void AudioPlayer::CleanupByteSource() {
 }
 
 void AudioPlayer::ReleaseMediaSource() {
-  if (isPlaying_)
-    isPlaying_ = false;
-  if (isInitialized_)
-    isInitialized_ = false;
-  url_.clear();
+  isPlaying_.store(false, std::memory_order_relaxed);
+  isInitialized_.store(false, std::memory_order_relaxed);
+  {
+    std::lock_guard<std::mutex> lock(url_mu_);
+    url_.clear();
+  }
 
-  // Bounded wait: the original GST_CLOCK_TIME_NONE could hang the caller
-  // forever if the pipeline got wedged.
+  // Bounded wait: GST_CLOCK_TIME_NONE could hang the caller forever if the
+  // pipeline got wedged.
   GstState playbinState;
   gst_element_get_state(playbin_, &playbinState, nullptr, 2 * GST_SECOND);
   if (playbinState > GST_STATE_NULL) {
@@ -290,8 +302,8 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       spdlog::error(
           "[audioplayers] gst error channel={} domain={} code={} message={} "
           "debug={}",
-          data->eventChannelName_, g_quark_to_string(err->domain), err->code,
-          err->message ? err->message : "", debug ? debug : "");
+          data->state_->event_channel_name, g_quark_to_string(err->domain),
+          err->code, err->message ? err->message : "", debug ? debug : "");
       data->OnMediaError(GST_MESSAGE_SRC(message), err, debug);
       g_error_free(err);
       g_free(debug);
@@ -304,8 +316,8 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       spdlog::warn(
           "[audioplayers] gst warning channel={} domain={} code={} message={} "
           "debug={}",
-          data->eventChannelName_, g_quark_to_string(err->domain), err->code,
-          err->message ? err->message : "", debug ? debug : "");
+          data->state_->event_channel_name, g_quark_to_string(err->domain),
+          err->code, err->message ? err->message : "", debug ? debug : "");
       g_error_free(err);
       g_free(debug);
       break;
@@ -324,7 +336,7 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
     }
     case GST_MESSAGE_EOS:
       if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_) &&
-          data->isPlaying_) {
+          data->isPlaying_.load(std::memory_order_relaxed)) {
         data->OnPlaybackEnded();
       }
       break;
@@ -333,9 +345,9 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       break;
     case GST_MESSAGE_ASYNC_DONE:
       if (GST_MESSAGE_SRC(message) == GST_OBJECT(data->playbin_)) {
-        if (!data->isSeekCompleted_) {
+        bool expected = false;
+        if (data->isSeekCompleted_.compare_exchange_strong(expected, true)) {
           data->OnSeekCompleted();
-          data->isSeekCompleted_ = true;
         }
       }
       break;
@@ -345,7 +357,7 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       break;
   }
 
-  // Continue watching for messages
+  // Continue watching for messages.
   return TRUE;
 }
 
@@ -364,7 +376,7 @@ void AudioPlayer::OnMediaError(GstObject* src,
     spdlog::debug(
         "[audioplayers] suppressing orphaned error channel={} src={} "
         "message={}",
-        eventChannelName_,
+        state_->event_channel_name,
         GST_OBJECT_NAME(src) ? GST_OBJECT_NAME(src) : "(null)",
         error->message ? error->message : "");
     return;
@@ -396,39 +408,26 @@ void AudioPlayer::OnError(const gchar* code,
   // Error(code, msg, details) through the stream's onError. Sending a
   // {"code", "message"} map via Success made Dart's event-type dispatch
   // throw UnimplementedError because there was no "event" key.
-  struct Ctx {
-    AudioPlayer* self;
-    std::string code;
-    std::string message;
-    EncodableValue* details;  // owned
-  };
-  auto* ctx = new Ctx{
-      this,
-      code ? code : "",
-      message ? message : "",
-      details ? new EncodableValue(*details) : nullptr,
-  };
-  g_idle_add_full(
-      G_PRIORITY_DEFAULT,
-      [](gpointer user_data) -> gboolean {
-        auto* c = static_cast<Ctx*>(user_data);
-        flutter::EventSink<>* sink;
-        {
-          std::lock_guard<std::mutex> lock(c->self->event_sink_mutex_);
-          sink = c->self->event_sink_.get();
-        }
-        if (sink) {
-          if (c->details) {
-            sink->Error(c->code, c->message, *c->details);
-          } else {
-            sink->Error(c->code, c->message);
-          }
-        }
-        delete c->details;
-        delete c;
-        return G_SOURCE_REMOVE;
-      },
-      ctx, nullptr);
+  auto state = state_;
+  std::string code_s = code ? code : "";
+  std::string message_s = message ? message : "";
+  std::shared_ptr<EncodableValue> details_copy;
+  if (details) {
+    details_copy = std::make_shared<EncodableValue>(*details);
+  }
+  ::PostToMainLoop([state, code_s = std::move(code_s),
+                    message_s = std::move(message_s),
+                    details_copy = std::move(details_copy)]() mutable {
+    std::lock_guard<std::mutex> lock(state->sink_mu);
+    if (state->cancelled || !state->sink) {
+      return;
+    }
+    if (details_copy) {
+      state->sink->Error(code_s, message_s, *details_copy);
+    } else {
+      state->sink->Error(code_s, message_s);
+    }
+  });
 }
 
 void AudioPlayer::OnMediaStateChange(const GstObject* src,
@@ -445,14 +444,14 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
 
   if (src == GST_OBJECT(playbin_)) {
     if (*new_state == GST_STATE_READY) {
-      // Need to set to pause state, in order to make player functional
+      // Need to set to pause state, in order to make player functional.
       const GstStateChangeReturn ret =
           gst_element_set_state(playbin_, GST_STATE_PAUSED);
       if (ret == GST_STATE_CHANGE_FAILURE) {
         const auto error_description =
             "Unable to set the pipeline from GST_STATE_READY to "
             "GST_STATE_PAUSED.";
-        if (isInitialized_) {
+        if (isInitialized_.load(std::memory_order_relaxed)) {
           OnError("LinuxAudioError", error_description, nullptr, nullptr);
         } else {
           EncodableValue details(error_description);
@@ -462,22 +461,20 @@ void AudioPlayer::OnMediaStateChange(const GstObject* src,
                   &details, nullptr);
         }
       }
-      if (isInitialized_) {
-        isInitialized_ = false;
-      }
+      isInitialized_.store(false, std::memory_order_relaxed);
     } else if (*old_state == GST_STATE_PAUSED &&
                *new_state == GST_STATE_PLAYING) {
       OnDurationUpdate();
     } else if (*new_state >= GST_STATE_PAUSED) {
-      if (!isInitialized_) {
-        isInitialized_ = true;
+      bool was_initialized = isInitialized_.exchange(true);
+      if (!was_initialized) {
         OnPrepared(true);
-        if (isPlaying_) {
+        if (isPlaying_.load(std::memory_order_relaxed)) {
           Resume();
         }
       }
-    } else if (isInitialized_) {
-      isInitialized_ = false;
+    } else {
+      isInitialized_.store(false, std::memory_order_relaxed);
     }
   }
 }
@@ -544,11 +541,11 @@ void AudioPlayer::SetBalance(float balance) {
 }
 
 void AudioPlayer::SetLooping(const bool isLooping) {
-  isLooping_ = isLooping;
+  isLooping_.store(isLooping, std::memory_order_relaxed);
 }
 
 bool AudioPlayer::GetLooping() const {
-  return isLooping_;
+  return isLooping_.load(std::memory_order_relaxed);
 }
 
 void AudioPlayer::SetVolume(double volume) const {
@@ -573,12 +570,12 @@ void AudioPlayer::SetPlayback(const int64_t seekTo, const double rate) {
     playbackRate_ = rate;
   }
 
-  if (!isInitialized_) {
+  if (!isInitialized_.load(std::memory_order_relaxed)) {
     return;
   }
   // See:
   // https://gstreamer.freedesktop.org/documentation/tutorials/basic/playback-speed.html?gi-language=c
-  if (!isSeekCompleted_) {
+  if (!isSeekCompleted_.load(std::memory_order_relaxed)) {
     return;
   }
   if (rate == 0) {
@@ -587,7 +584,7 @@ void AudioPlayer::SetPlayback(const int64_t seekTo, const double rate) {
     return;
   }
 
-  isSeekCompleted_ = false;
+  isSeekCompleted_.store(false, std::memory_order_relaxed);
 
   GstEvent* seek_event;
   if (rate > 0) {
@@ -607,7 +604,7 @@ void AudioPlayer::SetPlayback(const int64_t seekTo, const double rate) {
            std::to_string(seekTo) + std::string(" and rate ") +
            std::to_string(rate) + std::string("."))
               .c_str());
-    isSeekCompleted_ = true;
+    isSeekCompleted_.store(true, std::memory_order_relaxed);
   }
 }
 
@@ -619,7 +616,7 @@ void AudioPlayer::SetPlaybackRate(const double rate) {
  * @param position the position in milliseconds
  */
 void AudioPlayer::SetPosition(const int64_t position) {
-  if (!isInitialized_) {
+  if (!isInitialized_.load(std::memory_order_relaxed)) {
     return;
   }
   // Clamp to [0, duration]. gst_event_new_seek accepts out-of-range values
@@ -657,32 +654,28 @@ std::optional<int64_t> AudioPlayer::GetDuration() {
   // Prefer the GstDiscoverer result when available — gst_element_query_duration
   // is unreliable for variable-bitrate MP3s (the original FIXME).
   const int64_t discovered =
-      discovered_duration_ms_.load(std::memory_order_relaxed);
+      state_->discovered_duration_ms.load(std::memory_order_relaxed);
   if (discovered >= 0) {
     return std::make_optional(discovered);
   }
   gint64 duration = 0;
   if (!gst_element_query_duration(playbin_, GST_FORMAT_TIME, &duration)) {
     // Duration queries are unreliable before PAUSED/PLAYING and for some
-    // formats. GstDiscoverer result (cached above) is the preferred path;
-    // if we got here, just return nullopt instead of log-spamming Dart.
+    // formats. GstDiscoverer result (cached above) is the preferred path; if
+    // we got here, just return nullopt instead of log-spamming Dart.
     return std::nullopt;
   }
   return std::make_optional(duration / 1000000);
 }
 
 void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
-  // GstDiscoverer runs a brief synchronous probe (5s timeout) on a worker
-  // thread so we don't stall the calling thread. Store the result back on the
-  // AudioPlayer for GetDuration() to consume. We intentionally use the sync
-  // API on a detached thread rather than the async signal-based one to avoid
-  // wiring another GLib source into our main loop.
-  struct DiscoverCtx {
-    std::string uri;
-    std::atomic<int64_t>* sink;
-  };
-  auto* ctx = new DiscoverCtx{uri, &discovered_duration_ms_};
-  std::thread([ctx]() {
+  // GstDiscoverer runs a 5s-timeout probe on a worker thread so we don't
+  // stall the calling thread. The thread captures the SharedState by shared
+  // ref — if AudioPlayer is destroyed mid-probe, the state survives until
+  // the thread finishes, and the store into discovered_duration_ms is safe
+  // (the consumer is gone too, but the memory is still valid).
+  auto state = state_;
+  std::thread([state, uri]() {
     GError* err = nullptr;
     GstDiscoverer* discoverer = gst_discoverer_new(5 * GST_SECOND, &err);
     if (!discoverer) {
@@ -690,25 +683,23 @@ void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
                    err ? err->message : "unknown");
       if (err)
         g_error_free(err);
-      delete ctx;
       return;
     }
     GstDiscovererInfo* info =
-        gst_discoverer_discover_uri(discoverer, ctx->uri.c_str(), &err);
+        gst_discoverer_discover_uri(discoverer, uri.c_str(), &err);
     if (info) {
       const GstClockTime dur = gst_discoverer_info_get_duration(info);
       if (GST_CLOCK_TIME_IS_VALID(dur)) {
-        ctx->sink->store(static_cast<int64_t>(dur / GST_MSECOND),
-                         std::memory_order_relaxed);
+        state->discovered_duration_ms.store(
+            static_cast<int64_t>(dur / GST_MSECOND), std::memory_order_relaxed);
       }
       gst_discoverer_info_unref(info);
     } else if (err) {
-      spdlog::warn("[audioplayers] gst_discoverer probe failed for {}: {}",
-                   ctx->uri, err->message);
+      spdlog::warn("[audioplayers] gst_discoverer probe failed for {}: {}", uri,
+                   err->message);
       g_error_free(err);
     }
     g_object_unref(discoverer);
-    delete ctx;
   }).detach();
 }
 
@@ -718,10 +709,8 @@ void AudioPlayer::Play() {
 }
 
 void AudioPlayer::Pause() {
-  if (isPlaying_) {
-    isPlaying_ = false;
-  }
-  if (!isInitialized_) {
+  isPlaying_.store(false, std::memory_order_relaxed);
+  if (!isInitialized_.load(std::memory_order_relaxed)) {
     return;
   }
   const GstStateChangeReturn ret =
@@ -735,12 +724,12 @@ void AudioPlayer::Pause() {
 
 void AudioPlayer::Stop() {
   Pause();
-  if (!isInitialized_) {
+  if (!isInitialized_.load(std::memory_order_relaxed)) {
     return;
   }
   SetPosition(0);
   // Wait for the seek/state-change to settle. Bounded so a wedged element
-  // can't hang the calling thread (GST_CLOCK_TIME_NONE would).
+  // can't hang the calling thread.
   constexpr GstClockTime kStopTimeout = 2 * GST_SECOND;
   const GstStateChangeReturn ret =
       gst_element_get_state(playbin_, nullptr, nullptr, kStopTimeout);
@@ -752,21 +741,19 @@ void AudioPlayer::Stop() {
     spdlog::warn(
         "[audioplayers] Stop timed out after 2s waiting for state settle "
         "channel={}",
-        eventChannelName_);
+        state_->event_channel_name);
   }
 }
 
 void AudioPlayer::Resume() {
-  if (!isPlaying_) {
-    isPlaying_ = true;
-  }
-  if (!isInitialized_) {
+  isPlaying_.store(true, std::memory_order_relaxed);
+  if (!isInitialized_.load(std::memory_order_relaxed)) {
     return;
   }
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_PLAYING);
   if (ret == GST_STATE_CHANGE_SUCCESS) {
-    // Update duration when start playing, as no event is emitted elsewhere
+    // Update duration when start playing, as no event is emitted elsewhere.
     OnDurationUpdate();
   } else if (ret == GST_STATE_CHANGE_FAILURE) {
     OnError("LinuxAudioError",
@@ -780,7 +767,7 @@ void AudioPlayer::Dispose() {
     spdlog::warn(
         "[audioplayers] Dispose() called on already-disposed player "
         "channel={}",
-        eventChannelName_);
+        state_->event_channel_name);
     return;
   }
 
@@ -793,11 +780,6 @@ void AudioPlayer::Dispose() {
     bus_ = nullptr;
   }
 
-  if (source_) {
-    gst_object_unref(GST_OBJECT(source_));
-    source_ = nullptr;
-  }
-
   if (panorama_) {
     gst_element_set_state(audiobin_, GST_STATE_NULL);
 
@@ -805,7 +787,7 @@ void AudioPlayer::Dispose() {
     gst_bin_remove(GST_BIN(audiobin_), audiosink_);
     gst_bin_remove(GST_BIN(audiobin_), panorama_);
 
-    // audiobin gets unreferenced (2x) via playbin
+    // audiobin gets unreferenced (2x) via playbin.
     panorama_ = nullptr;
   }
 
