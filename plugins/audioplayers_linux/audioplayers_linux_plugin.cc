@@ -16,11 +16,11 @@
 
 #include "audioplayers_linux_plugin.h"
 
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
-#include <vector>
 
-#include <flutter/basic_message_channel.h>
 #include <flutter/plugin_registrar.h>
 
 #include "messages.h"
@@ -28,7 +28,11 @@
 
 namespace audioplayers_linux_plugin {
 
+// Method calls dispatch on the Flutter platform thread; bus-watch / idle
+// callbacks (DisposePlayer indirectly) run on the GLib main-loop thread.
+// All access to audioPlayers_ goes through this mutex.
 static std::map<std::string, std::unique_ptr<AudioPlayer>> audioPlayers_;
+static std::mutex audioPlayers_mutex_;
 
 // static
 void AudioplayersLinuxPlugin::RegisterWithRegistrar(
@@ -36,15 +40,19 @@ void AudioplayersLinuxPlugin::RegisterWithRegistrar(
   auto plugin =
       std::make_unique<AudioplayersLinuxPlugin>(registrar->messenger());
 
-  AudioPlayersApi::SetUp(registrar->messenger(), plugin.get());
-  AudioPlayersGlobalApi::SetUp(registrar->messenger(), plugin.get());
+  SetupMethodChannel(registrar->messenger());
+  SetupGlobalMethodChannel(registrar->messenger());
+  SetupGlobalEventChannel(registrar->messenger());
 
   registrar->AddPlugin(std::move(plugin));
 }
 
 AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(BinaryMessenger* messenger)
     : messenger_(messenger) {
-  audioPlayers_.clear();
+  {
+    std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
+    audioPlayers_.clear();
+  }
 
   // GStreamer lib only needs to be initialized once.  Calling it multiple times
   // is fine.
@@ -57,6 +65,7 @@ AudioplayersLinuxPlugin::AudioplayersLinuxPlugin(BinaryMessenger* messenger)
 AudioplayersLinuxPlugin::~AudioplayersLinuxPlugin() = default;
 
 AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
+  std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
   const auto searchPlayer = audioPlayers_.find(playerId);
   if (searchPlayer == audioPlayers_.end()) {
     return nullptr;
@@ -64,112 +73,37 @@ AudioPlayer* AudioplayersLinuxPlugin::GetPlayer(const std::string& playerId) {
   return searchPlayer->second.get();
 }
 
-void AudioplayersLinuxPlugin::Create(
-    const std::string& player_id,
-    const std::function<void(std::optional<FlutterError> reply)> result) {
-  if (const auto searchPlayer = audioPlayers_.find(player_id);
-      searchPlayer == audioPlayers_.end()) {
-    std::string event_channel = "xyz.luan/audioplayers/events/" + player_id;
-    auto player =
-        std::make_unique<AudioPlayer>(std::move(event_channel), messenger_);
-    audioPlayers_.insert(std::make_pair(player_id, std::move(player)));
+void AudioplayersLinuxPlugin::DisposePlayer(const std::string& playerId) {
+  // Move the player out of the map under the lock, then drop the lock before
+  // calling Dispose — Dispose can take a few seconds (GStreamer state-change
+  // wait) and we don't want to block other method calls in the meantime.
+  std::unique_ptr<AudioPlayer> player;
+  {
+    std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
+    const auto it = audioPlayers_.find(playerId);
+    if (it == audioPlayers_.end()) {
+      return;
+    }
+    player = std::move(it->second);
+    audioPlayers_.erase(it);
   }
-  result(std::nullopt);
+  player->Dispose();
 }
 
-void AudioplayersLinuxPlugin::Dispose(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::GetCurrentPosition(
-    const std::string& /* player_id */,
-    std::function<void(ErrorOr<std::optional<int64_t>> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::GetDuration(
-    const std::string& /* player_id */,
-    std::function<void(ErrorOr<std::optional<int64_t>> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::Pause(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::Release(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::Resume(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::Seek(
-    const std::string& /* player_id */,
-    int64_t /* position */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetBalance(
-    const std::string& /* player_id */,
-    double /* balance */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetPlayerMode(
-    const std::string& /* player_id */,
-    const std::string& /* player_mode */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetPlaybackRate(
-    const std::string& /* player_id */,
-    double /* playback_rate */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetReleaseMode(
-    const std::string& /* player_id */,
-    const std::string& /* release_mode */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetSourceBytes(
-    const std::string& /* player_id */,
-    const std::vector<uint8_t>& /* bytes */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetSourceUrl(
-    const std::string& /* player_id */,
-    const std::string& /* url */,
-    bool /* is_local */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetVolume(
-    const std::string& /* player_id */,
-    double /* volume */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::Stop(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::EmitLog(
-    const std::string& /* player_id */,
-    const std::string& /* message */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::EmitError(
-    const std::string& /* player_id */,
-    const std::string& /* code */,
-    const std::string& /* message */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::SetAudioContextGlobal(
-    const std::string& /* player_id */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::EmitLogGlobal(
-    const std::string& /* player_id */,
-    const std::string& /* message */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
-
-void AudioplayersLinuxPlugin::EmitErrorGlobal(
-    const std::string& /* player_id */,
-    const std::string& /* message */,
-    const std::string& /* code */,
-    std::function<void(std::optional<FlutterError> reply)> /* result */) {}
+AudioPlayer* AudioplayersLinuxPlugin::CreatePlayer(
+    const std::string& playerId,
+    flutter::BinaryMessenger* messenger) {
+  std::lock_guard<std::mutex> lock(audioPlayers_mutex_);
+  if (const auto existing = audioPlayers_.find(playerId);
+      existing != audioPlayers_.end()) {
+    return existing->second.get();
+  }
+  std::string event_channel = "xyz.luan/audioplayers/events/" + playerId;
+  auto player =
+      std::make_unique<AudioPlayer>(std::move(event_channel), messenger);
+  auto* raw = player.get();
+  audioPlayers_.insert(std::make_pair(playerId, std::move(player)));
+  return raw;
+}
 
 }  // namespace audioplayers_linux_plugin
