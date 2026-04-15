@@ -1,5 +1,5 @@
 #
-# Copyright 2021-2024 Toyota Connected North America
+# Copyright 2021-2026 Toyota Connected North America
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,10 @@
 # limitations under the License.
 #
 
-pkg_check_modules(WAYLAND_EGL REQUIRED IMPORTED_TARGET wayland-egl)
+# The plugin uses libnav_render's TextureRender API to render into an FBO
+# using the engine's GL context — no per-plugin EGL context, no Wayland
+# subsurface. The compositor composites the resulting GL_TEXTURE_2D onto
+# the scene at the layer rect.
 
 add_library(plugin_nav_render_view STATIC
         nav_render_view_plugin_c_api.cc
@@ -28,6 +31,5 @@ target_include_directories(plugin_nav_render_view PRIVATE include ${PROJECT_BINA
 target_link_libraries(plugin_nav_render_view PUBLIC
         flutter
         platform_homescreen
-        PkgConfig::WAYLAND_EGL
-        EGL
+        GLESv2
 )
