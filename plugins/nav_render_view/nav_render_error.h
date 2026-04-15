@@ -52,7 +52,7 @@ class ErrorOr {
     return std::holds_alternative<FlutterError>(v_);
   }
 
-  const T& value() const { return std::get<T>(v_); };
+  [[nodiscard]] const T& value() const { return std::get<T>(v_); };
 
   [[nodiscard]] const FlutterError& error() const {
     return std::get<FlutterError>(v_);

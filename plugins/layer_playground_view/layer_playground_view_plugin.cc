@@ -36,14 +36,14 @@ void LayerPlaygroundViewPlugin::RegisterWithRegistrar(
     double width,
     double height,
     const std::vector<uint8_t>& params,
-    std::string assetDirectory,
+    const std::string& assetDirectory,
     FlutterDesktopEngineRef engine,
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
     void* platform_view_context) {
   auto plugin = std::make_unique<LayerPlaygroundViewPlugin>(
       id, std::move(viewType), direction, top, left, width, height, params,
-      std::move(assetDirectory), engine, addListener, removeListener,
+      assetDirectory, engine, addListener, removeListener,
       platform_view_context);
   registrar->AddPlugin(std::move(plugin));
 }
@@ -57,7 +57,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     double width,
     double height,
     const std::vector<uint8_t>& /* params */,
-    std::string /* assetDirectory */,
+    const std::string& /* assetDirectory */,
     FlutterDesktopEngineState* state,
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
@@ -83,12 +83,18 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
   // fires — the engine's context isn't current here on the platform thread.
   if (state && state->view_controller && state->view_controller->view) {
     state->view_controller->view->RegisterCompositorSurface(
-        id_,
-        std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
+        id_, std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
           // Aliasing deleter: the plugin's lifetime is owned by the
           // PluginRegistrar, not by this shared_ptr. The compositor's
           // copy is dropped on UnregisterCompositorSurface.
         }));
+    SPDLOG_TRACE("[pv-trace] LayerPlaygroundView registered: id={} size={}x{}",
+                 id_, pending_width_.load(), pending_height_.load());
+  } else {
+    SPDLOG_TRACE(
+        "[pv-trace] LayerPlaygroundView could NOT register (state/view null): "
+        "id={}",
+        id_);
   }
 #else
   (void)state;
@@ -142,7 +148,8 @@ void LayerPlaygroundViewPlugin::on_touch(int32_t /* action */,
                                          const double* /* point_data */,
                                          void* /* data */) {}
 
-void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */, void* /* data */) {
+void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */,
+                                           void* /* data */) {
   // Compositor-owned shared_ptr drops via PlatformViewsHandler's
   // safety-net UnregisterCompositorSurface call. GL state is leaked
   // intentionally — destroying GL handles requires the engine's context
@@ -189,13 +196,42 @@ GLuint LoadShader(const GLchar* src, GLenum type) {
   return shader;
 }
 
+// Mirrors the simple_box_plugin Cairo pattern: a diagonal 3-stop gradient
+// (deep purple → warm coral → peach), a thin orange border, and a faint
+// 20-pixel white grid. Label text from the GTK variant is omitted — GLES2
+// font rendering would require a glyph atlas we don't want to pull in.
 constexpr GLchar kVertSrc[] =
-    "attribute vec4 vPosition;\n"
-    "void main() { gl_Position = vPosition; }\n";
+    "attribute vec2 aPosition;\n"
+    "varying vec2 vUv;\n"
+    "void main() {\n"
+    "  vUv = aPosition * 0.5 + 0.5;\n"
+    "  gl_Position = vec4(aPosition, 0.0, 1.0);\n"
+    "}\n";
 
 constexpr GLchar kFragSrc[] =
     "precision mediump float;\n"
-    "void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }\n";
+    "uniform vec2 uResolution;\n"
+    "varying vec2 vUv;\n"
+    "vec3 gradient(float t) {\n"
+    "  vec3 c0 = vec3(0.227, 0.110, 0.443);\n"  // #3A1C71
+    "  vec3 c1 = vec3(0.843, 0.427, 0.467);\n"  // #D76D77
+    "  vec3 c2 = vec3(1.000, 0.686, 0.482);\n"  // #FFAF7B
+    "  return t < 0.5 ? mix(c0, c1, t * 2.0) : mix(c1, c2, (t - 0.5) * 2.0);\n"
+    "}\n"
+    "void main() {\n"
+    "  vec2 px = vUv * uResolution;\n"
+    "  float t = clamp((vUv.x + vUv.y) * 0.5, 0.0, 1.0);\n"
+    "  vec3 color = gradient(t);\n"
+    "  vec2 d = min(px, uResolution - px);\n"
+    "  float edge = min(d.x, d.y);\n"
+    "  if (edge < 2.0) {\n"
+    "    color = mix(color, vec3(1.0, 0.65, 0.0), 0.9);\n"
+    "  }\n"
+    "  vec2 g = fract(px / 20.0) * 20.0;\n"
+    "  float grid = step(g.x, 1.0) + step(g.y, 1.0);\n"
+    "  color = mix(color, vec3(1.0), 0.12 * clamp(grid, 0.0, 1.0));\n"
+    "  gl_FragColor = vec4(color, 1.0);\n"
+    "}\n";
 
 }  // namespace
 
@@ -232,8 +268,7 @@ void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          color_texture_, 0);
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error(
-        "LayerPlaygroundViewPlugin: FBO incomplete at {}x{}", w, h);
+    spdlog::error("LayerPlaygroundViewPlugin: FBO incomplete at {}x{}", w, h);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
@@ -244,7 +279,7 @@ void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
     program_ = glCreateProgram();
     glAttachShader(program_, vs);
     glAttachShader(program_, fs);
-    glBindAttribLocation(program_, 0, "vPosition");
+    glBindAttribLocation(program_, 0, "aPosition");
     glLinkProgram(program_);
     glDeleteShader(vs);
     glDeleteShader(fs);
@@ -260,10 +295,26 @@ void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
       spdlog::error("LayerPlaygroundViewPlugin: program link failed: {}", log);
       glDeleteProgram(program_);
       program_ = 0;
+    } else {
+      u_resolution_loc_ = glGetUniformLocation(program_, "uResolution");
+      a_position_loc_ = glGetAttribLocation(program_, "aPosition");
     }
   }
 
-  gl_initialized_ = (program_ != 0);
+  // A VBO is required: under GLES3 the engine has a VAO bound, and
+  // client-side vertex arrays are invalid unless the default VAO (0) is
+  // current. A VBO works regardless of which VAO is bound.
+  if (!vbo_ && program_) {
+    static constexpr GLfloat kVerts[] = {
+        -1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f,
+    };
+    glGenBuffers(1, &vbo_);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kVerts), kVerts, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+  }
+
+  gl_initialized_ = (program_ != 0 && vbo_ != 0);
 }
 
 void LayerPlaygroundViewPlugin::DestroyGlState() {
@@ -276,6 +327,10 @@ void LayerPlaygroundViewPlugin::DestroyGlState() {
     glDeleteFramebuffers(1, &framebuffer_);
     framebuffer_ = 0;
   }
+  if (vbo_) {
+    glDeleteBuffers(1, &vbo_);
+    vbo_ = 0;
+  }
   if (program_) {
     glDeleteProgram(program_);
     program_ = 0;
@@ -284,31 +339,73 @@ void LayerPlaygroundViewPlugin::DestroyGlState() {
 }
 
 void LayerPlaygroundViewPlugin::DrawFrame() const {
-  static constexpr GLfloat verts[] = {0.0f,  0.5f, 0.0f, -0.5f, -0.5f,
-                                      0.0f,  0.5f, -0.5f, 0.0f};
-
+  // Flutter's Skia backend leaves assorted GL state on: a bound VAO, depth
+  // test, scissor test, blend, colour/depth masks. Reset everything we care
+  // about so the draw lands in the FBO as expected.
   glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
   glViewport(0, 0, tex_width_, tex_height_);
+
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glDisable(GL_STENCIL_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDepthMask(GL_FALSE);
+
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
   glUseProgram(program_);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, verts);
-  glEnableVertexAttribArray(0);
-  glDrawArrays(GL_TRIANGLES, 0, 3);
-  glDisableVertexAttribArray(0);
+  if (u_resolution_loc_ >= 0) {
+    glUniform2f(u_resolution_loc_, static_cast<GLfloat>(tex_width_),
+                static_cast<GLfloat>(tex_height_));
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+  const GLuint loc =
+      a_position_loc_ >= 0 ? static_cast<GLuint>(a_position_loc_) : 0u;
+  glVertexAttribPointer(loc, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+  glEnableVertexAttribArray(loc);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glDisableVertexAttribArray(loc);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
   glUseProgram(0);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
-  // Apply any pending resize from the platform thread, then render.
-  const int32_t target_w = pending_width_.load();
-  const int32_t target_h = pending_height_.load();
+  // The engine supplies the composed layer size every frame in layer->size;
+  // trust that over on_resize, which the embedder may never deliver while the
+  // widget is laid out (the platform-views `create` message carries 1x1
+  // placeholders). Fall back to pending_*/ atomic if the layer is absent.
+  int32_t target_w = pending_width_.load();
+  int32_t target_h = pending_height_.load();
+  if (layer && layer->size.width > 0 && layer->size.height > 0) {
+    target_w = static_cast<int32_t>(layer->size.width);
+    target_h = static_cast<int32_t>(layer->size.height);
+  }
+  static thread_local int32_t last_w = 0;
+  static thread_local int32_t last_h = 0;
+  static thread_local bool first_fire = true;
+  const bool size_changed = (target_w != last_w) || (target_h != last_h);
+  if (first_fire || size_changed) {
+    SPDLOG_TRACE(
+        "[pv-trace] LayerPlaygroundView::OnPresent id={} target={}x{} "
+        "tex={}x{} gl_init={} (first={}, size_changed={})",
+        id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
+        first_fire, size_changed);
+    first_fire = false;
+    last_w = target_w;
+    last_h = target_h;
+  }
   if (target_w <= 0 || target_h <= 0) {
     return true;
   }
   EnsureGlState(target_w, target_h);
   if (!gl_initialized_) {
+    SPDLOG_TRACE(
+        "[pv-trace] LayerPlaygroundView::OnPresent id={} gl NOT initialised "
+        "(program link failed?); returning false",
+        id_);
     return false;
   }
   DrawFrame();

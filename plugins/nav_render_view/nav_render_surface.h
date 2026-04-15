@@ -49,7 +49,8 @@ namespace nav_render_view_plugin {
 class NavRenderSurface final : public flutter::Plugin,
                                public PlatformView
 #if BUILD_COMPOSITOR
-    , public ICompositorSurface
+    ,
+                               public ICompositorSurface
 #endif
 {
  public:

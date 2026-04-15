@@ -14,6 +14,8 @@
 # limitations under the License.
 #
 
+include_guard()
+
 # The plugin uses libnav_render's TextureRender API to render into an FBO
 # using the engine's GL context — no per-plugin EGL context, no Wayland
 # subsurface. The compositor composites the resulting GL_TEXTURE_2D onto
@@ -26,7 +28,10 @@ add_library(plugin_nav_render_view STATIC
         libnav_render.cc
 )
 
-target_include_directories(plugin_nav_render_view PRIVATE include ${PROJECT_BINARY_DIR})
+target_include_directories(plugin_nav_render_view PUBLIC
+        .
+        include
+)
 
 target_link_libraries(plugin_nav_render_view PUBLIC
         flutter

@@ -135,10 +135,16 @@ NavRenderSurface::NavRenderSurface(int32_t id,
 
   if (state && state->view_controller && state->view_controller->view) {
     state->view_controller->view->RegisterCompositorSurface(
-        id_,
-        std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
+        id_, std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
           // Aliasing deleter — PluginRegistrar owns the plugin.
         }));
+    SPDLOG_TRACE("[pv-trace] NavRenderSurface registered: id={} size={}x{}",
+                 id_, pending_width_.load(), pending_height_.load());
+  } else {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface could NOT register (state/view null): "
+        "id={}",
+        id_);
   }
 #else
   (void)state;
@@ -272,18 +278,44 @@ void NavRenderSurface::EnsureGlState(int32_t w, int32_t h) {
   gl_initialized_ = true;
 }
 
-bool NavRenderSurface::OnPresent(const FlutterLayer* /*layer*/) {
+bool NavRenderSurface::OnPresent(const FlutterLayer* layer) {
   if (init_failed_) {
     return false;
   }
-  const int32_t w = pending_width_.load();
-  const int32_t h = pending_height_.load();
-  if (w <= 0 || h <= 0) {
+  // The engine supplies the composed layer size every frame in layer->size;
+  // trust that over on_resize, which the embedder may never deliver while the
+  // widget is laid out (the platform-views `create` message carries 1x1
+  // placeholders). Fall back to pending_*/ atomic if the layer is absent.
+  int32_t target_w = pending_width_.load();
+  int32_t target_h = pending_height_.load();
+  if (layer && layer->size.width > 0 && layer->size.height > 0) {
+    target_w = static_cast<int32_t>(layer->size.width);
+    target_h = static_cast<int32_t>(layer->size.height);
+  }
+  static thread_local int32_t last_w = 0;
+  static thread_local int32_t last_h = 0;
+  static thread_local bool first_fire = true;
+  const bool size_changed = (target_w != last_w) || (target_h != last_h);
+  if (first_fire || size_changed) {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface::OnPresent id={} target={}x{} "
+        "tex={}x{} gl_init={} (first={}, size_changed={})",
+        id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
+        first_fire, size_changed);
+    first_fire = false;
+    last_w = target_w;
+    last_h = target_h;
+  }
+  if (target_w <= 0 || target_h <= 0) {
     return true;
   }
 
-  EnsureGlState(w, h);
+  EnsureGlState(target_w, target_h);
   if (!gl_initialized_ || !context_) {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface::OnPresent id={} gl NOT initialised "
+        "(context/FBO init failed?); returning false",
+        id_);
     return false;
   }
 

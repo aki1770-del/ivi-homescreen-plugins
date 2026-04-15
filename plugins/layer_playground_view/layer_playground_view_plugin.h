@@ -39,16 +39,19 @@ namespace plugin_layer_playground_view {
 /**
  * Layer playground demo platform view.
  *
- * Renders a single colored triangle into an FBO-backed @c GL_TEXTURE_2D
- * which the compositor composites into the scene at the layer's
- * @c offset / @c size each frame. No Wayland subsurface, no per-plugin
- * EGL context — all GL state is created lazily in @c OnPresent on the
- * engine's rasterizer thread using the engine's GL context.
+ * Renders a diagonal 3-stop gradient with a thin border and a faint grid
+ * into an FBO-backed @c GL_TEXTURE_2D which the compositor composites into
+ * the scene at the layer's @c offset / @c size each frame. The visual
+ * design mirrors the GTK/Cairo @c simple_box companion plugin in the
+ * layer_playground app (minus the text label). No Wayland subsurface, no
+ * per-plugin EGL context — all GL state is created lazily in @c OnPresent
+ * on the engine's rasterizer thread using the engine's GL context.
  */
 class LayerPlaygroundViewPlugin : public flutter::Plugin,
                                   public PlatformView
 #if BUILD_COMPOSITOR
-    , public ICompositorSurface
+    ,
+                                  public ICompositorSurface
 #endif
 {
  public:
@@ -61,7 +64,7 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
                                     double width,
                                     double height,
                                     const std::vector<uint8_t>& params,
-                                    std::string assetDirectory,
+                                    const std::string& assetDirectory,
                                     FlutterDesktopEngineRef engine,
                                     PlatformViewAddListener addListener,
                                     PlatformViewRemoveListener removeListener,
@@ -75,7 +78,7 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
                             double width,
                             double height,
                             const std::vector<uint8_t>& params,
-                            std::string assetDirectory,
+                            const std::string& assetDirectory,
                             FlutterDesktopEngineState* state,
                             PlatformViewAddListener addListener,
                             PlatformViewRemoveListener removeListener,
@@ -125,6 +128,9 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
   GLuint framebuffer_{0};
   GLuint color_texture_{0};
   GLuint program_{0};
+  GLuint vbo_{0};
+  GLint u_resolution_loc_{-1};
+  GLint a_position_loc_{-1};
   int32_t tex_width_{0};
   int32_t tex_height_{0};
   // Pending size from on_resize / OnResize, applied next OnPresent.
