@@ -19,9 +19,9 @@
 #include <flutter/standard_message_codec.h>
 
 #include "plugins/common/common.h"
+#include "view/flutter_view.h"
 
 class FlutterView;
-
 class Display;
 
 namespace plugin_layer_playground_view {
@@ -45,7 +45,6 @@ void LayerPlaygroundViewPlugin::RegisterWithRegistrar(
       id, std::move(viewType), direction, top, left, width, height, params,
       std::move(assetDirectory), engine, addListener, removeListener,
       platform_view_context);
-
   registrar->AddPlugin(std::move(plugin));
 }
 
@@ -58,7 +57,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
     double width,
     double height,
     const std::vector<uint8_t>& /* params */,
-    std::string assetDirectory,
+    std::string /* assetDirectory */,
     FlutterDesktopEngineState* state,
     PlatformViewAddListener addListener,
     PlatformViewRemoveListener removeListener,
@@ -72,36 +71,28 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
                    height),
       id_(id),
       platformViewsContext_(platform_view_context),
-      removeListener_(removeListener),
-      flutterAssetsPath_(std::move(assetDirectory)),
-      callback_(nullptr) {
+      removeListener_(removeListener) {
   SPDLOG_TRACE("++LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
 
-  /* Setup Wayland subsurface */
-  auto flutter_view = state->view_controller->view;
-  display_ = flutter_view->GetDisplay()->GetDisplay();
-  egl_display_ = eglGetDisplay(display_);
-  assert(egl_display_);
+#if BUILD_COMPOSITOR
+  pending_width_ = static_cast<int32_t>(width);
+  pending_height_ = static_cast<int32_t>(height);
 
-  surface_ =
-      wl_compositor_create_surface(flutter_view->GetDisplay()->GetCompositor());
-  egl_window_ = wl_egl_window_create(surface_, width_, height_);
-  assert(egl_window_);
-
-  InitializeEGL();
-  egl_surface_ =
-      eglCreateWindowSurface(egl_display_, egl_config_, egl_window_, nullptr);
-
-  // Subsurface
-  parent_surface_ = flutter_view->GetWindow()->GetBaseSurface();
-  subsurface_ = wl_subcompositor_get_subsurface(
-      flutter_view->GetDisplay()->GetSubCompositor(), surface_,
-      parent_surface_);
-
-  wl_subsurface_set_desync(subsurface_);
-
-  eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
-  InitializeScene();
+  // Register so PresentLayers routes layer dispatch to OnPresent. GL state
+  // is allocated lazily on the rasterizer thread the first time OnPresent
+  // fires — the engine's context isn't current here on the platform thread.
+  if (state && state->view_controller && state->view_controller->view) {
+    state->view_controller->view->RegisterCompositorSurface(
+        id_,
+        std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
+          // Aliasing deleter: the plugin's lifetime is owned by the
+          // PluginRegistrar, not by this shared_ptr. The compositor's
+          // copy is dropped on UnregisterCompositorSurface.
+        }));
+  }
+#else
+  (void)state;
+#endif
 
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
   SPDLOG_TRACE("--LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
@@ -114,16 +105,20 @@ LayerPlaygroundViewPlugin::~LayerPlaygroundViewPlugin() {
 void LayerPlaygroundViewPlugin::on_resize(double width,
                                           double height,
                                           void* data) {
-  if (const auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
+  if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
     plugin->width_ = static_cast<int32_t>(width);
     plugin->height_ = static_cast<int32_t>(height);
+#if BUILD_COMPOSITOR
+    plugin->pending_width_ = static_cast<int32_t>(width);
+    plugin->pending_height_ = static_cast<int32_t>(height);
+#endif
     SPDLOG_TRACE("Resize: {} {}", width, height);
   }
 }
 
 void LayerPlaygroundViewPlugin::on_set_direction(const int32_t direction,
                                                  void* data) {
-  if (const auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
+  if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
     plugin->direction_ = direction;
     SPDLOG_TRACE("SetDirection: {}", plugin->direction_);
   }
@@ -132,17 +127,12 @@ void LayerPlaygroundViewPlugin::on_set_direction(const int32_t direction,
 void LayerPlaygroundViewPlugin::on_set_offset(const double left,
                                               const double top,
                                               void* data) {
-  if (const auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
+  // Offset positioning is handled by the compositor sequencer in
+  // BUILD_COMPOSITOR mode; we just track the values for diagnostics.
+  if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
     plugin->left_ = static_cast<int32_t>(left);
     plugin->top_ = static_cast<int32_t>(top);
-    if (plugin->subsurface_) {
-      SPDLOG_DEBUG("SetOffset: left: {}, top: {}", plugin->left_, plugin->top_);
-      wl_subsurface_set_position(plugin->subsurface_, plugin->left_,
-                                 plugin->top_);
-      if (!plugin->callback_) {
-        on_frame(plugin, plugin->callback_, 0);
-      }
-    }
+    SPDLOG_TRACE("SetOffset: {} {}", left, top);
   }
 }
 
@@ -152,27 +142,13 @@ void LayerPlaygroundViewPlugin::on_touch(int32_t /* action */,
                                          const double* /* point_data */,
                                          void* /* data */) {}
 
-void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */, void* data) {
-  const auto plugin = static_cast<LayerPlaygroundViewPlugin*>(data);
-  if (plugin->callback_) {
-    wl_callback_destroy(plugin->callback_);
-    plugin->callback_ = nullptr;
-  }
-
-  if (plugin->subsurface_) {
-    wl_subsurface_destroy(plugin->subsurface_);
-    plugin->subsurface_ = nullptr;
-  }
-
-  if (plugin->egl_window_) {
-    wl_egl_window_destroy(plugin->egl_window_);
-    plugin->egl_window_ = nullptr;
-  }
-
-  if (plugin->surface_) {
-    wl_surface_destroy(plugin->surface_);
-    plugin->surface_ = nullptr;
-  }
+void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */, void* /* data */) {
+  // Compositor-owned shared_ptr drops via PlatformViewsHandler's
+  // safety-net UnregisterCompositorSurface call. GL state is leaked
+  // intentionally — destroying GL handles requires the engine's context
+  // to be current on the rasterizer thread, and we have no way to
+  // marshal that from the platform-thread dispose call. The engine's
+  // context outlives the plugin and reclaims the resources at shutdown.
 }
 
 const platform_view_listener
@@ -186,186 +162,165 @@ const platform_view_listener
         .reject_gesture = nullptr,
 };
 
-void LayerPlaygroundViewPlugin::on_frame(void* data,
-                                         wl_callback* callback,
-                                         const uint32_t time) {
-  const auto obj = static_cast<LayerPlaygroundViewPlugin*>(data);
+#if BUILD_COMPOSITOR
 
-  obj->callback_ = nullptr;
+namespace {
 
-  if (callback) {
-    wl_callback_destroy(callback);
-  }
-
-  obj->DrawFrame(time);
-
-  // Z-Order
-  // wl_subsurface_place_above(obj->subsurface_, obj->parent_surface_);
-  wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
-
-  obj->callback_ = wl_surface_frame(obj->surface_);
-  wl_callback_add_listener(obj->callback_,
-                           &LayerPlaygroundViewPlugin::frame_listener, data);
-
-  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
-
-  wl_surface_commit(obj->surface_);
-}
-
-const wl_callback_listener LayerPlaygroundViewPlugin::frame_listener = {
-    .done = on_frame};
-
-GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
-  // Create the shader object
+GLuint LoadShader(const GLchar* src, GLenum type) {
   const GLuint shader = glCreateShader(type);
-  if (shader == 0)
+  if (!shader) {
     return 0;
-  glShaderSource(shader, 1, &shaderSrc, nullptr);
+  }
+  glShaderSource(shader, 1, &src, nullptr);
   glCompileShader(shader);
-  GLint compiled;
+  GLint compiled = 0;
   glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
   if (!compiled) {
-    GLint infoLen = 0;
-    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLen);
-    if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(
-          malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
-      glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
-      spdlog::error("Error compiling shader:\n{}\n", infoLog);
-      free(infoLog);
+    GLint len = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &len);
+    std::string log(static_cast<size_t>(len > 0 ? len : 0), '\0');
+    if (len > 0) {
+      glGetShaderInfoLog(shader, len, nullptr, log.data());
     }
+    spdlog::error("LayerPlaygroundViewPlugin: shader compile failed: {}", log);
     glDeleteShader(shader);
     return 0;
   }
   return shader;
 }
 
-void LayerPlaygroundViewPlugin::InitializeEGL() {
-  EGLint major, minor;
-  EGLBoolean ret = eglInitialize(egl_display_, &major, &minor);
-  assert(ret == EGL_TRUE);
-  SPDLOG_DEBUG("EGL {}.{}", major, minor);
+constexpr GLchar kVertSrc[] =
+    "attribute vec4 vPosition;\n"
+    "void main() { gl_Position = vPosition; }\n";
 
-  ret = eglBindAPI(EGL_OPENGL_ES_API);
-  assert(ret == EGL_TRUE);
+constexpr GLchar kFragSrc[] =
+    "precision mediump float;\n"
+    "void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }\n";
 
-  if (std::vector<EGLConfig> configs;
-      !GetConfig(kEglConfigAttribs.data(), configs)) {
-    spdlog::warn(
-        "[LayerPlaygroundViewPlugin] Could not use default EGLConfig trying "
-        "with fallback.");
-    // try with the fallback one
-    if (!GetConfig(kEglConfigAttribsFallBack.data(), configs)) {
-      spdlog::critical(
-          "[LayerPlaygroundViewPlugin] did not find config with buffer size {}",
-          buffer_size_);
-      abort();
-    }
-  }
+}  // namespace
 
-  egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT,
-                                  kEglContextAttribs.data());
-  assert(egl_context_);
-  SPDLOG_TRACE("Context={}", egl_context_);
-}
-
-bool LayerPlaygroundViewPlugin::GetConfig(const EGLint* attrib_list,
-                                          std::vector<EGLConfig>& configs) {
-  EGLint n = 0;
-  auto ret = eglChooseConfig(egl_display_, attrib_list, nullptr, 0, &n);
-  if (!ret || n < 1) {
-    spdlog::error("Failed to choose EGL config");
-    return false;
-  }
-
-  configs.resize(static_cast<size_t>(n));
-  ret = eglChooseConfig(egl_display_, attrib_list, configs.data(),
-                        static_cast<EGLint>(configs.size()), &n);
-  if (!ret || n < 1) {
-    spdlog::error("Failed to choose EGL config");
-    return false;
-  }
-
-  EGLint size;
-  for (EGLint i = 0; i < n; i++) {
-    eglGetConfigAttrib(egl_display_, configs[static_cast<size_t>(i)],
-                       EGL_BUFFER_SIZE, &size);
-    SPDLOG_DEBUG("Buffer size for config {} is {}", i, size);
-    if (buffer_size_ <= size) {
-      std::copy(&configs[static_cast<size_t>(i)],
-                &configs[static_cast<size_t>(i)] + 1, &egl_config_);
-      return true;
-    }
-  }
-  return false;
-}
-
-void LayerPlaygroundViewPlugin::InitializeScene() {
-  constexpr GLchar vShaderStr[] =
-      "attribute vec4 vPosition; \n"
-      "void main() \n"
-      "{ \n"
-      " gl_Position = vPosition; \n"
-      "} \n";
-  constexpr GLchar fShaderStr[] =
-      "precision mediump float; \n"
-      "void main() \n"
-      "{ \n"
-      " gl_FragColor = vec4(1.5, 0.0, 0.0, 1.0); \n"
-      "} \n";
-
-  const GLuint vertexShader = LoadShader(vShaderStr, GL_VERTEX_SHADER);
-  const GLuint fragmentShader = LoadShader(fShaderStr, GL_FRAGMENT_SHADER);
-
-  const GLuint programObject = glCreateProgram();
-  if (programObject == 0)
-    return;
-
-  glAttachShader(programObject, vertexShader);
-  glAttachShader(programObject, fragmentShader);
-
-  glBindAttribLocation(programObject, 0, "vPosition");
-
-  glLinkProgram(programObject);
-
-  GLint linked;
-  glGetProgramiv(programObject, GL_LINK_STATUS, &linked);
-  if (!linked) {
-    GLint infoLen = 0;
-    glGetProgramiv(programObject, GL_INFO_LOG_LENGTH, &infoLen);
-    if (infoLen > 1) {
-      auto* infoLog = static_cast<GLchar*>(
-          malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
-      glGetProgramInfoLog(programObject, infoLen, nullptr, infoLog);
-      spdlog::error("Error linking program:\n{}\n", infoLog);
-      free(infoLog);
-    }
-    glDeleteProgram(programObject);
+void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
+  if (gl_initialized_ && w == tex_width_ && h == tex_height_) {
     return;
   }
 
-  programObject_ = programObject;
+  // Re-create the texture / FBO on size change. Program is reused across
+  // resizes.
+  if (color_texture_) {
+    glDeleteTextures(1, &color_texture_);
+    color_texture_ = 0;
+  }
+  if (framebuffer_) {
+    glDeleteFramebuffers(1, &framebuffer_);
+    framebuffer_ = 0;
+  }
+
+  tex_width_ = w;
+  tex_height_ = h;
+
+  glGenTextures(1, &color_texture_);
+  glBindTexture(GL_TEXTURE_2D, color_texture_);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex_width_, tex_height_, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glGenFramebuffers(1, &framebuffer_);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         color_texture_, 0);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    spdlog::error(
+        "LayerPlaygroundViewPlugin: FBO incomplete at {}x{}", w, h);
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  if (!program_) {
+    const GLuint vs = LoadShader(kVertSrc, GL_VERTEX_SHADER);
+    const GLuint fs = LoadShader(kFragSrc, GL_FRAGMENT_SHADER);
+    program_ = glCreateProgram();
+    glAttachShader(program_, vs);
+    glAttachShader(program_, fs);
+    glBindAttribLocation(program_, 0, "vPosition");
+    glLinkProgram(program_);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint linked = 0;
+    glGetProgramiv(program_, GL_LINK_STATUS, &linked);
+    if (!linked) {
+      GLint len = 0;
+      glGetProgramiv(program_, GL_INFO_LOG_LENGTH, &len);
+      std::string log(static_cast<size_t>(len > 0 ? len : 0), '\0');
+      if (len > 0) {
+        glGetProgramInfoLog(program_, len, nullptr, log.data());
+      }
+      spdlog::error("LayerPlaygroundViewPlugin: program link failed: {}", log);
+      glDeleteProgram(program_);
+      program_ = 0;
+    }
+  }
+
+  gl_initialized_ = (program_ != 0);
+}
+
+void LayerPlaygroundViewPlugin::DestroyGlState() {
+  // Intentionally not called from the platform thread — see on_dispose.
+  if (color_texture_) {
+    glDeleteTextures(1, &color_texture_);
+    color_texture_ = 0;
+  }
+  if (framebuffer_) {
+    glDeleteFramebuffers(1, &framebuffer_);
+    framebuffer_ = 0;
+  }
+  if (program_) {
+    glDeleteProgram(program_);
+    program_ = 0;
+  }
+  gl_initialized_ = false;
+}
+
+void LayerPlaygroundViewPlugin::DrawFrame() const {
+  static constexpr GLfloat verts[] = {0.0f,  0.5f, 0.0f, -0.5f, -0.5f,
+                                      0.0f,  0.5f, -0.5f, 0.0f};
+
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+  glViewport(0, 0, tex_width_, tex_height_);
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-}
-
-void LayerPlaygroundViewPlugin::DrawFrame(uint32_t /* time */) const {
-  static constexpr GLfloat vVertices[] = {0.0f, 0.5f, 0.0f,  -0.5f, -0.5f,
-                                          0.0f, 0.5f, -0.5f, 0.0f};
-
-  if (eglGetCurrentContext() != egl_context_) {
-    eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
-  }
-
-  glViewport(0, 0, width_, height_);
   glClear(GL_COLOR_BUFFER_BIT);
-  glUseProgram(programObject_);
-
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, vVertices);
+  glUseProgram(program_);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, verts);
   glEnableVertexAttribArray(0);
   glDrawArrays(GL_TRIANGLES, 0, 3);
-  eglSwapBuffers(egl_display_, egl_surface_);
-
-  eglMakeCurrent(egl_display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  glDisableVertexAttribArray(0);
+  glUseProgram(0);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+
+bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
+  // Apply any pending resize from the platform thread, then render.
+  const int32_t target_w = pending_width_.load();
+  const int32_t target_h = pending_height_.load();
+  if (target_w <= 0 || target_h <= 0) {
+    return true;
+  }
+  EnsureGlState(target_w, target_h);
+  if (!gl_initialized_) {
+    return false;
+  }
+  DrawFrame();
+  (void)layer;
+  return true;
+}
+
+void LayerPlaygroundViewPlugin::OnResize(int32_t w, int32_t h) {
+  pending_width_ = w;
+  pending_height_ = h;
+}
+
+#endif  // BUILD_COMPOSITOR
 
 }  // namespace plugin_layer_playground_view
