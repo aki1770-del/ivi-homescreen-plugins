@@ -1,3 +1,18 @@
+/*
+ * Copyright 2021-2026 Toyota Connected North America
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "nav_render_surface.h"
 
@@ -8,9 +23,12 @@
 
 #include "libnav_render.h"
 
+#if BUILD_COMPOSITOR
+#include "view/flutter_view.h"
+#endif
+
 namespace nav_render_view_plugin {
 
-// static
 void NavRenderSurface::RegisterWithRegistrar(
     flutter::PluginRegistrar* registrar,
     int32_t id,
@@ -54,50 +72,41 @@ NavRenderSurface::NavRenderSurface(int32_t id,
                    width,
                    height),
       id_(id),
-      view_(state->view_controller->view),
-      width_(static_cast<int>(width)),
-      height_(static_cast<int>(height)),
-      callback_(nullptr),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
       flutterAssetsPath_(std::move(assetDirectory)) {
   SPDLOG_TRACE("++NavRenderSurface::NavRenderSurface");
+
   auto& codec = flutter::StandardMessageCodec::GetInstance();
   const auto decoded = codec.DecodeMessage(params.data(), params.size());
   const auto& creationParams =
       std::get_if<flutter::EncodableMap>(decoded.get());
 
   std::string access_token;
-  std::string module;
-  bool map_flutter_assets{};
   std::string asset_path;
   std::string cache_folder;
   std::string misc_folder;
-
-  for (const auto& [fst, snd] : *creationParams) {
-    if (auto key = std::get<std::string>(fst); key == "access_token") {
-      if (std::holds_alternative<std::string>(snd)) {
+  bool map_flutter_assets{};
+  if (creationParams) {
+    for (const auto& [fst, snd] : *creationParams) {
+      const auto key = std::get<std::string>(fst);
+      if (key == "access_token" && std::holds_alternative<std::string>(snd)) {
         access_token = std::get<std::string>(snd);
-      }
-    } else if (key == "map_flutter_assets") {
-      if (std::holds_alternative<bool>(snd)) {
+      } else if (key == "map_flutter_assets" &&
+                 std::holds_alternative<bool>(snd)) {
         map_flutter_assets = std::get<bool>(snd);
-      }
-    } else if (key == "asset_path") {
-      if (std::holds_alternative<std::string>(snd)) {
+      } else if (key == "asset_path" &&
+                 std::holds_alternative<std::string>(snd)) {
         asset_path = std::get<std::string>(snd);
-      }
-    } else if (key == "cache_folder") {
-      if (std::holds_alternative<std::string>(snd)) {
+      } else if (key == "cache_folder" &&
+                 std::holds_alternative<std::string>(snd)) {
         cache_folder = std::get<std::string>(snd);
-      }
-    } else if (key == "misc_folder") {
-      if (std::holds_alternative<std::string>(snd)) {
+      } else if (key == "misc_folder" &&
+                 std::holds_alternative<std::string>(snd)) {
         misc_folder = std::get<std::string>(snd);
       }
     }
   }
-
   if (map_flutter_assets) {
     asset_path = flutterAssetsPath_;
   }
@@ -106,188 +115,96 @@ NavRenderSurface::NavRenderSurface(int32_t id,
     spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
     return;
   }
-  if (LibNavRender::kExpectedSurfaceApiVersion !=
-      LibNavRender->SurfaceGetInterfaceVersion()) {
-    spdlog::error("[NavRenderViewPlugin] unexpected interface version: {}",
-                  LibNavRender->SurfaceGetInterfaceVersion());
+
+#if BUILD_COMPOSITOR
+  if (LibNavRender::kExpectedTextureApiVersion !=
+      LibNavRender->TextureGetInterfaceVersion()) {
+    spdlog::error(
+        "[NavRenderViewPlugin] unexpected texture API version: {} (need {})",
+        LibNavRender->TextureGetInterfaceVersion(),
+        LibNavRender::kExpectedTextureApiVersion);
     return;
   }
 
-  /// Setup Native Window pointers
-  display_ = view_->GetDisplay()->GetDisplay();
-  auto compositor = view_->GetDisplay()->GetCompositor();
-  surface_ = wl_compositor_create_surface(compositor);
+  access_token_ = std::move(access_token);
+  asset_path_ = std::move(asset_path);
+  cache_folder_ = std::move(cache_folder);
+  misc_folder_ = std::move(misc_folder);
+  pending_width_ = static_cast<int32_t>(width);
+  pending_height_ = static_cast<int32_t>(height);
 
-  egl_display_ = eglGetDisplay(display_);
-  assert(egl_display_);
-  egl_window_ = wl_egl_window_create(surface_, width_, height_);
-  assert(egl_window_);
-
-  native_window_ = {
-      .wl_display = display_,
-      .wl_surface = surface_,
-      .egl_display = egl_display_,
-      .egl_window = egl_window_,
-      .width = static_cast<uint32_t>(width_),
-      .height = static_cast<uint32_t>(height_),
-  };
-
-  context_ = LibNavRender->SurfaceInitialize(
-      access_token.c_str(), static_cast<int>(width), static_cast<int>(height),
-      &native_window_, asset_path.c_str(), cache_folder.c_str(),
-      misc_folder.c_str());
-  assert(context_);
-  SPDLOG_DEBUG("Context: {}", fmt::ptr(context_));
-
-  // Sub Surface
-  auto sub_compositor = view_->GetDisplay()->GetSubCompositor();
-  parent_surface_ = view_->GetWindow()->GetBaseSurface();
-  subsurface_ = wl_subcompositor_get_subsurface(sub_compositor, surface_,
-                                                parent_surface_);
-
-  wl_subsurface_set_desync(subsurface_);
+  if (state && state->view_controller && state->view_controller->view) {
+    state->view_controller->view->RegisterCompositorSurface(
+        id_, std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
+          // Aliasing deleter — PluginRegistrar owns the plugin.
+        }));
+    SPDLOG_TRACE("[pv-trace] NavRenderSurface registered: id={} size={}x{}",
+                 id_, pending_width_.load(), pending_height_.load());
+  } else {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface could NOT register (state/view null): "
+        "id={}",
+        id_);
+  }
+#else
+  (void)state;
+  (void)access_token;
+  (void)asset_path;
+  (void)cache_folder;
+  (void)misc_folder;
+  spdlog::warn(
+      "[NavRenderViewPlugin] BUILD_COMPOSITOR is off; plugin will not "
+      "render. Rebuild with -DBUILD_COMPOSITOR=ON.");
+#endif
 
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
   SPDLOG_TRACE("--NavRenderSurface::NavRenderSurface");
 }
 
 NavRenderSurface::~NavRenderSurface() {
-  SPDLOG_TRACE("++NavRenderSurface::~NavRenderSurface");
-  SPDLOG_TRACE("--NavRenderSurface::~NavRenderSurface");
-}
-
-void NavRenderSurface::on_frame(void* data,
-                                wl_callback* callback,
-                                const uint32_t /* time */) {
-  const auto obj = static_cast<NavRenderSurface*>(data);
-
-  obj->callback_ = nullptr;
-
-  if (callback) {
-    wl_callback_destroy(callback);
-  }
-
-  obj->DrawFrame();
-
-  if (obj->subsurface_ == nullptr)
-    return;
-
-  // Z-Order
-  /// Place below or we miss mouse/touch
-  wl_subsurface_place_below(obj->subsurface_, obj->parent_surface_);
-
-  obj->callback_ = wl_surface_frame(obj->surface_);
-  wl_callback_add_listener(obj->callback_, &NavRenderSurface::frame_listener,
-                           data);
-
-  wl_subsurface_set_position(obj->subsurface_, obj->left_, obj->top_);
-
-  wl_surface_commit(obj->surface_);
-}
-
-const wl_callback_listener NavRenderSurface::frame_listener = {.done =
-                                                                   on_frame};
-
-void NavRenderSurface::Resize(int32_t width, int32_t height) {
-  SPDLOG_TRACE("[NavRenderView] Resize: {} {}", width, height);
-  width_ = width;
-  height_ = height;
-}
-
-void NavRenderSurface::Dispose() {
-  LibNavRender->SurfaceDeInitialize(context_);
-  context_ = nullptr;
-
-  if (callback_) {
-    wl_callback_destroy(callback_);
-    callback_ = nullptr;
-  }
-
-  if (subsurface_) {
-    wl_subsurface_destroy(subsurface_);
-    subsurface_ = nullptr;
-  }
-
-  if (egl_window_) {
-    wl_egl_window_destroy(egl_window_);
-    egl_window_ = nullptr;
-  }
-
-  if (surface_) {
-    wl_surface_destroy(surface_);
-    surface_ = nullptr;
-  }
   removeListener_(platformViewsContext_, id_);
 }
 
-void NavRenderSurface::DrawFrame() {
-  if (!context_)
-    return;
-
-  if (dispose_pending_) {
-    dispose_pending_ = false;
-    Dispose();
-    return;
-  }
-
-  LibNavRender->SurfaceDrawFrame(context_);
-}
-
-void NavRenderSurface::SetOffset(int32_t left, int32_t top) {
-  SPDLOG_DEBUG("[NavRenderSurface] SetOffset: left: {}, top: {}", left, top);
-  wl_subsurface_set_position(subsurface_, left, top);
-  if (!callback_) {
-    on_frame(this, callback_, 0);
-  }
-}
-
 void NavRenderSurface::on_resize(double width, double height, void* data) {
-  SPDLOG_TRACE("[NavRenderSurface] on_resize: {} {}", width, height);
-  const auto plugin = static_cast<NavRenderSurface*>(data);
-  plugin->Resize(static_cast<int32_t>(width), static_cast<int32_t>(height));
+  if (auto* p = static_cast<NavRenderSurface*>(data)) {
+    p->width_ = static_cast<int32_t>(width);
+    p->height_ = static_cast<int32_t>(height);
+#if BUILD_COMPOSITOR
+    p->pending_width_ = static_cast<int32_t>(width);
+    p->pending_height_ = static_cast<int32_t>(height);
+#endif
+    SPDLOG_TRACE("[NavRenderSurface] on_resize: {} {}", width, height);
+  }
 }
 
 void NavRenderSurface::on_set_direction(int32_t direction, void* data) {
-  SPDLOG_TRACE("[NavRenderSurface] on_set_direction: {}", direction);
-  if (!data) {
-    return;
+  if (auto* p = static_cast<NavRenderSurface*>(data)) {
+    p->direction_ = direction;
+    SPDLOG_TRACE("[NavRenderSurface] on_set_direction: {}", direction);
   }
-  static_cast<NavRenderSurface*>(data)->direction_ = direction;
 }
 
-void NavRenderSurface::on_set_offset(const double left,
-                                     const double top,
-                                     void* data) {
-  (void)left;
-  (void)top;
-  SPDLOG_TRACE("[NavRenderSurface] on_set_offset: left: {}, top: {}", left,
-               top);
-  if (!data) {
-    return;
+void NavRenderSurface::on_set_offset(double left, double top, void* data) {
+  if (auto* p = static_cast<NavRenderSurface*>(data)) {
+    p->left_ = static_cast<int32_t>(left);
+    p->top_ = static_cast<int32_t>(top);
+    SPDLOG_TRACE("[NavRenderSurface] on_set_offset: {} {}", left, top);
   }
-  static_cast<NavRenderSurface*>(data)->SetOffset(static_cast<int32_t>(left),
-                                                  static_cast<int32_t>(top));
 }
 
-void NavRenderSurface::on_touch(const int32_t action,
-                                const int32_t point_count,
-                                const size_t point_data_size,
-                                const double* /* point_data */,
-                                void* /* data */) {
-  (void)action;
-  (void)point_count;
-  (void)point_data_size;
-  SPDLOG_TRACE(
-      "[NavRenderSurface] on_touch: action: {}, point_count: {}, "
-      "point_data_size: {}",
-      action, point_count, point_data_size);
-}
+void NavRenderSurface::on_touch(int32_t /*action*/,
+                                int32_t /*point_count*/,
+                                size_t /*point_data_size*/,
+                                const double* /*point_data*/,
+                                void* /*data*/) {}
 
-void NavRenderSurface::on_dispose(bool /* hybrid */, void* data) {
-  const auto obj = static_cast<NavRenderSurface*>(data);
-
-  /// Dispose on the next frame callback
-  obj->dispose_pending_ = true;
+void NavRenderSurface::on_dispose(bool /*hybrid*/, void* /*data*/) {
+  // GL state and the libnav_render context are intentionally leaked —
+  // tearing them down requires the engine's GL context current on the
+  // rasterizer thread, and there's no clean way to marshal that from
+  // the platform-thread dispose call. The engine context outlives the
+  // plugin and reclaims the resources at shutdown.
+  // PlatformViewsHandler invokes UnregisterCompositorSurface for us.
 }
 
 const platform_view_listener NavRenderSurface::platform_view_listener_ = {
@@ -299,5 +216,124 @@ const platform_view_listener NavRenderSurface::platform_view_listener_ = {
     .accept_gesture = nullptr,
     .reject_gesture = nullptr,
 };
+
+#if BUILD_COMPOSITOR
+
+void NavRenderSurface::EnsureGlState(int32_t w, int32_t h) {
+  if (init_failed_) {
+    return;
+  }
+  if (gl_initialized_ && w == tex_width_ && h == tex_height_) {
+    return;
+  }
+
+  // Recreate the FBO + texture on size change. The libnav_render context
+  // is told to resize so it re-allocates internal G-buffers.
+  if (color_texture_) {
+    glDeleteTextures(1, &color_texture_);
+    color_texture_ = 0;
+  }
+  if (framebuffer_) {
+    glDeleteFramebuffers(1, &framebuffer_);
+    framebuffer_ = 0;
+  }
+
+  tex_width_ = w;
+  tex_height_ = h;
+
+  glGenTextures(1, &color_texture_);
+  glBindTexture(GL_TEXTURE_2D, color_texture_);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex_width_, tex_height_, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glGenFramebuffers(1, &framebuffer_);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         color_texture_, 0);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    spdlog::error("[NavRenderSurface] FBO incomplete at {}x{}", w, h);
+    init_failed_ = true;
+    return;
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  if (!context_) {
+    context_ = LibNavRender->TextureInitialize(
+        access_token_.c_str(), tex_width_, tex_height_, asset_path_.c_str(),
+        cache_folder_.c_str(), misc_folder_.c_str());
+    if (!context_) {
+      spdlog::error("[NavRenderSurface] TextureInitialize failed");
+      init_failed_ = true;
+      return;
+    }
+  } else if (LibNavRender->TextureResize) {
+    LibNavRender->TextureResize(context_, tex_width_, tex_height_);
+  }
+
+  gl_initialized_ = true;
+}
+
+bool NavRenderSurface::OnPresent(const FlutterLayer* layer) {
+  if (init_failed_) {
+    return false;
+  }
+  // The engine supplies the composed layer size every frame in layer->size;
+  // trust that over on_resize, which the embedder may never deliver while the
+  // widget is laid out (the platform-views `create` message carries 1x1
+  // placeholders). Fall back to pending_*/ atomic if the layer is absent.
+  int32_t target_w = pending_width_.load();
+  int32_t target_h = pending_height_.load();
+  if (layer && layer->size.width > 0 && layer->size.height > 0) {
+    target_w = static_cast<int32_t>(layer->size.width);
+    target_h = static_cast<int32_t>(layer->size.height);
+  }
+  static thread_local int32_t last_w = 0;
+  static thread_local int32_t last_h = 0;
+  static thread_local bool first_fire = true;
+  const bool size_changed = (target_w != last_w) || (target_h != last_h);
+  if (first_fire || size_changed) {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface::OnPresent id={} target={}x{} "
+        "tex={}x{} gl_init={} (first={}, size_changed={})",
+        id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
+        first_fire, size_changed);
+    first_fire = false;
+    last_w = target_w;
+    last_h = target_h;
+  }
+  if (target_w <= 0 || target_h <= 0) {
+    return true;
+  }
+
+  EnsureGlState(target_w, target_h);
+  if (!gl_initialized_ || !context_) {
+    SPDLOG_TRACE(
+        "[pv-trace] NavRenderSurface::OnPresent id={} gl NOT initialised "
+        "(context/FBO init failed?); returning false",
+        id_);
+    return false;
+  }
+
+  if (LibNavRender->TextureRunTask) {
+    LibNavRender->TextureRunTask(context_);
+  }
+  // libnav_render renders into the framebuffer we provide. After this
+  // call returns, color_texture_ contains the latest map frame; the
+  // compositor will composite it into the scene.
+  LibNavRender->TextureRender(context_, framebuffer_);
+  return true;
+}
+
+void NavRenderSurface::OnResize(int32_t w, int32_t h) {
+  pending_width_ = w;
+  pending_height_ = h;
+}
+
+#endif  // BUILD_COMPOSITOR
 
 }  // namespace nav_render_view_plugin

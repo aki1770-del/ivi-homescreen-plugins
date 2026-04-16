@@ -17,25 +17,43 @@
 #ifndef FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_H_
 #define FLUTTER_PLUGIN_LAYER_PLAYGROUND_PLUGIN_H_
 
+#include <atomic>
 #include <memory>
+#include <string>
+#include <vector>
 
-#include <EGL/egl.h>
-#include <GLES3/gl32.h>
-#include <flutter/event_channel.h>
-#include <flutter/method_channel.h>
+#include <GLES2/gl2.h>
 #include <flutter/plugin_registrar.h>
-#include <wayland-client.h>
-#include <wayland-egl.h>
 
+#include "config/common.h"
 #include "flutter_desktop_engine_state.h"
 #include "flutter_homescreen.h"
 #include "platform_views/platform_view.h"
-#include "view/flutter_view.h"
-#include "wayland/display.h"
+
+#if BUILD_COMPOSITOR
+#include "view/compositor_surface_interface.h"
+#endif
 
 namespace plugin_layer_playground_view {
 
-class LayerPlaygroundViewPlugin : public flutter::Plugin, PlatformView {
+/**
+ * Layer playground demo platform view.
+ *
+ * Renders a diagonal 3-stop gradient with a thin border and a faint grid
+ * into an FBO-backed @c GL_TEXTURE_2D which the compositor composites into
+ * the scene at the layer's @c offset / @c size each frame. The visual
+ * design mirrors the GTK/Cairo @c simple_box companion plugin in the
+ * layer_playground app (minus the text label). No Wayland subsurface, no
+ * per-plugin EGL context — all GL state is created lazily in @c OnPresent
+ * on the engine's rasterizer thread using the engine's GL context.
+ */
+class LayerPlaygroundViewPlugin : public flutter::Plugin,
+                                  public PlatformView
+#if BUILD_COMPOSITOR
+    ,
+                                  public ICompositorSurface
+#endif
+{
  public:
   static void RegisterWithRegistrar(flutter::PluginRegistrar* registrar,
                                     int32_t id,
@@ -46,7 +64,7 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin, PlatformView {
                                     double width,
                                     double height,
                                     const std::vector<uint8_t>& params,
-                                    std::string assetDirectory,
+                                    const std::string& assetDirectory,
                                     FlutterDesktopEngineRef engine,
                                     PlatformViewAddListener addListener,
                                     PlatformViewRemoveListener removeListener,
@@ -60,7 +78,7 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin, PlatformView {
                             double width,
                             double height,
                             const std::vector<uint8_t>& params,
-                            std::string assetDirectory,
+                            const std::string& assetDirectory,
                             FlutterDesktopEngineState* state,
                             PlatformViewAddListener addListener,
                             PlatformViewRemoveListener removeListener,
@@ -68,39 +86,61 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin, PlatformView {
 
   ~LayerPlaygroundViewPlugin() override;
 
-  // Disallow copy and assign.
   LayerPlaygroundViewPlugin(const LayerPlaygroundViewPlugin&) = delete;
-
   LayerPlaygroundViewPlugin& operator=(const LayerPlaygroundViewPlugin&) =
       delete;
+
+#if BUILD_COMPOSITOR
+  // ICompositorSurface
+  bool OnCreateBackingStore(const FlutterBackingStoreConfig*,
+                            FlutterBackingStore*) override {
+    return false;  // engine provides backing store; we render into our own FBO
+  }
+  bool OnCollectBackingStore(const FlutterBackingStore*) override {
+    return true;
+  }
+  bool OnPresent(const FlutterLayer* layer) override;
+  [[nodiscard]] FlutterPlatformViewIdentifier GetIdentifier() const override {
+    return id_;
+  }
+  void OnResize(int32_t w, int32_t h) override;
+
+  [[nodiscard]] uint32_t GetGlTextureName() const override {
+    return color_texture_;
+  }
+  [[nodiscard]] int32_t GetGlTextureWidth() const override {
+    return tex_width_;
+  }
+  [[nodiscard]] int32_t GetGlTextureHeight() const override {
+    return tex_height_;
+  }
+#endif
 
  private:
   int32_t id_;
   void* platformViewsContext_;
   PlatformViewRemoveListener removeListener_;
-  const std::string flutterAssetsPath_;
 
-  wl_display* display_;
-  wl_surface* surface_;
-  wl_surface* parent_surface_;
-  wl_callback* callback_;
-  wl_subsurface* subsurface_;
+#if BUILD_COMPOSITOR
+  // Owned FBO state, lazily created on the rasterizer thread when
+  // OnPresent first runs (so the engine's GL context is current).
+  bool gl_initialized_{false};
+  GLuint framebuffer_{0};
+  GLuint color_texture_{0};
+  GLuint program_{0};
+  GLuint vbo_{0};
+  GLint u_resolution_loc_{-1};
+  GLint a_position_loc_{-1};
+  int32_t tex_width_{0};
+  int32_t tex_height_{0};
+  // Pending size from on_resize / OnResize, applied next OnPresent.
+  std::atomic<int32_t> pending_width_{0};
+  std::atomic<int32_t> pending_height_{0};
 
-  static void on_frame(void* data, wl_callback* callback, uint32_t time);
-  static const wl_callback_listener frame_listener;
-
-  EGLDisplay egl_display_;
-  wl_egl_window* egl_window_;
-  int buffer_size_ = 32;
-  EGLContext egl_context_{};
-  EGLConfig egl_config_{};
-  GLuint programObject_{};
-  EGLSurface egl_surface_{};
-
-  void InitializeEGL();
-  bool GetConfig(const EGLint* attrib_list, std::vector<EGLConfig>& configs);
-  void InitializeScene();
-  void DrawFrame(uint32_t time) const;
+  void EnsureGlState(int32_t w, int32_t h);
+  void DestroyGlState();
+  void DrawFrame() const;
+#endif
 
   static void on_resize(double width, double height, void* data);
   static void on_set_direction(int32_t direction, void* data);
