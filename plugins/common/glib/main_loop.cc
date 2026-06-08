@@ -23,6 +23,15 @@ MainLoop::MainLoop()
 
 MainLoop::~MainLoop() {
   if (gthread_ && gthread_->joinable()) {
+    // The loop polls g_main_context_iteration(context_, TRUE) which may
+    // block forever inside ppoll waiting for a glib event. Without the
+    // exit_loop_ flip + a wakeup, ~MainLoop's join() hangs at atexit
+    // (the singleton instance is destructed by the C++ runtime after
+    // main() returns).
+    exit_loop_ = true;
+    if (context_ != nullptr) {
+      g_main_context_wakeup(context_);
+    }
     gthread_->join();
   }
 }
@@ -37,11 +46,17 @@ void MainLoop::main_loop(MainLoop* data) {
 
   data->is_running_ = true;
   while (data->is_running_) {
+    // Block until a glib event or ~MainLoop's g_main_context_wakeup(). Check
+    // the exit flag AFTER the iteration, not before: ~MainLoop sets exit_loop_
+    // and issues a single wakeup that unblocks exactly one iteration. Checking
+    // before would set is_running_ = false and then fall into another blocking
+    // g_main_context_iteration(TRUE) that never returns (the wakeup is already
+    // consumed), parking the thread forever and hanging ~MainLoop's join() at
+    // atexit. Checking after lets the wakeup-returning iteration exit the loop.
+    g_main_context_iteration(data->context_, TRUE);
     if (data->exit_loop_) {
       data->is_running_ = false;
     }
-
-    g_main_context_iteration(data->context_, TRUE);
   }
 
   g_main_loop_quit(data->main_loop_);
