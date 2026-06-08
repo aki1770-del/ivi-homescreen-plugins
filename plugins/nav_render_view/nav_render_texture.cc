@@ -1,6 +1,8 @@
 
 #include "nav_render_texture.h"
 
+#include <spdlog/spdlog.h>
+
 #include "libnav_render.h"
 
 namespace nav_render_view_plugin {
