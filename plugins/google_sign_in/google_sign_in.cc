@@ -45,7 +45,7 @@ bool GoogleSignIn::UpdateClientCredentialFile(
   if (env_var) {
     path.assign(env_var);
     if (path.empty()) {
-      spdlog::error("Missing File Path: {}", path);
+      ihs::log::error("Missing File Path: {}", path);
       return false;
     }
 
@@ -113,7 +113,7 @@ rapidjson::Document GoogleSignIn::SwapAuthCodeForToken(
   // change expires_in to expires_at
   auto expires_in = resp["expires_in"].GetInt64();
   if (!resp.RemoveMember("expires_in")) {
-    spdlog::error("Failed to remove token: expires_in");
+    ihs::log::error("Failed to remove token: expires_in");
   }
   int64_t expires_at = Utils::GetEpochTimeInSeconds() + expires_in;
   resp.AddMember("expires_at", expires_at, allocator);
@@ -145,14 +145,14 @@ rapidjson::Document GoogleSignIn::RefreshToken(
 
   // Has token expired?
   auto now = Utils::GetEpochTimeInSeconds();
-  spdlog::trace("[google_sign_in] Now: {}", now);
-  spdlog::trace("[google_sign_in] Token Expires At: {}", expires_at);
+  ihs::log::trace("[google_sign_in] Now: {}", now);
+  ihs::log::trace("[google_sign_in] Token Expires At: {}", expires_at);
   if (expires_at > now) {
-    spdlog::debug("[Google Sign In] Token Expires In {} Seconds",
-                  now - expires_at);
+    ihs::log::debug("[Google Sign In] Token Expires In {} Seconds",
+                    now - expires_at);
     return std::move(client_credential_doc);
   }
-  SPDLOG_DEBUG("[Google Sign In] Refreshing Token");
+  IHS_DEBUG("[Google Sign In] Refreshing Token");
 
   std::string token_uri = installed_secret_obj[kKeyTokenUri].GetString();
   std::string client_id = installed_secret_obj[kKeyClientId].GetString();
@@ -187,8 +187,9 @@ rapidjson::Document GoogleSignIn::RefreshToken(
 
   doc.Parse(response.c_str());
   if (doc.GetParseError() != rapidjson::kParseErrorNone) {
-    spdlog::error("[google_sign_in] Failure Parsing Refresh Token Response: {}",
-                  static_cast<int>(doc.GetParseError()));
+    ihs::log::error(
+        "[google_sign_in] Failure Parsing Refresh Token Response: {}",
+        static_cast<int>(doc.GetParseError()));
     doc.Parse("{}");
     return std::move(doc);
   }
@@ -199,16 +200,16 @@ rapidjson::Document GoogleSignIn::RefreshToken(
   if (resp.HasMember("error") && resp["error"].IsString() &&
       resp.HasMember("error_description") &&
       resp["error_description"].IsString()) {
-    spdlog::error("[google_sign_in] Refresh Token Error: {} - {}",
-                  resp["error"].GetString(),
-                  resp["error_description"].GetString());
+    ihs::log::error("[google_sign_in] Refresh Token Error: {} - {}",
+                    resp["error"].GetString(),
+                    resp["error_description"].GetString());
     return std::move(doc);
   }
 
   // change expires_in to expires_at
   auto expires_in = resp[kKeyExpiresIn].GetInt64();
   if (!resp.RemoveMember(kKeyExpiresIn)) {
-    spdlog::error("Failed to remove token: {}", kKeyExpiresIn);
+    ihs::log::error("Failed to remove token: {}", kKeyExpiresIn);
   }
   expires_at = Utils::GetEpochTimeInSeconds() + expires_in;
   resp.AddMember("expires_at", expires_at, allocator);
@@ -237,7 +238,7 @@ bool GoogleSignIn::CreateDefaultClientCredentialFile() {
   if (env_var) {
     path.assign(env_var);
     if (path.empty()) {
-      spdlog::error("Missing File Path: {}", path);
+      ihs::log::error("Missing File Path: {}", path);
       return false;
     }
 
@@ -260,7 +261,7 @@ std::string GoogleSignIn::GetAuthUrl(rapidjson::Document& secret_doc,
     const auto obj = secret_obj[kKeyInstalled].GetObject();
     if (!obj.HasMember(kKeyClientId) || !obj.HasMember(kKeyAuthUri) ||
         !obj[kKeyClientId].IsString() || !obj[kKeyAuthUri].IsString()) {
-      spdlog::error("Invalid client_secret object");
+      ihs::log::error("Invalid client_secret object");
       return res;
     } else {
       const std::string client_id_ = obj[kKeyClientId].GetString();
@@ -345,12 +346,12 @@ void GoogleSignIn::Init(const std::vector<std::string>& requestedScopes,
   for (auto& scope : requestedScopes) {
     ss << "\n\t" << scope;
   }
-  SPDLOG_DEBUG("\trequestedScopes: {}", ss.str().c_str());
-  SPDLOG_DEBUG("\thostedDomain: [{}]", hostedDomain);
-  SPDLOG_DEBUG("\tsignInOption: [{}]", signInOption);
-  SPDLOG_DEBUG("\tclientId: [{}]", clientId);
-  SPDLOG_DEBUG("\tserverClientId: [{}]", serverClientId);
-  SPDLOG_DEBUG("\tforceCodeForRefreshToken: {}", forceCodeForRefreshToken);
+  IHS_DEBUG("\trequestedScopes: {}", ss.str().c_str());
+  IHS_DEBUG("\thostedDomain: [{}]", hostedDomain);
+  IHS_DEBUG("\tsignInOption: [{}]", signInOption);
+  IHS_DEBUG("\tclientId: [{}]", clientId);
+  IHS_DEBUG("\tserverClientId: [{}]", serverClientId);
+  IHS_DEBUG("\tforceCodeForRefreshToken: {}", forceCodeForRefreshToken);
 #else
   (void)requestedScopes;
   (void)hostedDomain;
@@ -362,7 +363,7 @@ void GoogleSignIn::Init(const std::vector<std::string>& requestedScopes,
 
   auto secret_doc = GetClientSecret();
   if (!SecretJsonPopulated(secret_doc)) {
-    spdlog::error(
+    ihs::log::error(
         "Confirm client_secret JSON file has been downloaded from the Google "
         "cloud console");
   }
@@ -374,7 +375,7 @@ void GoogleSignIn::Init(const std::vector<std::string>& requestedScopes,
       CreateDefaultClientCredentialFile();
       secret_doc = GetClientSecret();
       std::string auth_uri = GetAuthUrl(secret_doc, requestedScopes);
-      spdlog::error(
+      ihs::log::error(
           "\tUpdate auth_code key in GOOGLE_API_OAUTH2_CLIENT_CREDENTIALS "
           "file with response from:\n\t{}",
           auth_uri);
@@ -407,8 +408,8 @@ std::unique_ptr<std::vector<uint8_t>> GoogleSignIn::GetUserData(
     auto response = client.RetrieveContent();
 
     if (client.GetCode() != CURLE_OK) {
-      spdlog::error("[google_sign_in] curl failure {} - {}",
-                    static_cast<int>(client.GetCode()), response);
+      ihs::log::error("[google_sign_in] curl failure {} - {}",
+                      static_cast<int>(client.GetCode()), response);
       result = codec.EncodeErrorEnvelope("http_client_failure", "");
       return std::move(result);
     }
@@ -416,8 +417,8 @@ std::unique_ptr<std::vector<uint8_t>> GoogleSignIn::GetUserData(
     rapidjson::Document doc;
     doc.Parse(response.c_str());
     if (doc.GetParseError() != rapidjson::kParseErrorNone) {
-      spdlog::error("[google_sign_in] curl response parse failure: {} - {}",
-                    static_cast<int>(doc.GetParseError()), response);
+      ihs::log::error("[google_sign_in] curl response parse failure: {} - {}",
+                      static_cast<int>(doc.GetParseError()), response);
       result = codec.EncodeErrorEnvelope("parse_error", "");
       return std::move(result);
     }
@@ -433,7 +434,7 @@ std::unique_ptr<std::vector<uint8_t>> GoogleSignIn::GetUserData(
         int code = obj["code"].GetInt();
         std::string message = obj["message"].GetString();
         std::string status = obj["status"].GetString();
-        spdlog::error("[google_sign_in] [{}] {}: {}", code, status, message);
+        ihs::log::error("[google_sign_in] [{}] {}: {}", code, status, message);
         result = codec.EncodeErrorEnvelope(status, message);
         return std::move(result);
       }
@@ -489,10 +490,10 @@ std::unique_ptr<std::vector<uint8_t>> GoogleSignIn::GetUserData(
         }
       }
     }
-    SPDLOG_DEBUG("id: {}", id);
-    SPDLOG_DEBUG("email: {}", email);
-    SPDLOG_DEBUG("display_name: {}", display_name);
-    SPDLOG_DEBUG("photo_url: {}", photo_url);
+    IHS_DEBUG("id: {}", id);
+    IHS_DEBUG("email: {}", email);
+    IHS_DEBUG("display_name: {}", display_name);
+    IHS_DEBUG("photo_url: {}", photo_url);
 
     auto res = flutter::EncodableValue(flutter::EncodableMap{
         {flutter::EncodableValue(kMethodResponseKeyId),
@@ -553,7 +554,7 @@ void GoogleSignIn::OnPlatformMessage(const FlutterPlatformMessage* message,
   const auto method = obj->method_name();
 
   if (method == kMethodInit) {
-    SPDLOG_DEBUG("[google_sign_in] <init>");
+    IHS_DEBUG("[google_sign_in] <init>");
 
     std::string signInOption;
     std::vector<std::string> requestedScopes;
@@ -600,13 +601,13 @@ void GoogleSignIn::OnPlatformMessage(const FlutterPlatformMessage* message,
          forceCodeForRefreshToken);
     result = codec.EncodeSuccessEnvelope();
   } else if (method == kMethodSignIn) {
-    SPDLOG_DEBUG("[google_sign_in] <signIn>");
+    IHS_DEBUG("[google_sign_in] <signIn>");
     result = GetUserData(codec);
   } else if (method == kMethodSignInSilently) {
-    SPDLOG_DEBUG("[google_sign_in] <signInSilently>");
+    IHS_DEBUG("[google_sign_in] <signInSilently>");
     result = GetUserData(codec);
   } else if (method == kMethodGetTokens) {
-    SPDLOG_DEBUG("[google_sign_in] <getTokens>");
+    IHS_DEBUG("[google_sign_in] <getTokens>");
     if (obj->arguments()->IsNull()) {
       result = codec.EncodeErrorEnvelope("invalid_arguments", "");
       engine->SendPlatformMessageResponse(message->response_handle,
@@ -624,14 +625,14 @@ void GoogleSignIn::OnPlatformMessage(const FlutterPlatformMessage* message,
         shouldRecoverAuth = std::get<bool>(it.second);
       }
     }
-    SPDLOG_DEBUG("\temail: [{}]", email);
-    SPDLOG_DEBUG("\tshouldRecoverAuth: {}", shouldRecoverAuth);
+    IHS_DEBUG("\temail: [{}]", email);
+    IHS_DEBUG("\tshouldRecoverAuth: {}", shouldRecoverAuth);
     result = GetTokens(email, shouldRecoverAuth, codec);
   } else if (method == kMethodSignOut) {
-    SPDLOG_DEBUG("[google_sign_in] <signOut>");
+    IHS_DEBUG("[google_sign_in] <signOut>");
     result = GetUserData(codec);
   } else if (method == kMethodDisconnect) {
-    SPDLOG_DEBUG("[google_sign_in] <disconnect>");
+    IHS_DEBUG("[google_sign_in] <disconnect>");
     result = GetUserData(codec);
   }
 

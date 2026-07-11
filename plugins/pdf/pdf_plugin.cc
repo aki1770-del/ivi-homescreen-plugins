@@ -48,10 +48,10 @@ std::optional<FlutterError> PdfPlugin::RasterPdf(const std::vector<uint8_t> doc,
                                                  std::vector<int32_t> pages,
                                                  double scale,
                                                  int job_id) {
-  SPDLOG_DEBUG("\tdoc_size: {}", doc.size());
-  SPDLOG_DEBUG("\tpages_count: {}", pages.size());
-  SPDLOG_DEBUG("\tscale: {}", scale);
-  SPDLOG_DEBUG("\tjob: {}", job_id);
+  IHS_DEBUG("\tdoc_size: {}", doc.size());
+  IHS_DEBUG("\tpages_count: {}", pages.size());
+  IHS_DEBUG("\tscale: {}", scale);
+  IHS_DEBUG("\tjob: {}", job_id);
   FPDF_LIBRARY_CONFIG config{};
   config.version = 2;
   // requires a PDFium build with skia enabled
@@ -63,7 +63,7 @@ std::optional<FlutterError> PdfPlugin::RasterPdf(const std::vector<uint8_t> doc,
       LibPdfium->LoadMemDocument64(doc.data(), doc.size(), nullptr);
   if (!pdf_doc) {
     const unsigned long err = LibPdfium->GetLastError();
-    SPDLOG_DEBUG("[pdf] Load unsuccessful: job: {}", job_id);
+    IHS_DEBUG("[pdf] Load unsuccessful: job: {}", job_id);
     switch (err) {
       case FPDF_ERR_SUCCESS:
         on_page_raster_end(job_id, "Success");
@@ -153,7 +153,7 @@ std::optional<FlutterError> PdfPlugin::RasterPdf(const std::vector<uint8_t> doc,
 
 bool PdfPlugin::SharePdf(const std::vector<uint8_t> buffer,
                          const std::string& name) {
-  SPDLOG_DEBUG("\t{}", name);
+  IHS_DEBUG("\t{}", name);
 
   const auto filename = "/tmp/" + name;
 
@@ -180,7 +180,7 @@ void PdfPlugin::on_page_rasterized(std::vector<uint8_t> data,
                                    int width,
                                    int height,
                                    int job_id) {
-  SPDLOG_DEBUG("on_page_rasterized: {}", job_id);
+  IHS_DEBUG("on_page_rasterized: {}", job_id);
   channel->InvokeMethod(
       "onPageRasterized",
       std::make_unique<flutter::EncodableValue>(
@@ -196,7 +196,7 @@ void PdfPlugin::on_page_rasterized(std::vector<uint8_t> data,
 }
 
 void PdfPlugin::on_page_raster_end(int job_id, const std::string& error) {
-  SPDLOG_DEBUG("on_page_raster_end: {}", job_id);
+  IHS_DEBUG("on_page_raster_end: {}", job_id);
   auto map = flutter::EncodableMap{
       {flutter::EncodableValue("job"), flutter::EncodableValue(job_id)},
   };

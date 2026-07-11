@@ -17,14 +17,10 @@
 #ifndef FLUTTER_PLUGIN_COMMON_LOGGING_H_
 #define FLUTTER_PLUGIN_COMMON_LOGGING_H_
 
-#if !defined(NDEBUG)
-#undef SPDLOG_ACTIVE_LEVEL
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
-#else
-#undef SPDLOG_ACTIVE_LEVEL
-#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_OFF
-#endif
-
-#include "spdlog/spdlog.h"
+// Plugin logging routes through ivi-homescreen's ihs_shared logging surface:
+// ihs::log::{trace,debug,info,warn,error,critical} plus the IHS_DEBUG /
+// IHS_TRACE macros (compiled out under NDEBUG, as the old SPDLOG_DEBUG /
+// SPDLOG_TRACE were). Previously this header configured and included spdlog.
+#include "logging/logging.h"
 
 #endif  // FLUTTER_PLUGIN_COMMON_LOGGING_H_

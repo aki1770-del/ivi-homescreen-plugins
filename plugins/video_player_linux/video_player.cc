@@ -73,7 +73,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
       audio_codec_(info.audio_codec),
       audio_channels_(info.audio_channels),
       audio_sample_rate_(info.audio_sample_rate) {
-  SPDLOG_DEBUG(
+  IHS_DEBUG(
       "[VideoPlayer] uri: {}, http_headers: {}, size: {} x {}, duration: {}, "
       "has_video: {}",
       uri_.c_str(), http_headers_.size(), width_, height_, duration_,
@@ -83,7 +83,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   // Validate dimensions only when video is expected.
   if (has_video_ && (width_ <= 0 || height_ <= 0)) {
-    SPDLOG_ERROR("[VideoPlayer] Invalid dimensions: {}x{}", width_, height_);
+    ihs::log::error("[VideoPlayer] Invalid dimensions: {}x{}", width_, height_);
     m_valid = false;
     return;
   }
@@ -123,11 +123,11 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
     flutter::TextureVariant texture = *gpu_surface_texture_;
     m_registrar->texture_registrar()->RegisterTexture(&texture);
-    SPDLOG_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
+    IHS_DEBUG("[VideoPlayer] Registered texture_id={}", m_texture_id);
   } else {
     // Audio-only: synthesise a player ID outside the GL texture ID range.
     m_texture_id = g_audio_player_id_counter.fetch_add(1);
-    SPDLOG_DEBUG("[VideoPlayer] Audio-only player_id={}", m_texture_id);
+    IHS_DEBUG("[VideoPlayer] Audio-only player_id={}", m_texture_id);
   }
 
   /// Setup GST Pipeline
@@ -136,7 +136,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
   playbin_ = gst_element_factory_make("playbin", nullptr);
   if (!playbin_) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to create playbin element");
+    ihs::log::error("[VideoPlayer] Failed to create playbin element");
     m_valid = false;
     return;
   }
@@ -147,7 +147,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
     for (const auto& [key, value] : http_headers_) {
       gst_structure_set(extraHeaders, key.c_str(), G_TYPE_STRING, value.c_str(),
                         nullptr);
-      SPDLOG_DEBUG("extra-header: {}:{}", key, value);
+      IHS_DEBUG("extra-header: {}:{}", key, value);
     }
     g_object_set(playbin_, "extra-headers", extraHeaders, nullptr);
     gst_structure_free(extraHeaders);
@@ -168,7 +168,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
     g_object_set(playbin_, "audio-sink", audio_bin_, nullptr);
     audio_upgraded_ = true;
   } else {
-    spdlog::warn("[VideoPlayer] Audio sink bin build failed; using fakesink");
+    ihs::log::warn("[VideoPlayer] Audio sink bin build failed; using fakesink");
     GstElement* fake = gst_element_factory_make("fakesink", "fake-audio");
     if (fake) {
       g_object_set(fake, "sync", TRUE, nullptr);
@@ -232,7 +232,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
   if (has_video_) {
     sink_ = gst_element_factory_make("fakesink", nullptr);
     if (!sink_) {
-      SPDLOG_ERROR("[VideoPlayer] Failed to create fakesink element");
+      ihs::log::error("[VideoPlayer] Failed to create fakesink element");
       m_valid = false;
       return;
     }
@@ -244,7 +244,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
     video_convert_ = gst_element_factory_make("videoconvert", nullptr);
     if (!video_convert_) {
-      SPDLOG_ERROR("[VideoPlayer] Failed to create videoconvert element");
+      ihs::log::error("[VideoPlayer] Failed to create videoconvert element");
       m_valid = false;
       return;
     }
@@ -254,7 +254,7 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
 
     video_scale_ = gst_element_factory_make("videoscale", nullptr);
     if (!video_scale_) {
-      SPDLOG_ERROR("[VideoPlayer] Failed to create videoscale element");
+      ihs::log::error("[VideoPlayer] Failed to create videoscale element");
       m_valid = false;
       return;
     }
@@ -281,12 +281,13 @@ VideoPlayer::VideoPlayer(flutter::PluginRegistrarDesktop* registrar,
                      nullptr);
 
     if (!gst_element_link_filtered(video_convert_, video_scale_, caps)) {
-      SPDLOG_ERROR("[VideoPlayer] Failed to link videoconvert with videoscale");
+      ihs::log::error(
+          "[VideoPlayer] Failed to link videoconvert with videoscale");
     }
     gst_caps_unref(caps);
 
     if (!gst_element_link_filtered(video_scale_, sink_, scale)) {
-      SPDLOG_ERROR("[VideoPlayer] Failed to link videoscale with fakesink");
+      ihs::log::error("[VideoPlayer] Failed to link videoscale with fakesink");
     }
     gst_caps_unref(scale);
 
@@ -322,7 +323,7 @@ VideoPlayer::~VideoPlayer() {
 }
 
 void VideoPlayer::Dispose() {
-  SPDLOG_DEBUG("[VideoPlayer] Dispose");
+  IHS_DEBUG("[VideoPlayer] Dispose");
   m_valid = false;
   is_initialized_ = false;
   StopAudioMonitor();
@@ -356,7 +357,7 @@ void VideoPlayer::Dispose() {
   }
 
   if (has_video_ && m_texture_id != 0) {
-    SPDLOG_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
+    IHS_DEBUG("[VideoPlayer] Unregistering texture_id={}", m_texture_id);
     m_registrar->texture_registrar()->UnregisterTexture(m_texture_id);
     m_texture_id = 0;
   }
@@ -374,12 +375,12 @@ void VideoPlayer::Dispose() {
 }
 
 void VideoPlayer::SetLooping(const bool isLooping) {
-  SPDLOG_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
+  IHS_DEBUG("[VideoPlayer] SetLooping: {}", is_looping_.load());
   is_looping_ = isLooping;
 }
 
 void VideoPlayer::SetVolume(const double volume) {
-  SPDLOG_DEBUG("[VideoPlayer] SetVolume: {}", volume);
+  IHS_DEBUG("[VideoPlayer] SetVolume: {}", volume);
   volume_ = volume;
   g_object_set(playbin_, "volume", volume, nullptr);
 }
@@ -392,7 +393,7 @@ void VideoPlayer::SetPlaybackSpeed(const double playbackSpeed) {
   GstState state;
   gst_element_get_state(playbin_, &state, nullptr, 0);
   if (state < GST_STATE_PAUSED) {
-    SPDLOG_DEBUG(
+    IHS_DEBUG(
         "[VideoPlayer] Deferring playback speed {} until pipeline is ready",
         playbackSpeed);
     return;
@@ -406,10 +407,10 @@ void VideoPlayer::Play() {
   const GstStateChangeReturn ret =
       gst_element_set_state(playbin_, GST_STATE_PLAYING);
   if (ret == GST_STATE_CHANGE_FAILURE) {
-    spdlog::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
+    ihs::log::error("[VideoPlayer] Failed to set state GST_STATE_PLAYING.");
   } else if (ret == GST_STATE_CHANGE_NO_PREROLL) {
     is_live_ = TRUE;
-    SPDLOG_DEBUG("[VideoPlayer] Pipeline is live");
+    IHS_DEBUG("[VideoPlayer] Pipeline is live");
   }
 }
 
@@ -427,7 +428,7 @@ void VideoPlayer::Pause() {
       }
       return;
     }
-    SPDLOG_DEBUG("[VideoPlayer] Transport Paused.");
+    IHS_DEBUG("[VideoPlayer] Transport Paused.");
   }
 }
 
@@ -435,7 +436,7 @@ int64_t VideoPlayer::GetPosition() {
   gint64 pos = 0;
   if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos)) {
     position_ = pos;
-    SPDLOG_TRACE("[VideoPlayer] Position: {}", pos);
+    IHS_TRACE("[VideoPlayer] Position: {}", pos);
   }
   const gint64 current = position_.load();
   return current >= 0 ? current / GST_MSECOND : 0;
@@ -478,19 +479,19 @@ void VideoPlayer::SendBufferingUpdate() {
 
 void VideoPlayer::SeekTo(const int64_t seek) {
   const gint64 position = seek * GST_MSECOND;
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position);
+  IHS_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, position);
 
   if (!gst_element_seek_simple(
           playbin_, GST_FORMAT_TIME,
           static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
                                     GST_SEEK_FLAG_KEY_UNIT),
           position)) {
-    SPDLOG_ERROR("[VideoPlayer] Seek Failed");
+    ihs::log::error("[VideoPlayer] Seek Failed");
   }
   gint64 pos;
   gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos);
   position_ = pos;
-  SPDLOG_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
+  IHS_DEBUG("[VideoPlayer] SeekTo: {} -> {}", seek, pos);
 
   // gst_element_seek_simple resets the segment rate to 1.0. If the user
   // had set a non-default rate, re-apply it now so dragging the scrubber
@@ -511,7 +512,7 @@ void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
     return;
   }
 
-  SPDLOG_DEBUG("[VideoPlayer] Init");
+  IHS_DEBUG("[VideoPlayer] Init");
   event_channel_ = std::make_unique<flutter::EventChannel<>>(
       messenger,
       std::string("flutter.io/videoPlayer/videoEvents") +
@@ -556,7 +557,7 @@ void VideoPlayer::Init(flutter::BinaryMessenger* messenger) {
 void VideoPlayer::SetBuffering(const bool buffering) {
   std::lock_guard event_lock(event_mutex_);
   if (event_sink_) {
-    SPDLOG_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
+    IHS_DEBUG("[VideoPlayer] SetBuffering: {}", buffering);
     auto res = flutter::EncodableMap(
         {{flutter::EncodableValue("event"),
           flutter::EncodableValue(buffering ? "bufferingStart"
@@ -597,17 +598,17 @@ void VideoPlayer::ApplyPlaybackSpeed() {
   }
 
   if (!gst_element_send_event(playbin_, seek_event)) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to set playback speed: {}",
-                 playbackSpeed);
+    ihs::log::error("[VideoPlayer] Failed to set playback speed: {}",
+                    playbackSpeed);
     return;
   }
   rate_.store(playbackSpeed);
-  SPDLOG_DEBUG("[VideoPlayer] Playback speed -> {}", playbackSpeed);
+  IHS_DEBUG("[VideoPlayer] Playback speed -> {}", playbackSpeed);
 }
 
 gboolean VideoPlayer::OnAudioRecovery(gpointer user_data) {
   auto* self = static_cast<VideoPlayer*>(user_data);
-  SPDLOG_DEBUG("[VideoPlayer] Audio recovery: restarting without audio");
+  IHS_DEBUG("[VideoPlayer] Audio recovery: restarting without audio");
 
   gint flags = 0;
   g_object_get(self->playbin_, "flags", &flags, nullptr);
@@ -649,7 +650,7 @@ void VideoPlayer::StartAudioMonitor() {
   udev_channel_ = g_io_channel_unix_new(fd);
   udev_watch_id_ = g_io_add_watch(udev_channel_, G_IO_IN, OnUdevEvent, this);
 
-  SPDLOG_DEBUG("[VideoPlayer] Audio hotplug monitor started");
+  IHS_DEBUG("[VideoPlayer] Audio hotplug monitor started");
 
   // Check if a PCM device already exists (device may have appeared
   // before the monitor was set up).
@@ -663,7 +664,7 @@ void VideoPlayer::StartAudioMonitor() {
     if (dev) {
       const char* sysname = udev_device_get_sysname(dev);
       if (sysname && strncmp(sysname, "pcmC", 4) == 0) {
-        SPDLOG_DEBUG("[VideoPlayer] Audio device already present: {}", sysname);
+        IHS_DEBUG("[VideoPlayer] Audio device already present: {}", sysname);
         udev_device_unref(dev);
         // Schedule upgrade immediately. Track the GSource id so we can
         // cancel it in StopAudioMonitor if Dispose runs first.
@@ -720,7 +721,7 @@ gboolean VideoPlayer::OnUdevEvent(GIOChannel* /*channel*/,
   if (action && sysname && strcmp(action, "add") == 0 &&
       strncmp(sysname, "pcmC", 4) == 0 && !self->audio_upgraded_ &&
       !self->audio_upgrade_idle_id_) {
-    SPDLOG_DEBUG("[VideoPlayer] Audio device hotplugged: {}", sysname);
+    IHS_DEBUG("[VideoPlayer] Audio device hotplugged: {}", sysname);
     // Schedule the upgrade on an idle callback to avoid reentrancy.
     // Track the source id so it can be cancelled if Dispose runs first.
     GSource* idle = g_idle_source_new();
@@ -746,7 +747,7 @@ gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
   // Try to create a real audio sink.  If it can reach READY, swap it in.
   GstElement* real_sink = gst_element_factory_make("autoaudiosink", nullptr);
   if (!real_sink) {
-    spdlog::warn("[VideoPlayer] Audio upgrade: autoaudiosink unavailable");
+    ihs::log::warn("[VideoPlayer] Audio upgrade: autoaudiosink unavailable");
     return G_SOURCE_REMOVE;
   }
 
@@ -754,13 +755,13 @@ gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
       GST_STATE_CHANGE_FAILURE) {
     gst_element_set_state(real_sink, GST_STATE_NULL);
     gst_object_unref(real_sink);
-    spdlog::warn("[VideoPlayer] Audio upgrade: sink not ready yet");
+    ihs::log::warn("[VideoPlayer] Audio upgrade: sink not ready yet");
     return G_SOURCE_REMOVE;  // udev will trigger us again on next hotplug
   }
   gst_element_set_state(real_sink, GST_STATE_NULL);
 
   // Hot-swap: pause playbin, swap audio-sink, resume
-  SPDLOG_DEBUG("[VideoPlayer] Audio upgrade: swapping to real audio sink");
+  IHS_DEBUG("[VideoPlayer] Audio upgrade: swapping to real audio sink");
   GstState cur_state = GST_STATE_NULL;
   gst_element_get_state(self->playbin_, &cur_state, nullptr, 0);
 
@@ -775,13 +776,13 @@ gboolean VideoPlayer::OnAudioUpgrade(gpointer user_data) {
   gst_element_set_state(self->playbin_, cur_state);
   self->audio_upgraded_ = true;
   self->StopAudioMonitor();
-  SPDLOG_DEBUG("[VideoPlayer] Audio upgrade: done");
+  IHS_DEBUG("[VideoPlayer] Audio upgrade: done");
   return G_SOURCE_REMOVE;
 }
 
 void VideoPlayer::OnPlaybackEnded() {
   if (is_looping_) {
-    SPDLOG_DEBUG("[VideoPlayer] Looping: restarting pipeline");
+    IHS_DEBUG("[VideoPlayer] Looping: restarting pipeline");
     is_buffering_ = false;
     // The READY round-trip resets the pipeline's segment rate to 1.0.
     // Invalidate our cached rate so the next ApplyPlaybackSpeed call
@@ -794,7 +795,7 @@ void VideoPlayer::OnPlaybackEnded() {
   }
   std::lock_guard event_lock(event_mutex_);
   if (event_sink_) {
-    SPDLOG_DEBUG("[VideoPlayer] OnPlaybackEnded");
+    IHS_DEBUG("[VideoPlayer] OnPlaybackEnded");
     auto res = flutter::EncodableMap({{flutter::EncodableValue("event"),
                                        flutter::EncodableValue("completed")}});
     event_sink_->Success(flutter::EncodableValue(
@@ -812,8 +813,8 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
     SetBuffering(false);
 
     if (state == GST_STATE_PLAYING) {
-      SPDLOG_DEBUG("[VideoPlayer] message state changed, start playing {}",
-                   m_texture_id);
+      IHS_DEBUG("[VideoPlayer] message state changed, start playing {}",
+                m_texture_id);
       audio_recovery_ = false;
       if (has_video_) {
         prepare(this);
@@ -840,8 +841,7 @@ void VideoPlayer::OnMediaStateChange(const GstState state) {
         StartAudioMonitor();
       }
     } else if (state == GST_STATE_READY) {
-      SPDLOG_DEBUG("[VideoPlayer] message state changed, ready {}",
-                   m_texture_id);
+      IHS_DEBUG("[VideoPlayer] message state changed, ready {}", m_texture_id);
     }
   }
 }
@@ -851,10 +851,10 @@ void VideoPlayer::OnMediaError(GstMessage* msg) {
   gchar* debug_info;
   gst_message_parse_error(msg, &err, &debug_info);
   const std::string error_msg = err->message ? err->message : "Unknown error";
-  spdlog::error("[VideoPlayer] Error: {}:{}", GST_OBJECT_NAME(msg->src),
-                error_msg);
+  ihs::log::error("[VideoPlayer] Error: {}:{}", GST_OBJECT_NAME(msg->src),
+                  error_msg);
   if (debug_info) {
-    spdlog::error("[VideoPlayer] {}", debug_info);
+    ihs::log::error("[VideoPlayer] {}", debug_info);
     g_free(debug_info);
   }
   g_clear_error(&err);
@@ -907,29 +907,29 @@ void VideoPlayer::OnTag(const GstTagList* list,
       tag_str == "audio-codec" && type == 64) {
     gchar* value = nullptr;
     if (gst_tag_list_get_string(list, tag, &value) && value) {
-      spdlog::debug("[VideoPlayer] audio-codec: {}", value);
+      ihs::log::debug("[VideoPlayer] audio-codec: {}", value);
       g_free(value);
     }
   } else if (tag_str == "video-codec" && type == 64) {
     gchar* value = nullptr;
     if (gst_tag_list_get_string(list, tag, &value) && value) {
-      spdlog::debug("[VideoPlayer] video-codec: {}", value);
+      ihs::log::debug("[VideoPlayer] video-codec: {}", value);
       g_free(value);
     }
   } else if (tag_str == "maximum-bitrate" && type == 28) {
     guint value = 0;
     if (gst_tag_list_get_uint(list, tag, &value)) {
-      spdlog::debug("[VideoPlayer] maximum-bitrate: {}", value);
+      ihs::log::debug("[VideoPlayer] maximum-bitrate: {}", value);
     }
   } else if (tag_str == "minimum-bitrate" && type == 28) {
     guint value = 0;
     if (gst_tag_list_get_uint(list, tag, &value)) {
-      spdlog::debug("[VideoPlayer] minimum-bitrate: {}", value);
+      ihs::log::debug("[VideoPlayer] minimum-bitrate: {}", value);
     }
   } else if (tag_str == "bitrate" && type == 28) {
     guint value = 0;
     if (gst_tag_list_get_uint(list, tag, &value)) {
-      spdlog::debug("[VideoPlayer] bitrate: {}", value);
+      ihs::log::debug("[VideoPlayer] bitrate: {}", value);
     }
   }
 }
@@ -990,9 +990,9 @@ void VideoPlayer::handoff_handler(GstElement* /* fakesink */,
 
     obj->m_registrar->texture_registrar()->MarkTextureFrameAvailable(
         obj->m_texture_id);
-    SPDLOG_TRACE("[VideoPlayer] frame");
+    IHS_TRACE("[VideoPlayer] frame");
   } else {
-    SPDLOG_ERROR("[VideoPlayer] Cannot read video frame out from buffer");
+    ihs::log::error("[VideoPlayer] Cannot read video frame out from buffer");
   }
 }
 
@@ -1006,7 +1006,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
       return FALSE;
     case GST_MESSAGE_EOS:
     case GST_MESSAGE_SEGMENT_DONE: {
-      SPDLOG_DEBUG(
+      IHS_DEBUG(
           "[VideoPlayer] {}: texture_id: {}",
           (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_EOS ? "EOS" : "Segment done"),
           obj->m_texture_id);
@@ -1029,7 +1029,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
 #if 0
     case GST_MESSAGE_LATENCY: {
       auto src = GST_MESSAGE_SRC(msg);
-      SPDLOG_DEBUG("[VideoPlayer] Latency: {}", src->name);
+      IHS_DEBUG("[VideoPlayer] Latency: {}", src->name);
       GstQuery* query;
       gboolean res;
       query = gst_query_new_latency();
@@ -1048,15 +1048,15 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
       GError* warn_err = nullptr;
       gchar* warn_debug = nullptr;
       gst_message_parse_warning(msg, &warn_err, &warn_debug);
-      spdlog::warn("[VideoPlayer] Warning: {}:{} debug={}",
-                   GST_OBJECT_NAME(msg->src), warn_err ? warn_err->message : "",
-                   warn_debug ? warn_debug : "");
+      ihs::log::warn(
+          "[VideoPlayer] Warning: {}:{} debug={}", GST_OBJECT_NAME(msg->src),
+          warn_err ? warn_err->message : "", warn_debug ? warn_debug : "");
       g_clear_error(&warn_err);
       g_free(warn_debug);
       break;
     }
     case GST_MESSAGE_ASYNC_DONE: {
-      SPDLOG_DEBUG("[VideoPlayer] Async Done");
+      IHS_DEBUG("[VideoPlayer] Async Done");
       // bufferingEnd
       break;
     }
@@ -1065,7 +1065,7 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
       gst_message_parse_new_clock(msg, &clock);
       const GstClockTime time = gst_clock_get_time(clock);
       (void)time;
-      SPDLOG_DEBUG("[VideoPlayer] New Clock: {}", time);
+      IHS_DEBUG("[VideoPlayer] New Clock: {}", time);
       break;
     }
     case GST_MESSAGE_BUFFERING: {
@@ -1075,8 +1075,8 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
 
       gint percent;
       gst_message_parse_buffering(msg, &percent);
-      SPDLOG_DEBUG("[VideoPlayer] Buffering: {}% texture_id: {}", percent,
-                   obj->m_texture_id);
+      IHS_DEBUG("[VideoPlayer] Buffering: {}% texture_id: {}", percent,
+                obj->m_texture_id);
 
       obj->SendBufferingUpdate();
 
@@ -1111,20 +1111,20 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
       gchar* path;
       GstTask* task = nullptr;
 
-      SPDLOG_DEBUG("STREAM_STATUS:");
+      IHS_DEBUG("STREAM_STATUS:");
       gst_message_parse_stream_status(msg, &type, &owner);
 
       val = gst_message_get_stream_status_object(msg);
 
-      SPDLOG_DEBUG("\ttype:   {}", static_cast<guint>(type));
+      IHS_DEBUG("\ttype:   {}", static_cast<guint>(type));
       path = gst_object_get_path_string(GST_MESSAGE_SRC(msg));
-      SPDLOG_DEBUG("\tsource: {}", path);
+      IHS_DEBUG("\tsource: {}", path);
       g_free(path);
       path = gst_object_get_path_string(GST_OBJECT(owner));
-      SPDLOG_DEBUG("\towner:  {}", path);
+      IHS_DEBUG("\towner:  {}", path);
       g_free(path);
-      SPDLOG_DEBUG("\tobject: type {}, value {}", G_VALUE_TYPE_NAME(val),
-                   g_value_get_object(val));
+      IHS_DEBUG("\tobject: type {}, value {}", G_VALUE_TYPE_NAME(val),
+                g_value_get_object(val));
 
       /* see if we know how to deal with this object */
       if (G_VALUE_TYPE(val) == GST_TYPE_TASK) {
@@ -1133,10 +1133,10 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
 
       switch (type) {
         case GST_STREAM_STATUS_TYPE_CREATE:
-          SPDLOG_DEBUG("Created task: {}", fmt::ptr(task));
+          IHS_DEBUG("Created task: {}", fmt::ptr(task));
           break;
         case GST_STREAM_STATUS_TYPE_ENTER:
-          SPDLOG_DEBUG("raising task priority");
+          IHS_DEBUG("raising task priority");
           // setpriority (PRIO_PROCESS, 0, -10);
           break;
         case GST_STREAM_STATUS_TYPE_LEAVE:
@@ -1155,8 +1155,8 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
     }
     // element specific message
     case GST_MESSAGE_ELEMENT: {
-      SPDLOG_DEBUG("message-element: {}",
-                   gst_structure_get_name(gst_message_get_structure(msg)));
+      IHS_DEBUG("message-element: {}",
+                gst_structure_get_name(gst_message_get_structure(msg)));
       break;
     }
 #endif
@@ -1227,8 +1227,8 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
     default:
 #if GSTREAMER_DEBUG
     {
-      SPDLOG_DEBUG("GST Message Type: {}",
-                   gst_message_type_get_name(GST_MESSAGE_TYPE(msg)));
+      IHS_DEBUG("GST Message Type: {}",
+                gst_message_type_get_name(GST_MESSAGE_TYPE(msg)));
       break;
     }
 #else
@@ -1239,38 +1239,39 @@ gboolean VideoPlayer::OnBusMessage(GstBus* /* bus */,
 }
 
 void VideoPlayer::prepare(VideoPlayer* user_data) {
-  SPDLOG_DEBUG("[VideoPlayer] prepare");
+  IHS_DEBUG("[VideoPlayer] prepare");
   g_object_get(user_data->playbin_, "n-video", &user_data->n_video_, nullptr);
-  SPDLOG_DEBUG("[VideoPlayer] {} video streams", user_data->n_video_);
+  IHS_DEBUG("[VideoPlayer] {} video streams", user_data->n_video_);
   g_object_get(user_data->playbin_, "current-video", &user_data->current_video_,
                nullptr);
   GstPad* pad = nullptr;
   g_signal_emit_by_name(user_data->playbin_, "get-video-pad",
                         user_data->current_video_, &pad);
   if (!pad) {
-    SPDLOG_ERROR(
+    ihs::log::error(
         "[VideoPlayer] Failed to get video pad, stream number might not exist");
     // TODO g_main_loop_quit(obj->main_loop_);
     return;
   }
   GstCaps* caps = gst_pad_get_current_caps(pad);
   if (!caps) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to get caps from video pad");
+    ihs::log::error("[VideoPlayer] Failed to get caps from video pad");
     gst_object_unref(pad);
     return;
   }
   std::lock_guard lock(user_data->gst_mutex_);
   if (!gst_video_info_from_caps(&user_data->info_, caps)) {
-    SPDLOG_ERROR("[VideoPlayer] Fail to get video info from the cap");
+    ihs::log::error("[VideoPlayer] Fail to get video info from the cap");
   }
   gst_caps_unref(caps);
-  SPDLOG_DEBUG("[VideoPlayer] original video width: {}, height: {}",
-               user_data->info_.width, user_data->info_.height);
+  IHS_DEBUG("[VideoPlayer] original video width: {}, height: {}",
+            user_data->info_.width, user_data->info_.height);
   // set to the target
   if (!gst_video_info_set_format(&user_data->info_, GST_VIDEO_FORMAT_NV12,
                                  static_cast<guint>(user_data->width_),
                                  static_cast<guint>(user_data->height_))) {
-    SPDLOG_ERROR("[VideoPlayer] Failed to set the video info to target NV12");
+    ihs::log::error(
+        "[VideoPlayer] Failed to set the video info to target NV12");
   }
 }
 
@@ -1296,7 +1297,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
   for (const char* name : candidates) {
     GstElement* candidate = gst_element_factory_make(name, "real-audiosink");
     if (!candidate) {
-      SPDLOG_DEBUG("[VideoPlayer] audio sink {} unavailable", name);
+      IHS_DEBUG("[VideoPlayer] audio sink {} unavailable", name);
       continue;
     }
     // Trust pipewiresink and pulsesink — they're reliable on modern Linux
@@ -1309,7 +1310,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
       GstStateChangeReturn ret =
           gst_element_set_state(candidate, GST_STATE_READY);
       if (ret == GST_STATE_CHANGE_FAILURE) {
-        SPDLOG_DEBUG("[VideoPlayer] audio sink {} failed READY", name);
+        IHS_DEBUG("[VideoPlayer] audio sink {} failed READY", name);
         gst_element_set_state(candidate, GST_STATE_NULL);
         gst_object_unref(candidate);
         continue;
@@ -1321,10 +1322,10 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
     break;
   }
   if (!real_sink) {
-    spdlog::error("[VideoPlayer] No working audio sink found");
+    ihs::log::error("[VideoPlayer] No working audio sink found");
     return nullptr;
   }
-  spdlog::info("[VideoPlayer] Selected audio sink: {}", picked);
+  ihs::log::info("[VideoPlayer] Selected audio sink: {}", picked);
   if (const char* dev = std::getenv("VIDEO_PLAYER_AUDIO_DEVICE")) {
     if (g_object_class_find_property(G_OBJECT_GET_CLASS(real_sink), "device")) {
       g_object_set(real_sink, "device", dev, nullptr);
@@ -1340,7 +1341,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
       gst_element_factory_make("scaletempo", "audio-scaletempo");
   audio_capsfilter_ = gst_element_factory_make("capsfilter", "audio-caps");
   if (!audio_convert_ || !audio_resample_ || !audio_capsfilter_) {
-    spdlog::error("[VideoPlayer] Failed to create audio sink bin elements");
+    ihs::log::error("[VideoPlayer] Failed to create audio sink bin elements");
     if (audio_convert_)
       gst_object_unref(audio_convert_);
     if (audio_resample_)
@@ -1355,7 +1356,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
     return nullptr;
   }
   if (!audio_scaletempo_) {
-    spdlog::warn(
+    ihs::log::warn(
         "[VideoPlayer] scaletempo unavailable; playback rate changes will "
         "pitch-shift audio. Install gst-plugins-good.");
   }
@@ -1414,7 +1415,7 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
                                    audio_capsfilter_, real_sink, nullptr);
   }
   if (!linked) {
-    spdlog::error("[VideoPlayer] Failed to link audio sink bin");
+    ihs::log::error("[VideoPlayer] Failed to link audio sink bin");
     gst_object_unref(bin);
     audio_convert_ = audio_resample_ = audio_capsfilter_ = nullptr;
     audio_scaletempo_ = nullptr;
@@ -1431,8 +1432,8 @@ GstElement* VideoPlayer::BuildAudioSinkBin() {
   gst_element_add_pad(bin, ghost);
   gst_object_unref(pad);
 
-  SPDLOG_DEBUG("[VideoPlayer] Built audio sink bin (sink={}, channels={})",
-               picked, output_channels_);
+  IHS_DEBUG("[VideoPlayer] Built audio sink bin (sink={}, channels={})", picked,
+            output_channels_);
   return bin;
 }
 
@@ -1454,7 +1455,7 @@ void VideoPlayer::OnSourceSetup(GstElement* /*playbin*/,
       }
     }
     g_object_set(source, "timeout", timeout, nullptr);
-    SPDLOG_DEBUG("[VideoPlayer] source timeout={}s", timeout);
+    IHS_DEBUG("[VideoPlayer] source timeout={}s", timeout);
   }
   if (g_object_class_find_property(klass, "user-agent")) {
     if (const char* ua = std::getenv("VIDEO_PLAYER_USER_AGENT")) {
@@ -1510,7 +1511,7 @@ void VideoPlayer::HandleAlbumArt(GstSample* sample) {
   constexpr size_t kMaxAlbumArtBytes = static_cast<size_t>(10) * 1024 * 1024;
   if (map.size == 0 || map.size > kMaxAlbumArtBytes) {
     if (map.size > kMaxAlbumArtBytes) {
-      spdlog::warn(
+      ihs::log::warn(
           "[VideoPlayer] Runtime album art is {} bytes (>{} MB cap); ignoring.",
           map.size, kMaxAlbumArtBytes / (static_cast<size_t>(1024) * 1024));
     }
@@ -1587,8 +1588,8 @@ void VideoPlayer::SetAudioTrack(int index) {
   gint n = 0;
   g_object_get(playbin_, "n-audio", &n, nullptr);
   if (index < 0 || index >= n) {
-    spdlog::warn("[VideoPlayer] SetAudioTrack({}) out of range (n={})", index,
-                 n);
+    ihs::log::warn("[VideoPlayer] SetAudioTrack({}) out of range (n={})", index,
+                   n);
     return;
   }
   g_object_set(playbin_, "current-audio", index, nullptr);
@@ -1596,7 +1597,8 @@ void VideoPlayer::SetAudioTrack(int index) {
 
 void VideoPlayer::SetOutputChannels(int channels) {
   if (channels < 1 || channels > 8) {
-    spdlog::warn("[VideoPlayer] SetOutputChannels({}) out of range", channels);
+    ihs::log::warn("[VideoPlayer] SetOutputChannels({}) out of range",
+                   channels);
     return;
   }
   output_channels_ = channels;
@@ -1633,7 +1635,7 @@ void VideoPlayer::SetScaleMethod(int method) {
     return;
   }
   if (method < 0 || method > 9) {
-    spdlog::warn("[VideoPlayer] SetScaleMethod({}) out of range", method);
+    ihs::log::warn("[VideoPlayer] SetScaleMethod({}) out of range", method);
     return;
   }
   if (g_object_class_find_property(G_OBJECT_GET_CLASS(video_scale_),
@@ -1678,8 +1680,8 @@ void VideoPlayer::SetSubtitleTrack(int index) {
   gint n = 0;
   g_object_get(playbin_, "n-text", &n, nullptr);
   if (index < 0 || index >= n) {
-    spdlog::warn("[VideoPlayer] SetSubtitleTrack({}) out of range (n={})",
-                 index, n);
+    ihs::log::warn("[VideoPlayer] SetSubtitleTrack({}) out of range (n={})",
+                   index, n);
     return;
   }
   g_object_set(playbin_, "current-text", index, nullptr);
@@ -1725,12 +1727,12 @@ static int QueryInputChannels(GstElement* audio_convert) {
 
 void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
   if (!audio_convert_) {
-    spdlog::warn("[VideoPlayer] SetChannelMixPreset: audio bin not built");
+    ihs::log::warn("[VideoPlayer] SetChannelMixPreset: audio bin not built");
     return;
   }
   if (!g_object_class_find_property(G_OBJECT_GET_CLASS(audio_convert_),
                                     "mix-matrix")) {
-    spdlog::warn(
+    ihs::log::warn(
         "[VideoPlayer] audioconvert mix-matrix unsupported (GStreamer < 1.20)");
     return;
   }
@@ -1742,7 +1744,7 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
   // coefficients.
   const int in_ch = QueryInputChannels(audio_convert_);
   if (in_ch != 6) {
-    spdlog::debug(
+    ihs::log::debug(
         "[VideoPlayer] SetChannelMixPreset('{}'): input has {} channels "
         "(need 6 for the matrix presets); applying capsfilter only.",
         preset, in_ch);
@@ -1800,7 +1802,7 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
     }
   }
   if (!match) {
-    spdlog::warn("[VideoPlayer] Unknown channel mix preset '{}'", preset);
+    ihs::log::warn("[VideoPlayer] Unknown channel mix preset '{}'", preset);
     return;
   }
 
@@ -1824,7 +1826,7 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
   g_value_unset(&matrix);
 
   SetOutputChannels(match->out_channels);
-  SPDLOG_DEBUG("[VideoPlayer] Applied channel mix preset '{}'", preset);
+  IHS_DEBUG("[VideoPlayer] Applied channel mix preset '{}'", preset);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1834,8 +1836,8 @@ void VideoPlayer::SetChannelMixPreset(const std::string& preset) {
 
 void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
   if (bands.size() != 10) {
-    spdlog::warn("[VideoPlayer] SetEqualizer: expected 10 bands, got {}",
-                 bands.size());
+    ihs::log::warn("[VideoPlayer] SetEqualizer: expected 10 bands, got {}",
+                   bands.size());
     return;
   }
   // Lazily insert equalizer-10bands into the audio sink bin on first
@@ -1847,18 +1849,18 @@ void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
   // audio dropout.
   if (!equalizer_) {
     if (!audio_bin_ || !audio_capsfilter_) {
-      spdlog::warn("[VideoPlayer] SetEqualizer: audio bin not available");
+      ihs::log::warn("[VideoPlayer] SetEqualizer: audio bin not available");
       return;
     }
     GstElement* upstream =
         audio_scaletempo_ ? audio_scaletempo_ : audio_resample_;
     if (!upstream) {
-      spdlog::warn("[VideoPlayer] SetEqualizer: upstream element missing");
+      ihs::log::warn("[VideoPlayer] SetEqualizer: upstream element missing");
       return;
     }
     GstElement* eq = gst_element_factory_make("equalizer-10bands", "audio-eq");
     if (!eq) {
-      spdlog::warn(
+      ihs::log::warn(
           "[VideoPlayer] equalizer-10bands element unavailable; install "
           "gst-plugins-good");
       return;
@@ -1875,7 +1877,8 @@ void VideoPlayer::SetEqualizer(const std::vector<double>& bands) {
     gst_element_unlink(upstream, audio_capsfilter_);
     gst_bin_add(GST_BIN(audio_bin_), eq);
     if (!gst_element_link_many(upstream, eq, audio_capsfilter_, nullptr)) {
-      spdlog::error("[VideoPlayer] Failed to splice equalizer into audio bin");
+      ihs::log::error(
+          "[VideoPlayer] Failed to splice equalizer into audio bin");
       gst_element_unlink(upstream, eq);
       gst_element_unlink(eq, audio_capsfilter_);
       gst_bin_remove(GST_BIN(audio_bin_), eq);
@@ -1922,7 +1925,7 @@ void VideoPlayer::SetVideoBalance(double brightness,
     }
     GstElement* vb = gst_element_factory_make("videobalance", "video-balance");
     if (!vb) {
-      spdlog::warn("[VideoPlayer] videobalance element unavailable");
+      ihs::log::warn("[VideoPlayer] videobalance element unavailable");
       return;
     }
     GstState cur = GST_STATE_NULL;
@@ -1944,7 +1947,7 @@ void VideoPlayer::SetVideoBalance(double brightness,
                     gst_element_link_filtered(vb, video_scale_, nv12);
     gst_caps_unref(nv12);
     if (!ok) {
-      spdlog::error("[VideoPlayer] Failed to splice videobalance");
+      ihs::log::error("[VideoPlayer] Failed to splice videobalance");
       gst_element_unlink(video_convert_, vb);
       gst_element_unlink(vb, video_scale_);
       gst_bin_remove(GST_BIN(pipeline_), vb);
@@ -1993,17 +1996,18 @@ void VideoPlayer::SetChannelMixMatrix(int in_channels,
                                       int out_channels,
                                       const std::vector<double>& matrix) {
   if (!audio_convert_) {
-    spdlog::warn("[VideoPlayer] SetChannelMixMatrix: audio bin not built");
+    ihs::log::warn("[VideoPlayer] SetChannelMixMatrix: audio bin not built");
     return;
   }
   if (in_channels <= 0 || out_channels <= 0 || in_channels > 8 ||
       out_channels > 8) {
-    spdlog::warn("[VideoPlayer] SetChannelMixMatrix: invalid dimensions {}x{}",
-                 in_channels, out_channels);
+    ihs::log::warn(
+        "[VideoPlayer] SetChannelMixMatrix: invalid dimensions {}x{}",
+        in_channels, out_channels);
     return;
   }
   if (static_cast<int>(matrix.size()) != in_channels * out_channels) {
-    spdlog::warn(
+    ihs::log::warn(
         "[VideoPlayer] SetChannelMixMatrix: matrix size mismatch (got {}, "
         "expected {})",
         matrix.size(), in_channels * out_channels);
@@ -2011,7 +2015,7 @@ void VideoPlayer::SetChannelMixMatrix(int in_channels,
   }
   if (!g_object_class_find_property(G_OBJECT_GET_CLASS(audio_convert_),
                                     "mix-matrix")) {
-    spdlog::warn("[VideoPlayer] audioconvert mix-matrix unsupported");
+    ihs::log::warn("[VideoPlayer] audioconvert mix-matrix unsupported");
     return;
   }
 

@@ -18,7 +18,7 @@
 #include "operation_tracker.h"
 
 #include "asio/post.hpp"
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 namespace flatpak_plugin {
 
@@ -44,8 +44,8 @@ void OperationTracker::TrackOperationStart(const std::string& app_id,
     op_info.required_bytes = 0;  // Initialize
     active_ops_[app_id] = op_info;
 
-    spdlog::debug("[FlatpakPlugin] Operation {} Tracker started for {}",
-                  op_type, app_id);
+    ihs::log::debug("[FlatpakPlugin] Operation {} Tracker started for {}",
+                    op_type, app_id);
   });
 }
 
@@ -58,7 +58,7 @@ void OperationTracker::SetOperationSize(const std::string& app_id,
       it->second.required_bytes = size_bytes;
       total_pending_bytes_ += size_bytes;
 
-      spdlog::debug(
+      ihs::log::debug(
           "[FlatpakPlugin] Cached required size {} bytes for app {}. Total "
           "queue pending: {}",
           size_bytes, app_id, total_pending_bytes_.load());
@@ -113,14 +113,14 @@ void OperationTracker::UpdateTotalOperations(const std::string& app_id,
   asio::post(io_context_, [this, app_id, total_ops]() {
     auto it = active_ops_.find(app_id);
     if (it == active_ops_.end()) {
-      spdlog::error("[FlatpakPlugin] can't update total operations for {}",
-                    app_id);
+      ihs::log::error("[FlatpakPlugin] can't update total operations for {}",
+                      app_id);
       return;
     }
 
     it->second.total_ops = total_ops;
-    spdlog::debug("[FlatpakPlugin] Updated total operations {} for app {}",
-                  total_ops, app_id);
+    ihs::log::debug("[FlatpakPlugin] Updated total operations {} for app {}",
+                    total_ops, app_id);
   });
 }
 
@@ -134,13 +134,13 @@ void OperationTracker::TrackOperationComplete(const std::string& app_id,
     OperationInfo& op_info = it->second;
     op_info.completed_ops++;
     op_info.completed_ref.insert(ref);
-    spdlog::debug("[FlatpakPlugin] Operation Progress for {}: {}/{}", app_id,
-                  op_info.completed_ops, op_info.total_ops);
+    ihs::log::debug("[FlatpakPlugin] Operation Progress for {}: {}/{}", app_id,
+                    op_info.completed_ops, op_info.total_ops);
 
     if (ref.find(app_id) != std::string::npos) {
       op_info.is_app = true;
-      spdlog::info("[FlatpakPlugin] Application Operations completed: {}",
-                   app_id);
+      ihs::log::info("[FlatpakPlugin] Application Operations completed: {}",
+                     app_id);
     }
   });
 }
@@ -154,7 +154,7 @@ void OperationTracker::SendOperationFinish(const std::string& app_id,
       return;
     }
     OperationInfo& op_info = it->second;
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] {} operation for {} completed, success:{}, total "
         "operations: {}, completed operations:{}",
         op_type, app_id, success, op_info.total_ops, op_info.completed_ops);
@@ -188,7 +188,7 @@ void OperationTracker::ClearOperation(const std::string& app_id) {
     if (it != active_ops_.end()) {
       total_pending_bytes_ -= it->second.required_bytes;
       active_ops_.erase(it);
-      spdlog::debug("[FlatpakPlugin] clear operation for {}", app_id);
+      ihs::log::debug("[FlatpakPlugin] clear operation for {}", app_id);
     }
   });
 }

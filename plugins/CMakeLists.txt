@@ -20,6 +20,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${PROJECT_BINARY_DIR}/config
+        # ivi-homescreen shell root, so plugins resolve the ihs logging shim
+        # "logging/logging.h" (ihs::log:: + IHS_DEBUG / IHS_TRACE).
+        ${CMAKE_SOURCE_DIR}/shell
 )
 
 find_package(PkgConfig REQUIRED)
@@ -75,7 +78,8 @@ endmacro(PLUGIN_OPTION)
 # target used at top level
 add_library(plugins generated_plugin_registrant.cc)
 target_include_directories(plugins PUBLIC . ${CMAKE_BINARY_DIR} ${PLUGINS_DIR})
-target_link_libraries(plugins PUBLIC rapidjson spdlog flutter)
+target_link_libraries(plugins PUBLIC rapidjson flutter)
+ihs_target_add_logging(plugins)
 
 # Plugins
 PLUGIN_OPTION(common "Includes Common Plugin" ON)

@@ -36,7 +36,7 @@ AppstreamCatalog::~AppstreamCatalog() = default;
 void AppstreamCatalog::parseXmlFile(const std::string& filePath) {
   xmlDoc* document = xmlReadFile(filePath.c_str(), nullptr, 0);
   if (document == nullptr) {
-    spdlog::error("Failed to parse {}", filePath);
+    ihs::log::error("Failed to parse {}", filePath);
     return;
   }
 
@@ -69,13 +69,13 @@ void AppstreamCatalog::decompressGzFile(const std::string& gzPath,
                                         const std::string& xmlPath) {
   const auto gz = gzopen(gzPath.c_str(), "rb");
   if (!gz) {
-    spdlog::error("Failed to open {} for reading", gzPath);
+    ihs::log::error("Failed to open {} for reading", gzPath);
     return;
   }
 
   std::ofstream outFile(xmlPath, std::ios::binary);
   if (!outFile) {
-    spdlog::error("Failed to open {} for writing", xmlPath);
+    ihs::log::error("Failed to open {} for writing", xmlPath);
     gzclose(gz);
     return;
   }

@@ -58,7 +58,7 @@ void on_global(void* /*data*/,
   const char* name = spa_dict_lookup(props, "node.description");
 
   if (media_class && std::string(media_class) == "Video/Source") {
-    spdlog::debug("found camera: {} (id: {})", name, id);
+    ihs::log::debug("found camera: {} (id: {})", name, id);
     cameras.push_back({id, name ? name : "Unknown"});
   }
 }
@@ -79,7 +79,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
                            flutter::BinaryMessenger* /*messenger*/)
     : mPreview(), registrar_(plugin_registrar) {
   if (!pipewire_graph::instance().initialize()) {
-    spdlog::error("failed to initialize PipeWire manager!");
+    ihs::log::error("failed to initialize PipeWire manager!");
   }
 
   auto messenger = registrar_->messenger();
@@ -96,7 +96,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
           std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&& sink)
           -> std::unique_ptr<
               flutter::StreamHandlerError<flutter::EncodableValue>> {
-        spdlog::info("[camera_plugin] image_stream on_listen");
+        ihs::log::info("[camera_plugin] image_stream on_listen");
         image_sink_ = std::move(sink);
         StartImageStream();  // start PipeWire or a test generator
         return nullptr;
@@ -105,7 +105,7 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrarDesktop* plugin_registrar,
       [this](const flutter::EncodableValue* /*args*/)
           -> std::unique_ptr<
               flutter::StreamHandlerError<flutter::EncodableValue>> {
-        spdlog::info("[camera_plugin] image_stream on_cancel");
+        ihs::log::info("[camera_plugin] image_stream on_cancel");
         StopImageStream();
         image_sink_.reset();
         return nullptr;
@@ -124,8 +124,8 @@ ErrorOr<flutter::EncodableList> CameraPlugin::GetAvailableCameras() {
 
   const auto cameras = mgr.getCameraNodes();
   for (auto camera : cameras) {
-    spdlog::debug("[camera_plugin] detected camera:  (camera_id: {})",
-                  camera.id);
+    ihs::log::debug("[camera_plugin] detected camera:  (camera_id: {})",
+                    camera.id);
     list.emplace_back(std::in_place_type<std::string>,
                       std::to_string(camera.id));
   }
@@ -136,7 +136,7 @@ void CameraPlugin::Create(
     const std::string& camera_id,
     const PlatformMediaSettings& /*settings*/,
     const std::function<void(ErrorOr<int64_t> reply)> result) {
-  spdlog::debug("[camera_plugin] create camera_id: {}", camera_id);
+  ihs::log::debug("[camera_plugin] create camera_id: {}", camera_id);
   if (CameraId_CameraStream.find(camera_id) == CameraId_CameraStream.end()) {
     auto new_camera =
         std::make_shared<camera_stream>(registrar_, camera_id, 640, 480);
@@ -191,8 +191,8 @@ void CameraPlugin::Create(
     TextureId_CameraStream.insert({new_camera->texture_id(), new_camera});
   }
   int64_t texture_id = CameraId_CameraStream[camera_id]->texture_id();
-  spdlog::debug("[camera_plugin] camera_id {}'s texture_id: {}", camera_id,
-                texture_id);
+  ihs::log::debug("[camera_plugin] camera_id {}'s texture_id: {}", camera_id,
+                  texture_id);
   result(ErrorOr<int64_t>(texture_id));
 }
 /******************************************************************************
@@ -211,7 +211,7 @@ int decode_mjpeg(const uint8_t* input,
 
   jpeg_mem_src(&cinfo, input, input_size);
   if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
-    spdlog::error("[decode_mjpeg] failed to read JPEG header.");
+    ihs::log::error("[decode_mjpeg] failed to read JPEG header.");
     jpeg_destroy_decompress(&cinfo);
     return -1;
   }
@@ -220,7 +220,7 @@ int decode_mjpeg(const uint8_t* input,
   if (cinfo.output_width != static_cast<uint32_t>(out_width) ||
       cinfo.output_height != static_cast<uint32_t>(out_height) ||
       cinfo.output_components != 3) {
-    spdlog::error("[decode_mjpeg] unexpected size/components.");
+    ihs::log::error("[decode_mjpeg] unexpected size/components.");
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     return -1;
@@ -261,7 +261,7 @@ void save_image_to_jpeg(const std::string& filename,
   // Open a file for writing
   FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
-    spdlog::error("error: unable to open file {} for writing!", filename);
+    ihs::log::error("error: unable to open file {} for writing!", filename);
     return;
   }
 
@@ -291,7 +291,7 @@ void save_image_to_jpeg(const std::string& filename,
   jpeg_finish_compress(&cinfo);
   fclose(outfile);
   jpeg_destroy_compress(&cinfo);
-  spdlog::debug("image saved to {}", filename);
+  ihs::log::debug("image saved to {}", filename);
 }
 
 void CameraPlugin::Initialize(
@@ -304,12 +304,12 @@ void CameraPlugin::Initialize(
 
   result(ErrorOr(PlatformSize(camera_stream->camera_width(),
                               camera_stream->camera_height())));
-  spdlog::debug("[camera_plugin] start the stream for camera_id: {}",
-                camera_stream->camera_id());
+  ihs::log::debug("[camera_plugin] start the stream for camera_id: {}",
+                  camera_stream->camera_id());
   camera_stream->Start(camera_stream->camera_id());
 }
 void CameraPlugin::blit_fb(uint8_t const* pixels) const {
-  spdlog::debug("[camera_plugin] blit_fb");
+  ihs::log::debug("[camera_plugin] blit_fb");
   texture_registrar_->TextureClearCurrent();
   glBindFramebuffer(GL_FRAMEBUFFER, mPreview.framebuffer);
   glViewport(0, 0, mPreview.width, mPreview.height);
@@ -335,7 +335,7 @@ void CameraPlugin::blit_fb(uint8_t const* pixels) const {
 }
 
 std::optional<FlutterError> CameraPlugin::Dispose(const int64_t texture_id) {
-  spdlog::debug("[camera_plugin] dispose texture_id: {}", texture_id);
+  ihs::log::debug("[camera_plugin] dispose texture_id: {}", texture_id);
   const auto camera_stream = TextureId_CameraStream[texture_id];
   camera_stream->Stop();
   return {};
@@ -344,7 +344,8 @@ std::optional<FlutterError> CameraPlugin::Dispose(const int64_t texture_id) {
 void CameraPlugin::TakePicture(
     const int64_t texture_id,
     const std::function<void(ErrorOr<std::string> reply)> result) {
-  spdlog::debug("[camera_plugin] take picture for texture_id: {}", texture_id);
+  ihs::log::debug("[camera_plugin] take picture for texture_id: {}",
+                  texture_id);
   const auto camera_stream = TextureId_CameraStream[texture_id];
   result(ErrorOr(camera_stream->takePicture()));
 }
@@ -362,7 +363,7 @@ void CameraPlugin::StopVideoRecording(
 void CameraPlugin::PausePreview(
     const int64_t texture_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
-  spdlog::debug("[camera_plugin] pause preview texture_id: {}", texture_id);
+  ihs::log::debug("[camera_plugin] pause preview texture_id: {}", texture_id);
   const auto camera_stream = TextureId_CameraStream[texture_id];
   camera_stream->PauseStream();
   result({});
@@ -371,7 +372,7 @@ void CameraPlugin::PausePreview(
 void CameraPlugin::ResumePreview(
     const int64_t texture_id,
     const std::function<void(std::optional<FlutterError> reply)> result) {
-  spdlog::debug("[camera_plugin] resume preview");
+  ihs::log::debug("[camera_plugin] resume preview");
   const auto camera_stream = TextureId_CameraStream[texture_id];
   camera_stream->ResumeStream();
   result({});

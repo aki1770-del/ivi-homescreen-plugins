@@ -1,7 +1,7 @@
 
 #include "nav_render_texture.h"
 
-#include <spdlog/spdlog.h>
+#include "logging/logging.h"
 
 #include "libnav_render.h"
 
@@ -12,12 +12,12 @@ namespace nav_render_view_plugin {
 void NavRenderTexture::RegisterWithRegistrar(
     flutter::PluginRegistrar* registrar) {
   if (!LibNavRender::IsPresent()) {
-    spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
+    ihs::log::error("[NavRenderViewPlugin] libnav_render.so missing");
   }
   if (LibNavRender::kExpectedTextureApiVersion !=
       LibNavRender->TextureGetInterfaceVersion()) {
-    spdlog::error("[NavRenderViewPlugin] unexpected interface version: {}",
-                  LibNavRender->TextureGetInterfaceVersion());
+    ihs::log::error("[NavRenderViewPlugin] unexpected interface version: {}",
+                    LibNavRender->TextureGetInterfaceVersion());
   }
 
   auto plugin = std::make_unique<NavRenderTexture>(registrar);

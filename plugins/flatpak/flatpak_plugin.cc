@@ -49,22 +49,23 @@ FlatpakPlugin::FlatpakPlugin(flutter::PluginRegistrar* registrar)
       strand_(std::make_unique<asio::io_context::strand>(*io_context_)),
       registrar_(registrar) {
   plugin_common_glib::MainLoop::GetInstance();
-  spdlog::info("[FlatpakPlugin] GLIB Main loop initialized");
+  ihs::log::info("[FlatpakPlugin] GLIB Main loop initialized");
   thread_ = std::thread([&] { io_context_->run(); });
 
   asio::post(*strand_, [&]() {
     pthread_self_ = pthread_self();
-    spdlog::debug("\tthread_id=0x{:x}", pthread_self_);
+    ihs::log::debug("\tthread_id=0x{:x}", pthread_self_);
   });
 
-  spdlog::debug("[FlatpakPlugin]");
-  spdlog::debug("\tlinked with libflatpak.so v{}.{}.{}", FLATPAK_MAJOR_VERSION,
-                FLATPAK_MINOR_VERSION, FLATPAK_MICRO_VERSION);
-  spdlog::debug("\tDefault Arch: {}", flatpak_get_default_arch());
-  spdlog::debug("\tSupported Arches:");
+  ihs::log::debug("[FlatpakPlugin]");
+  ihs::log::debug("\tlinked with libflatpak.so v{}.{}.{}",
+                  FLATPAK_MAJOR_VERSION, FLATPAK_MINOR_VERSION,
+                  FLATPAK_MICRO_VERSION);
+  ihs::log::debug("\tDefault Arch: {}", flatpak_get_default_arch());
+  ihs::log::debug("\tSupported Arches:");
   if (auto* supported_arches = flatpak_get_supported_arches()) {
     for (auto arch = supported_arches; *arch != nullptr; ++arch) {
-      spdlog::debug("\t\t{}", *arch);
+      ihs::log::debug("\t\t{}", *arch);
     }
   }
 
@@ -103,7 +104,7 @@ void FlatpakPlugin::Init() {
       [this](const auto& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) { this->HandleMethodCall(call, std::move(result)); });
-  spdlog::info("[FlatpakPlugin] Event channel Setup Complete");
+  ihs::log::info("[FlatpakPlugin] Event channel Setup Complete");
 
   flatpak_plugin::FlatpakShim::update_appstream();
 }
@@ -197,10 +198,10 @@ void FlatpakPlugin::ApplicationInstall(
         try {
           callback(std::move(error));
         } catch (const std::exception& e) {
-          spdlog::error("Exception in ApplicationInstall callback: {}",
-                        e.what());
+          ihs::log::error("Exception in ApplicationInstall callback: {}",
+                          e.what());
         } catch (...) {
-          spdlog::error("Unknown exception in ApplicationInstall callback");
+          ihs::log::error("Unknown exception in ApplicationInstall callback");
         }
       });
     }
@@ -239,10 +240,10 @@ void FlatpakPlugin::ApplicationUninstall(
         try {
           callback(std::move(error));
         } catch (const std::exception& e) {
-          spdlog::error("Exception in ApplicationUninstall callback: {}",
-                        e.what());
+          ihs::log::error("Exception in ApplicationUninstall callback: {}",
+                          e.what());
         } catch (...) {
-          spdlog::error("Unknown exception in ApplicationUninstall callback");
+          ihs::log::error("Unknown exception in ApplicationUninstall callback");
         }
       });
     }
@@ -283,10 +284,10 @@ void FlatpakPlugin::ApplicationUpdate(
         try {
           callback(std::move(error));
         } catch (const std::exception& e) {
-          spdlog::error("Exception in ApplicationUpdate callback: {}",
-                        e.what());
+          ihs::log::error("Exception in ApplicationUpdate callback: {}",
+                          e.what());
         } catch (...) {
-          spdlog::error("Unknown exception in ApplicationUpdate callback");
+          ihs::log::error("Unknown exception in ApplicationUpdate callback");
         }
       });
     }
@@ -320,12 +321,12 @@ void FlatpakPlugin::ApplicationStart(
       std::make_shared<std::function<void(ErrorOr<bool>)>>(std::move(result));
 
   asio::dispatch(*strand_, [this, id, result_callback]() {
-    spdlog::debug("[FlatpakPlugin] ApplicationStart executing on strand");
+    ihs::log::debug("[FlatpakPlugin] ApplicationStart executing on strand");
 
     shim_->ApplicationStart(
         id, *strand_, portal_manager_,
         [result_callback](const ErrorOr<bool>& start_result) {
-          spdlog::debug("[FlatpakPlugin] ApplicationStart callback received");
+          ihs::log::debug("[FlatpakPlugin] ApplicationStart callback received");
           (*result_callback)(start_result);
         });
   });
@@ -338,16 +339,16 @@ ErrorOr<bool> FlatpakPlugin::ApplicationStop(const std::string& id) {
 void FlatpakPlugin::SetupEventChannel(
     const std::string& app_id,
     std::function<void(std::optional<FlutterError> reply)> result) {
-  spdlog::info("[FlatpakPlugin] Setting up channel for :{}", app_id);
+  ihs::log::info("[FlatpakPlugin] Setting up channel for :{}", app_id);
 
   try {
     shim_->SetupTransactionEventChannel(app_id, registrar_->messenger());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    spdlog::info("[FlatpakPlugin] Event channel ready for: {}", app_id);
+    ihs::log::info("[FlatpakPlugin] Event channel ready for: {}", app_id);
 
     result(std::nullopt);
   } catch (const std::exception& e) {
-    spdlog::error("Cannot setup channel :{}", e.what());
+    ihs::log::error("Cannot setup channel :{}", e.what());
     result(FlutterError("CHANNEL_SETUP_FAILED", e.what(),
                         flutter::EncodableValue()));
   }
@@ -358,7 +359,7 @@ void FlatpakPlugin::HandleMethodCall(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result)
     const {
   const auto& method_name = method.method_name();
-  spdlog::debug("[FlatpakPlugin] HandleMethodCall {}", method_name);
+  ihs::log::debug("[FlatpakPlugin] HandleMethodCall {}", method_name);
 
   if (method_name == "getSystemStorage") {
     std::error_code ec;

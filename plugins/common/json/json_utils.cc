@@ -35,7 +35,7 @@ rapidjson::Document GetJsonDocumentFromFile(std::string& path,
     if (!ifs.is_open()) {
       if (missing_is_error) {
         d.Parse("{}");
-        spdlog::error("Failed to open file for reading: {}", path);
+        ihs::log::error("Failed to open file for reading: {}", path);
       }
       return d;
     }
@@ -44,7 +44,7 @@ rapidjson::Document GetJsonDocumentFromFile(std::string& path,
   } else {
     d.SetObject();
     if (missing_is_error) {
-      spdlog::error("File missing: {}", path);
+      ihs::log::error("File missing: {}", path);
     }
   }
   return d;
@@ -53,7 +53,7 @@ rapidjson::Document GetJsonDocumentFromFile(std::string& path,
 bool WriteJsonDocumentToFile(std::string& path,
                              const rapidjson::Document& doc) {
   if (path.empty()) {
-    spdlog::error("Missing File Path: {}", path);
+    ihs::log::error("Missing File Path: {}", path);
     return false;
   }
 
@@ -64,7 +64,7 @@ bool WriteJsonDocumentToFile(std::string& path,
 
   FILE* fp = fopen(path.c_str(), "w+");
   if (fp == nullptr) {
-    spdlog::error("Failed to open file: {}", path);
+    ihs::log::error("Failed to open file: {}", path);
     return false;
   }
 

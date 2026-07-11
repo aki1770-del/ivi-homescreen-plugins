@@ -55,7 +55,7 @@ void IntegrationTestApi::SetUp(flutter::BinaryMessenger* binary_messenger,
           [api](const MethodCall<>& call,
                 const std::unique_ptr<MethodResult<>>& result) {
             const auto& method = call.method_name();
-            SPDLOG_DEBUG("[IntegrationTest] {}", method);
+            IHS_DEBUG("[IntegrationTest] {}", method);
 
             if (method == "allTestsFinished") {
               const auto args = std::get_if<EncodableMap>(call.arguments());

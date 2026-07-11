@@ -51,36 +51,36 @@ CameraContext::CameraContext(std::string cameraName,
       mEnableAudio(enableAudio),
       mCamera(std::move(camera)),
       mPreview() {
-  spdlog::debug("[camera_plugin]");
-  spdlog::debug("\tcameraName: [{}]", mCameraName);
-  spdlog::debug("\tresolutionPreset: [{}]", mResolutionPreset);
-  spdlog::debug("\tfps: [{}]", mFps);
-  spdlog::debug("\tvideoBitrate: [{}]", mVideoBitrate);
-  spdlog::debug("\taudioBitrate: [{}]", mAudioBitrate);
-  spdlog::debug("\tenableAudio: [{}]", mEnableAudio);
+  ihs::log::debug("[camera_plugin]");
+  ihs::log::debug("\tcameraName: [{}]", mCameraName);
+  ihs::log::debug("\tresolutionPreset: [{}]", mResolutionPreset);
+  ihs::log::debug("\tfps: [{}]", mFps);
+  ihs::log::debug("\tvideoBitrate: [{}]", mVideoBitrate);
+  ihs::log::debug("\taudioBitrate: [{}]", mAudioBitrate);
+  ihs::log::debug("\tenableAudio: [{}]", mEnableAudio);
   mCameraState = CAM_STATE_AVAILABLE;
   if (auto res = mCamera->acquire(); res == 0) {
     if (mCameraState == CAM_STATE_AVAILABLE) {
       mCameraState = CAM_STATE_ACQUIRED;
     }
   } else {
-    spdlog::error("[camera_plugin] Failed to acquire camera: {}", res);
+    ihs::log::error("[camera_plugin] Failed to acquire camera: {}", res);
   }
 
-  spdlog::debug("[camera_plugin] Controls:");
+  ihs::log::debug("[camera_plugin] Controls:");
   for (const auto& [id, info] : mCamera->controls()) {
-    spdlog::debug("\t[{}] {}", id->name(), info.toString());
+    ihs::log::debug("\t[{}] {}", id->name(), info.toString());
   }
 
-  spdlog::debug("[camera_plugin] Properties:");
+  ihs::log::debug("[camera_plugin] Properties:");
   for (const auto& [key, value] : mCamera->properties()) {
     const auto* id = libcamera::properties::properties.at(key);
-    spdlog::debug("\t[{}] {}", id->name(), value.toString());
+    ihs::log::debug("\t[{}] {}", id->name(), value.toString());
   }
 }
 
 CameraContext::~CameraContext() {
-  SPDLOG_DEBUG("[camera_plugin] ~CameraContext()");
+  IHS_DEBUG("[camera_plugin] ~CameraContext()");
   mCamera->release();
   mCameraState = CAM_STATE_AVAILABLE;
 }
@@ -107,7 +107,7 @@ std::string CameraContext::Initialize(
   camera_id_ = camera_id;
   texture_registrar_ = plugin_registrar->texture_registrar();
   mImageFormatGroup.assign(image_format_group);
-  spdlog::debug(
+  ihs::log::debug(
       "[camera_plugin] Initialize: cameraId: {}, imageFormatGroup: [{}]",
       camera_id, mImageFormatGroup);
 
@@ -137,7 +137,7 @@ std::string CameraContext::Initialize(
 
   if (auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
       status != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error("[camera_plugin] FramebufferStatus: 0x{:X}", status);
+    ihs::log::error("[camera_plugin] FramebufferStatus: 0x{:X}", status);
   }
 
   glFinish();
@@ -234,23 +234,23 @@ std::string CameraContext::takePicture() {
 }
 
 void CameraContext::startVideoRecording(bool /* enableStream */) {
-  SPDLOG_DEBUG("[camera_plugin] startVideoRecording");
+  IHS_DEBUG("[camera_plugin] startVideoRecording");
 }
 
 void CameraContext::pauseVideoRecording() {
-  SPDLOG_DEBUG("[camera_plugin] pauseVideoRecording");
+  IHS_DEBUG("[camera_plugin] pauseVideoRecording");
 }
 
 void CameraContext::resumeVideoRecording() {
-  SPDLOG_DEBUG("[camera_plugin] resumeVideoRecording");
+  IHS_DEBUG("[camera_plugin] resumeVideoRecording");
 }
 
 std::string CameraContext::stopVideoRecording() {
   if (auto filename = GetFilePathForVideo(); filename.has_value()) {
-    SPDLOG_DEBUG("[camera_plugin] stopVideoRecording: [{}]", filename.value());
+    IHS_DEBUG("[camera_plugin] stopVideoRecording: [{}]", filename.value());
     return filename.value();
   }
-  SPDLOG_DEBUG("[camera_plugin] stopVideoRecording: []");
+  IHS_DEBUG("[camera_plugin] stopVideoRecording: []");
   return {};
 }
 

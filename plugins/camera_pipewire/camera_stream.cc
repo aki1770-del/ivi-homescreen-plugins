@@ -50,7 +50,7 @@ static int decode_mjpeg(const uint8_t* input,
 
   jpeg_mem_src(&cinfo, input, input_size);
   if (jpeg_read_header(&cinfo, TRUE) != JPEG_HEADER_OK) {
-    spdlog::error("[decode_mjpeg] failed to read JPEG header.");
+    ihs::log::error("[decode_mjpeg] failed to read JPEG header.");
     jpeg_destroy_decompress(&cinfo);
     return -1;
   }
@@ -59,7 +59,7 @@ static int decode_mjpeg(const uint8_t* input,
   if (static_cast<int>(cinfo.output_width) != out_width ||
       static_cast<int>(cinfo.output_height) != out_height ||
       cinfo.output_components != 3) {
-    spdlog::error("[decode_mjpeg] unexpected size.");
+    ihs::log::error("[decode_mjpeg] unexpected size.");
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
     return -1;
@@ -85,8 +85,8 @@ static int decode_yuy2(const uint8_t* input,
                        const int height) {
   if (const size_t expected_size = width * height * 2;
       input_size < expected_size) {
-    spdlog::error("[decode_yuy2] input size too small: {} < {}", input_size,
-                  expected_size);
+    ihs::log::error("[decode_yuy2] input size too small: {} < {}", input_size,
+                    expected_size);
     return -1;
   }
 
@@ -181,7 +181,7 @@ camera_stream::camera_stream(flutter::PluginRegistrarDesktop* plugin_registrar,
 
   if (auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
       status != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error("[camera_plugin] framebufferStatus: 0x{:X}", status);
+    ihs::log::error("[camera_plugin] framebufferStatus: 0x{:X}", status);
   }
 
   glFinish();
@@ -225,13 +225,13 @@ bool camera_stream::Start(const std::string& camera_id) {
   // 1) Ensure the manager is running
   auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] fail to initialize PipewireGraph.");
+    ihs::log::error("[CameraStream] fail to initialize PipewireGraph.");
     return false;
   }
 
   auto* loop = mgr.threadLoop();
   if (!loop) {
-    spdlog::error("[CameraStream] threadLoop is null!");
+    ihs::log::error("[CameraStream] threadLoop is null!");
     return false;
   }
 
@@ -240,7 +240,7 @@ bool camera_stream::Start(const std::string& camera_id) {
   {
     auto* core = mgr.core();
     if (!core) {
-      spdlog::error("[CameraStream] no valid PipeWire core.");
+      ihs::log::error("[CameraStream] no valid PipeWire core.");
       pw_thread_loop_unlock(loop);
       return false;
     }
@@ -252,7 +252,7 @@ bool camera_stream::Start(const std::string& camera_id) {
 
     pw_stream_ = pw_stream_new(core, "MyCameraStream", props);
     if (!pw_stream_) {
-      spdlog::error("[CameraStream] failed to create pw_stream.");
+      ihs::log::error("[CameraStream] failed to create pw_stream.");
       pw_thread_loop_unlock(loop);
       return false;
     }
@@ -289,15 +289,15 @@ bool camera_stream::Start(const std::string& camera_id) {
     } else if (format_env == "YUY2") {
       camera_output_format = "YUY2";
     } else {
-      spdlog::error(
+      ihs::log::error(
           "CAMERA_OUTPUT_FORMAT is set to an unsupported value ('{}'). "
           "Supported values: MJPEG, YUY2. Defaulting to YUY2.",
           format_env);
       camera_output_format = "YUY2";
     }
 
-    spdlog::debug("[CameraStream] camera_output_format is set to {}",
-                  camera_output_format);
+    ihs::log::debug("[CameraStream] camera_output_format is set to {}",
+                    camera_output_format);
 
     if (camera_output_format == "MJPEG") {
       params[0] = static_cast<const spa_pod*>(spa_pod_builder_add_object(
@@ -317,14 +317,14 @@ bool camera_stream::Start(const std::string& camera_id) {
     }
 
     // Actually connect the stream
-    spdlog::debug("[CameraStream] connecting to camera_id: {}", camera_id);
+    ihs::log::debug("[CameraStream] connecting to camera_id: {}", camera_id);
     if (int res = pw_stream_connect(
             pw_stream_, PW_DIRECTION_INPUT, PW_ID_ANY,
             static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT |
                                          PW_STREAM_FLAG_MAP_BUFFERS),
             params, 1);
         res < 0) {
-      spdlog::error("[CameraStream] pw_stream_connect() error: {}", res);
+      ihs::log::error("[CameraStream] pw_stream_connect() error: {}", res);
       pw_stream_destroy(pw_stream_);
       pw_stream_ = nullptr;
       pw_thread_loop_unlock(loop);
@@ -372,7 +372,7 @@ void save_image_to_jpeg(const std::string& filename,
   // Open a file for writing
   FILE* outfile = fopen(filename.c_str(), "wb");
   if (!outfile) {
-    spdlog::error("error: unable to open {} for writing", filename);
+    ihs::log::error("error: unable to open {} for writing", filename);
     return;
   }
 
@@ -402,7 +402,7 @@ void save_image_to_jpeg(const std::string& filename,
   jpeg_finish_compress(&cinfo);
   fclose(outfile);
   jpeg_destroy_compress(&cinfo);
-  spdlog::debug("image saved to {}", filename);
+  ihs::log::debug("image saved to {}", filename);
 }
 
 static void YUY2ToI420Planes(const uint8_t* src,
@@ -513,7 +513,7 @@ void camera_stream::HandleProcess() {
     ret = decode_mjpeg(compressedData, compressedSize, decoded_buffer_.get(),
                        width_, height_);
   } else {
-    spdlog::debug("camera_output_format {}", camera_output_format);
+    ihs::log::debug("camera_output_format {}", camera_output_format);
   }
 
   if (ret == 0) {
@@ -545,7 +545,7 @@ void camera_stream::HandleProcess() {
       registrar_->texture_registrar()->MarkTextureFrameAvailable(texture_id_);
     }
   } else {
-    spdlog::error("[CameraStream] mjpeg decode failed.");
+    ihs::log::error("[CameraStream] mjpeg decode failed.");
   }
   pw_stream_queue_buffer(pw_stream_, buf);
 }
@@ -574,8 +574,9 @@ void camera_stream::OnStreamStateChanged(void* /*data*/,
                                          const pw_stream_state old_state,
                                          const pw_stream_state new_state,
                                          const char* /*error*/) {
-  spdlog::debug("[CameraStream] stream state changed from {} to {}",
-                StreamStateToString(old_state), StreamStateToString(new_state));
+  ihs::log::debug("[CameraStream] stream state changed from {} to {}",
+                  StreamStateToString(old_state),
+                  StreamStateToString(new_state));
 }
 
 void camera_stream::OnStreamProcess(void* data) {
@@ -590,13 +591,13 @@ void camera_stream::PauseStream() const {
 
   auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
+    ihs::log::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
   auto* loop = mgr.threadLoop();
   if (!loop) {
-    spdlog::error("[CameraStream] threadLoop is null!");
+    ihs::log::error("[CameraStream] threadLoop is null!");
     return;
   }
 
@@ -611,13 +612,13 @@ void camera_stream::ResumeStream() const {
 
   auto& mgr = pipewire_graph::instance();
   if (!mgr.initialize()) {
-    spdlog::error("[CameraStream] failed to initialize PipewireGraph.");
+    ihs::log::error("[CameraStream] failed to initialize PipewireGraph.");
     return;
   }
 
   auto* loop = mgr.threadLoop();
   if (!loop) {
-    spdlog::error("[CameraStream] threadLoop is null!");
+    ihs::log::error("[CameraStream] threadLoop is null!");
     return;
   }
 

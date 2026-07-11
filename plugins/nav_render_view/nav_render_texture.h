@@ -5,7 +5,6 @@
 #include <flutter/plugin_registrar.h>
 
 #include "nav_render_error.h"
-#include "wayland/display.h"
 
 namespace nav_render_view_plugin {
 class NavRenderTexture final : public flutter::Plugin {

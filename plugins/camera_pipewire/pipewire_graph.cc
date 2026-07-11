@@ -16,7 +16,7 @@
 
 #include "pipewire_graph.h"
 
-#include <spdlog/spdlog.h>
+#include "logging/logging.h"
 
 pipewire_graph& pipewire_graph::instance() {
   static pipewire_graph s_instance;
@@ -40,7 +40,7 @@ void pipewire_graph::on_global(void* data,
                                const uint32_t version,
                                const struct spa_dict* props) {
   if (!data) {
-    spdlog::error("on_global received null data");
+    ihs::log::error("on_global received null data");
     return;
   }
 
@@ -59,7 +59,7 @@ void pipewire_graph::on_global(void* data,
 }
 void pipewire_graph::on_global_remove(void* data, const uint32_t id) {
   if (!data) {
-    spdlog::error("[error] on_global_remove received null data");
+    ihs::log::error("[error] on_global_remove received null data");
     return;
   }
   auto* self = static_cast<pipewire_graph*>(data);
@@ -98,14 +98,14 @@ bool pipewire_graph::initialize() {
   // 2) Create the main loop, context, and core
   pw_thread_loop_ = pw_thread_loop_new("camera-loop", nullptr);
   if (!pw_thread_loop_) {
-    spdlog::error("[CameraManager] failed to create pw_main_loop.");
+    ihs::log::error("[CameraManager] failed to create pw_main_loop.");
     return false;
   }
 
   // 3) Start the loop in its own thread
   if (int ret = pw_thread_loop_start(pw_thread_loop_); ret != 0) {
-    spdlog::error("[CameraManager] failed to start pw_thread_loop (err={})",
-                  ret);
+    ihs::log::error("[CameraManager] failed to start pw_thread_loop (err={})",
+                    ret);
     pw_thread_loop_destroy(pw_thread_loop_);
     pw_thread_loop_ = nullptr;
     return false;
@@ -116,17 +116,18 @@ bool pipewire_graph::initialize() {
   {
     // We get the underlying spa_loop from the thread loop
     if (auto* loop = pw_thread_loop_get_loop(pw_thread_loop_); !loop) {
-      spdlog::error("[CameraManager] could not get loop from threadLoop.");
+      ihs::log::error("[CameraManager] could not get loop from threadLoop.");
     } else {
       // Create PipeWire context
       pw_context_ = pw_context_new(loop, nullptr, 0);
       if (!pw_context_) {
-        spdlog::error("[CameraManager] failed to create pw_context.");
+        ihs::log::error("[CameraManager] failed to create pw_context.");
       } else {
         // Connect to PipeWire core
         pw_core_ = pw_context_connect(pw_context_, nullptr, 0);
         if (!pw_core_) {
-          spdlog::error("[CameraManager] could not connect to PipeWire core.");
+          ihs::log::error(
+              "[CameraManager] could not connect to PipeWire core.");
         }
         pw_registry_ = pw_core_get_registry(pw_core_, PW_VERSION_REGISTRY, 0);
         static pw_registry_events registry_events = {
@@ -187,7 +188,7 @@ void pipewire_graph::shutdown() {
   // 4) De-init PipeWire
   pw_deinit();
   initialized_ = false;
-  spdlog::info("[PipewireGraph] Shutdown completed");
+  ihs::log::info("[PipewireGraph] Shutdown completed");
 }
 
 void pipewire_graph::handleNodeInfo(const uint32_t id,
@@ -317,7 +318,7 @@ const std::vector<LinkInfo>& pipewire_graph::getActiveLinks() const {
 }
 
 void pipewire_graph::printDebugNodeInfo(const NodeInfo& node) {
-  spdlog::debug(
+  ihs::log::debug(
       "[PipewireGraph] Node ID: {} | Name: {} | Media Class: {} | Factory: {} "
       "| Version: {} | Camera: {} | Audio: {}",
       node.id, node.name, node.media_class, node.factory_name, node.version,
@@ -325,14 +326,14 @@ void pipewire_graph::printDebugNodeInfo(const NodeInfo& node) {
 }
 
 void pipewire_graph::printDebugPortInfo(const PortInfo& port) {
-  spdlog::debug(
+  ihs::log::debug(
       "[PipewireGraph] Port ID: {} | Node ID: {} | Name: {} | Direction: {} | "
       "Format: {}",
       port.id, port.node_id, port.name, port.direction, port.format);
 }
 
 void pipewire_graph::printDebugLinkInfo(const LinkInfo& link) {
-  spdlog::debug(
+  ihs::log::debug(
       "[PipewireGraph] Link ID: {} | Output Node: {} | Input Node: {} | Output "
       "Port: {} | Input Port: {}",
       link.id, link.output_node_id, link.input_node_id, link.output_port_id,

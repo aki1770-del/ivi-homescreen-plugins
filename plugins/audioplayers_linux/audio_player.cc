@@ -3,7 +3,7 @@
 
 #include <flutter/event_stream_handler_functions.h>
 #include <flutter/standard_method_codec.h>
-#include <spdlog/spdlog.h>
+#include "logging/logging.h"
 
 extern "C" {
 #include <gst/pbutils/gstdiscoverer.h>
@@ -194,7 +194,7 @@ static bool IsAllowedSourceUrl(const std::string& url) {
 
 void AudioPlayer::SetSourceUrl(const std::string& url) {
   if (!url.empty() && !IsAllowedSourceUrl(url)) {
-    spdlog::warn(
+    ihs::log::warn(
         "[audioplayers] rejecting setSourceUrl with disallowed scheme "
         "channel={} url={}",
         state_->event_channel_name, url);
@@ -299,7 +299,7 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       GError* err;
       gchar* debug;
       gst_message_parse_error(message, &err, &debug);
-      spdlog::error(
+      ihs::log::error(
           "[audioplayers] gst error channel={} domain={} code={} message={} "
           "debug={}",
           data->state_->event_channel_name, g_quark_to_string(err->domain),
@@ -313,7 +313,7 @@ gboolean AudioPlayer::OnBusMessage(GstBus* /* bus */,
       GError* err;
       gchar* debug;
       gst_message_parse_warning(message, &err, &debug);
-      spdlog::warn(
+      ihs::log::warn(
           "[audioplayers] gst warning channel={} domain={} code={} message={} "
           "debug={}",
           data->state_->event_channel_name, g_quark_to_string(err->domain),
@@ -373,7 +373,7 @@ void AudioPlayer::OnMediaError(GstObject* src,
   // reach Dart normally.
   if (src && playbin_ &&
       !gst_object_has_as_ancestor(src, GST_OBJECT(playbin_))) {
-    spdlog::debug(
+    ihs::log::debug(
         "[audioplayers] suppressing orphaned error channel={} src={} "
         "message={}",
         state_->event_channel_name,
@@ -679,8 +679,8 @@ void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
     GError* err = nullptr;
     GstDiscoverer* discoverer = gst_discoverer_new(5 * GST_SECOND, &err);
     if (!discoverer) {
-      spdlog::warn("[audioplayers] gst_discoverer_new failed: {}",
-                   err ? err->message : "unknown");
+      ihs::log::warn("[audioplayers] gst_discoverer_new failed: {}",
+                     err ? err->message : "unknown");
       if (err)
         g_error_free(err);
       return;
@@ -695,8 +695,8 @@ void AudioPlayer::StartDurationDiscovery(const std::string& uri) {
       }
       gst_discoverer_info_unref(info);
     } else if (err) {
-      spdlog::warn("[audioplayers] gst_discoverer probe failed for {}: {}", uri,
-                   err->message);
+      ihs::log::warn("[audioplayers] gst_discoverer probe failed for {}: {}",
+                     uri, err->message);
       g_error_free(err);
     }
     g_object_unref(discoverer);
@@ -738,7 +738,7 @@ void AudioPlayer::Stop() {
             "Unable to seek playback to '0' while stopping the player.",
             nullptr, nullptr);
   } else if (ret == GST_STATE_CHANGE_ASYNC) {
-    spdlog::warn(
+    ihs::log::warn(
         "[audioplayers] Stop timed out after 2s waiting for state settle "
         "channel={}",
         state_->event_channel_name);
@@ -764,7 +764,7 @@ void AudioPlayer::Resume() {
 
 void AudioPlayer::Dispose() {
   if (!playbin_) {
-    spdlog::warn(
+    ihs::log::warn(
         "[audioplayers] Dispose() called on already-disposed player "
         "channel={}",
         state_->event_channel_name);

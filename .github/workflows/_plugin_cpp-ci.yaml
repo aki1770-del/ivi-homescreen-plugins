@@ -119,12 +119,6 @@ jobs:
           libcamera-version: ${{ inputs.libcamera-version }}
           apt-packages: ${{ inputs.apt-packages }}
 
-      # NOTE: for some reason doesn't tidy correctly if waypp files are not generated
-      - name: Build waypp
-        working-directory: ${{github.workspace}}/build
-        run: |
-          ninja waypp
-
       - name: clang-tidy
         working-directory: ${{github.workspace}}/plugins_source/plugins
         run: |

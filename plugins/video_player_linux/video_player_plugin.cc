@@ -90,20 +90,20 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
       path /= asset->c_str();
     } else {
       path = std::filesystem::absolute(registrar_->flutter_asset_folder());
-      SPDLOG_DEBUG("path: [{}]", path.c_str());
+      IHS_DEBUG("path: [{}]", path.c_str());
       path /= asset->c_str();
     }
     // Ensure the path is absolute so the file:// URI is valid.
     path = std::filesystem::absolute(path);
     if (!exists(path)) {
-      spdlog::error("[VideoPlayer] Asset Path does not exist. {}",
-                    path.c_str());
+      ihs::log::error("[VideoPlayer] Asset Path does not exist. {}",
+                      path.c_str());
       return FlutterError("asset_load_failed", "Asset Path does not exist.");
     }
     asset_to_load += path.c_str();
   } else if (uri && !uri->empty()) {
     if (!is_allowed_uri_scheme(*uri)) {
-      spdlog::error("[VideoPlayer] Unsupported URI scheme: {}", *uri);
+      ihs::log::error("[VideoPlayer] Unsupported URI scheme: {}", *uri);
       return FlutterError("uri_load_failed",
                           "URI scheme not allowed. "
                           "Supported: file, http, https, rtsp");
@@ -116,7 +116,7 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
         const auto& k = std::get<std::string>(key);
         const auto& v = std::get<std::string>(value);
         if (has_header_injection(k) || has_header_injection(v)) {
-          spdlog::error(
+          ihs::log::error(
               "[VideoPlayer] Rejected HTTP header with control characters");
           return FlutterError("invalid_headers",
                               "HTTP header contains invalid characters");
@@ -128,7 +128,7 @@ ErrorOr<int64_t> VideoPlayerPlugin::Create(
     return FlutterError("not_implemented", "Set either an asset or a uri");
   }
 
-  SPDLOG_DEBUG("[VideoPlayer] asset: {}", asset_to_load);
+  IHS_DEBUG("[VideoPlayer] asset: {}", asset_to_load);
 
   try {
     MediaInfo info;
@@ -266,8 +266,8 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
   GError* err = nullptr;
   GstDiscoverer* discoverer = gst_discoverer_new(10 * GST_SECOND, &err);
   if (!discoverer) {
-    spdlog::error("[VideoPlayer] Failed to create discoverer: {}",
-                  err ? err->message : "unknown");
+    ihs::log::error("[VideoPlayer] Failed to create discoverer: {}",
+                    err ? err->message : "unknown");
     g_clear_error(&err);
     return false;
   }
@@ -276,8 +276,8 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
       gst_discoverer_discover_uri(discoverer, url, &err);
   if (!disc_info ||
       gst_discoverer_info_get_result(disc_info) != GST_DISCOVERER_OK) {
-    spdlog::error("[VideoPlayer] Discovery failed for {}: {}", url,
-                  err ? err->message : "unknown");
+    ihs::log::error("[VideoPlayer] Discovery failed for {}: {}", url,
+                    err ? err->message : "unknown");
     g_clear_error(&err);
     if (disc_info)
       gst_discoverer_info_unref(disc_info);
@@ -317,7 +317,7 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
   }
 
   if (!info.has_video && !info.has_audio) {
-    spdlog::error("[VideoPlayer] No playable streams in {}", url);
+    ihs::log::error("[VideoPlayer] No playable streams in {}", url);
     gst_discoverer_info_unref(disc_info);
     g_object_unref(discoverer);
     return false;
@@ -348,7 +348,7 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
             }
           }
         } else if (map.size > kMaxAlbumArtBytes) {
-          spdlog::warn(
+          ihs::log::warn(
               "[VideoPlayer] Embedded album art is {} bytes (>{} MB cap); "
               "ignoring.",
               map.size, kMaxAlbumArtBytes / (static_cast<size_t>(1024) * 1024));
@@ -378,7 +378,7 @@ bool VideoPlayerPlugin::discover_media_info(const char* url, MediaInfo& info) {
     // tags owned by disc_info — do not unref
   }
 
-  SPDLOG_DEBUG(
+  IHS_DEBUG(
       "[VideoPlayer] Discovered: video={} ({}x{}), audio={} ({}ch/{}Hz), "
       "duration={}ns, art={}B",
       info.has_video, info.width, info.height, info.has_audio,

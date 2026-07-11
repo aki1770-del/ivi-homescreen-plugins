@@ -75,7 +75,7 @@ NavRenderSurface::NavRenderSurface(int32_t id,
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener),
       flutterAssetsPath_(std::move(assetDirectory)) {
-  SPDLOG_TRACE("++NavRenderSurface::NavRenderSurface");
+  IHS_TRACE("++NavRenderSurface::NavRenderSurface");
 
   auto& codec = flutter::StandardMessageCodec::GetInstance();
   const auto decoded = codec.DecodeMessage(params.data(), params.size());
@@ -112,14 +112,14 @@ NavRenderSurface::NavRenderSurface(int32_t id,
   }
 
   if (!LibNavRender::IsPresent()) {
-    spdlog::error("[NavRenderViewPlugin] libnav_render.so missing");
+    ihs::log::error("[NavRenderViewPlugin] libnav_render.so missing");
     return;
   }
 
 #if BUILD_COMPOSITOR
   if (LibNavRender::kExpectedTextureApiVersion !=
       LibNavRender->TextureGetInterfaceVersion()) {
-    spdlog::error(
+    ihs::log::error(
         "[NavRenderViewPlugin] unexpected texture API version: {} (need {})",
         LibNavRender->TextureGetInterfaceVersion(),
         LibNavRender::kExpectedTextureApiVersion);
@@ -138,10 +138,10 @@ NavRenderSurface::NavRenderSurface(int32_t id,
         id_, std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
           // Aliasing deleter — PluginRegistrar owns the plugin.
         }));
-    SPDLOG_TRACE("[pv-trace] NavRenderSurface registered: id={} size={}x{}",
-                 id_, pending_width_.load(), pending_height_.load());
+    IHS_TRACE("[pv-trace] NavRenderSurface registered: id={} size={}x{}", id_,
+              pending_width_.load(), pending_height_.load());
   } else {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] NavRenderSurface could NOT register (state/view null): "
         "id={}",
         id_);
@@ -152,13 +152,13 @@ NavRenderSurface::NavRenderSurface(int32_t id,
   (void)asset_path;
   (void)cache_folder;
   (void)misc_folder;
-  spdlog::warn(
+  ihs::log::warn(
       "[NavRenderViewPlugin] BUILD_COMPOSITOR is off; plugin will not "
       "render. Rebuild with -DBUILD_COMPOSITOR=ON.");
 #endif
 
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
-  SPDLOG_TRACE("--NavRenderSurface::NavRenderSurface");
+  IHS_TRACE("--NavRenderSurface::NavRenderSurface");
 }
 
 NavRenderSurface::~NavRenderSurface() {
@@ -173,14 +173,14 @@ void NavRenderSurface::on_resize(double width, double height, void* data) {
     p->pending_width_ = static_cast<int32_t>(width);
     p->pending_height_ = static_cast<int32_t>(height);
 #endif
-    SPDLOG_TRACE("[NavRenderSurface] on_resize: {} {}", width, height);
+    IHS_TRACE("[NavRenderSurface] on_resize: {} {}", width, height);
   }
 }
 
 void NavRenderSurface::on_set_direction(int32_t direction, void* data) {
   if (auto* p = static_cast<NavRenderSurface*>(data)) {
     p->direction_ = direction;
-    SPDLOG_TRACE("[NavRenderSurface] on_set_direction: {}", direction);
+    IHS_TRACE("[NavRenderSurface] on_set_direction: {}", direction);
   }
 }
 
@@ -188,7 +188,7 @@ void NavRenderSurface::on_set_offset(double left, double top, void* data) {
   if (auto* p = static_cast<NavRenderSurface*>(data)) {
     p->left_ = static_cast<int32_t>(left);
     p->top_ = static_cast<int32_t>(top);
-    SPDLOG_TRACE("[NavRenderSurface] on_set_offset: {} {}", left, top);
+    IHS_TRACE("[NavRenderSurface] on_set_offset: {} {}", left, top);
   }
 }
 
@@ -255,7 +255,7 @@ void NavRenderSurface::EnsureGlState(int32_t w, int32_t h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          color_texture_, 0);
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error("[NavRenderSurface] FBO incomplete at {}x{}", w, h);
+    ihs::log::error("[NavRenderSurface] FBO incomplete at {}x{}", w, h);
     init_failed_ = true;
     return;
   }
@@ -267,7 +267,7 @@ void NavRenderSurface::EnsureGlState(int32_t w, int32_t h) {
         access_token_.c_str(), tex_width_, tex_height_, asset_path_.c_str(),
         cache_folder_.c_str(), misc_folder_.c_str());
     if (!context_) {
-      spdlog::error("[NavRenderSurface] TextureInitialize failed");
+      ihs::log::error("[NavRenderSurface] TextureInitialize failed");
       init_failed_ = true;
       return;
     }
@@ -297,7 +297,7 @@ bool NavRenderSurface::OnPresent(const FlutterLayer* layer) {
   static thread_local bool first_fire = true;
   const bool size_changed = (target_w != last_w) || (target_h != last_h);
   if (first_fire || size_changed) {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] NavRenderSurface::OnPresent id={} target={}x{} "
         "tex={}x{} gl_init={} (first={}, size_changed={})",
         id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
@@ -312,7 +312,7 @@ bool NavRenderSurface::OnPresent(const FlutterLayer* layer) {
 
   EnsureGlState(target_w, target_h);
   if (!gl_initialized_ || !context_) {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] NavRenderSurface::OnPresent id={} gl NOT initialised "
         "(context/FBO init failed?); returning false",
         id_);

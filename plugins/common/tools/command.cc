@@ -23,13 +23,13 @@ namespace plugin_common::Command {
 bool Execute(const char* cmd, std::string& result) {
   const auto fp = popen(cmd, "r");
   if (!fp) {
-    spdlog::error("[ExecuteCommand] Failed to Execute Command: ({}) {}", errno,
-                  strerror(errno));
-    spdlog::error("Failed to Execute Command: {}", cmd);
+    ihs::log::error("[ExecuteCommand] Failed to Execute Command: ({}) {}",
+                    errno, strerror(errno));
+    ihs::log::error("Failed to Execute Command: {}", cmd);
     return false;
   }
 
-  SPDLOG_TRACE("[Command] Execute: {}", cmd);
+  IHS_TRACE("[Command] Execute: {}", cmd);
 
   auto buf = std::make_unique<char[]>(1024);
   while (fgets(&buf[0], 1024, fp) != nullptr) {
@@ -37,11 +37,11 @@ bool Execute(const char* cmd, std::string& result) {
   }
   buf.reset();
 
-  SPDLOG_TRACE("[Command] Execute Result: [{}] {}", result.size(), result);
+  IHS_TRACE("[Command] Execute Result: [{}] {}", result.size(), result);
 
   if (const auto status = pclose(fp); status == -1) {
-    spdlog::error("[ExecuteCommand] Failed to Close Pipe: ({}) {}", errno,
-                  strerror(errno));
+    ihs::log::error("[ExecuteCommand] Failed to Close Pipe: ({}) {}", errno,
+                    strerror(errno));
     return false;
   }
   return true;

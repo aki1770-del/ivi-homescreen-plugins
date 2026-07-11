@@ -240,7 +240,7 @@ void SetupMethodChannel(flutter::BinaryMessenger* messenger) {
       } else if (method_name == "dispose") {
         AudioplayersLinuxPlugin::DisposePlayer(playerId);
       } else {
-        SPDLOG_DEBUG("Unhandled: {}", method_name);
+        IHS_DEBUG("Unhandled: {}", method_name);
         result->NotImplemented();
         return;
       }

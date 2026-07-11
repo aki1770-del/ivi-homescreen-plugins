@@ -17,7 +17,7 @@
 
 #include "portal_proxy.h"
 
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 PortalProxy::PortalProxy()
     : session_bus_(plugin_common_sdbus::SessionDBus::Instance()),
@@ -56,13 +56,13 @@ std::shared_ptr<sdbus::IProxy> PortalProxy::GetProxy(
     proxy_cache_[portal] = proxy;
     return proxy;
   } catch (const sdbus::Error& e) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] sdbus::Error Failed to create proxy for {}: {}",
         portal.service_name, e.what());
     throw;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Failed to create proxy for {}: {}",
-                  portal.service_name, e.what());
+    ihs::log::error("[FlatpakPlugin] Failed to create proxy for {}: {}",
+                    portal.service_name, e.what());
     throw;
   }
 }

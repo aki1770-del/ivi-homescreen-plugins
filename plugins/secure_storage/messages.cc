@@ -44,7 +44,7 @@ void SecureStorageApi::SetUp(flutter::BinaryMessenger* binary_messenger,
       channel->SetMethodCallHandler(
           [api](const flutter::MethodCall<>& call,
                 const std::unique_ptr<flutter::MethodResult<>>& result) {
-            SPDLOG_DEBUG("[secure_storage] {}", call.method_name());
+            IHS_DEBUG("[secure_storage] {}", call.method_name());
             auto args = std::get_if<EncodableMap>(call.arguments());
 
             std::string key;
@@ -62,26 +62,26 @@ void SecureStorageApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             }
 
             if (call.method_name() == "write") {
-              SPDLOG_DEBUG("secure_storage: [Write] key: {}, value: {}", key,
-                           value);
+              IHS_DEBUG("secure_storage: [Write] key: {}, value: {}", key,
+                        value);
               api->write(key.c_str(), value.c_str());
               result->Success(flutter::EncodableValue(true));
             } else if (call.method_name() == "read") {
-              SPDLOG_DEBUG("secure_storage: [Read] key: {}", key);
+              IHS_DEBUG("secure_storage: [Read] key: {}", key);
               result->Success(api->read(key.c_str()));
             } else if (call.method_name() == "readAll") {
-              SPDLOG_DEBUG("secure_storage: [ReadAll]");
+              IHS_DEBUG("secure_storage: [ReadAll]");
               result->Success(api->readAll());
             } else if (call.method_name() == "delete") {
-              SPDLOG_DEBUG("secure_storage: [Delete]");
+              IHS_DEBUG("secure_storage: [Delete]");
               api->deleteIt(key.c_str());
               result->Success(flutter::EncodableValue(true));
             } else if (call.method_name() == "deleteAll") {
-              SPDLOG_DEBUG("secure_storage: [DeleteAll]");
+              IHS_DEBUG("secure_storage: [DeleteAll]");
               api->deleteAll();
               result->Success(flutter::EncodableValue(true));
             } else if (call.method_name() == "containsKey") {
-              SPDLOG_DEBUG("secure_storage: [ContainsKey]");
+              IHS_DEBUG("secure_storage: [ContainsKey]");
               auto val = api->containsKey(key.c_str());
               result->Success(EncodableValue(val));
             } else {

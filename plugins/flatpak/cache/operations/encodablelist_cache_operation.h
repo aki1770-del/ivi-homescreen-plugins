@@ -18,8 +18,8 @@
 #ifndef ENCODABLELIST_CACHE_OPERATION_H
 #define ENCODABLELIST_CACHE_OPERATION_H
 
-#include <spdlog/spdlog.h>
 #include <chrono>
+#include "logging/logging.h"
 
 #include <flutter/encodable_value.h>
 
@@ -45,15 +45,15 @@ struct EncodableListCacheOperation
       const flutter::EncodableValue encodable_data(data);
       const auto encoded = codec.EncodeMessage(encodable_data);
       if (!encoded) {
-        spdlog::error("Failed to encode encodable list");
+        ihs::log::error("Failed to encode encodable list");
         return "";
       }
       return {encoded->begin(), encoded->end()};
     } catch (const std::exception& e) {
-      spdlog::error("Failed to serialize encodable list: {}", e.what());
+      ihs::log::error("Failed to serialize encodable list: {}", e.what());
       return "";
     } catch (...) {
-      spdlog::error("Failed to serialize encodable list");
+      ihs::log::error("Failed to serialize encodable list");
       return "";
     }
   }
@@ -63,11 +63,11 @@ struct EncodableListCacheOperation
     if (serialized_data.empty()) {
       return std::nullopt;
     }
-    spdlog::debug("[EncodableListCache] Deserializing {} bytes of data",
-                  serialized_data.size());
+    ihs::log::debug("[EncodableListCache] Deserializing {} bytes of data",
+                    serialized_data.size());
     try {
       if (serialized_data.empty()) {
-        spdlog::error("Attempting to deserialize empty encodable list");
+        ihs::log::error("Attempting to deserialize empty encodable list");
         return flutter::EncodableList{};
       }
 
@@ -77,11 +77,11 @@ struct EncodableListCacheOperation
       const auto decoded = codec.DecodeMessage(buffer);
 
       if (!decoded) {
-        spdlog::error("Failed to decode message");
+        ihs::log::error("Failed to decode message");
         return std::nullopt;
       }
       if (!std::holds_alternative<flutter::EncodableList>(*decoded)) {
-        spdlog::error("Decoded message is not EncodableList");
+        ihs::log::error("Decoded message is not EncodableList");
         return std::nullopt;
       }
 
@@ -96,7 +96,7 @@ struct EncodableListCacheOperation
               const Application& app = std::any_cast<Application>(value);
               encodable_data.emplace_back(item);
             } catch (const std::exception& e) {
-              spdlog::error(
+              ihs::log::error(
                   "Failed to convert encodable list to Application: {}",
                   e.what());
               encodable_data.emplace_back(item);
@@ -110,10 +110,10 @@ struct EncodableListCacheOperation
       }
       return encodable_data;
     } catch (const std::exception& e) {
-      spdlog::error("Failed to deserialize message: {}", e.what());
+      ihs::log::error("Failed to deserialize message: {}", e.what());
       return std::nullopt;
     } catch (...) {
-      spdlog::error("Failed to deserialize message");
+      ihs::log::error("Failed to deserialize message");
       return std::nullopt;
     }
   }

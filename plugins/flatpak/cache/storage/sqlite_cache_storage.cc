@@ -37,33 +37,33 @@ bool SQLiteCacheStorage::Initialize() {
 
   int rc = sqlite3_open(db_path_.c_str(), &db_);
   if (rc != SQLITE_OK) {
-    spdlog::error("Error while opening DB : {}", sqlite3_errmsg(db_));
+    ihs::log::error("Error while opening DB : {}", sqlite3_errmsg(db_));
     return false;
   }
 
   rc = sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to enable WAL mode : {}",
-                  sqlite3_errmsg(db_));
+    ihs::log::error("[SQLiteCacheStorage] Failed to enable WAL mode : {}",
+                    sqlite3_errmsg(db_));
   }
 
   rc = sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr,
                     nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error(
+    ihs::log::error(
         "[SQLiteCacheStorage] Failed to enable synchronous mode for DB : {}",
         sqlite3_errmsg(db_));
   }
 
   rc = sqlite3_exec(db_, "PRAGMA foreign_keys=ON;", nullptr, nullptr, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error(
+    ihs::log::error(
         "[SQLiteCacheStorage] Failed to enable foreign keys for DB : {}",
         sqlite3_errmsg(db_));
   }
 
   if (!CreateTables()) {
-    spdlog::error("error while creating tables");
+    ihs::log::error("error while creating tables");
     sqlite3_close(db_);
     throw std::runtime_error("failed to create database schema");
   }
@@ -107,8 +107,9 @@ bool SQLiteCacheStorage::Store(
   int rc = sqlite3_prepare_v2(db_, insert_sql, -1, &stmt, nullptr);
 
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return false;
   }
 
@@ -124,8 +125,9 @@ bool SQLiteCacheStorage::Store(
   sqlite3_finalize(stmt);
 
   if (rc != SQLITE_DONE) {
-    spdlog::error("[SQLiteCacheStorage] Failed to execute statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to execute statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return false;
   }
 
@@ -146,8 +148,9 @@ std::optional<std::string> SQLiteCacheStorage::Retrieve(
   sqlite3_stmt* stmt;
   int rc = sqlite3_prepare_v2(db_, select_sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return std::nullopt;
   }
 
@@ -176,7 +179,7 @@ std::optional<std::string> SQLiteCacheStorage::Retrieve(
             !decompressed.empty()) {
           result = decompressed;
         } else {
-          spdlog::error(
+          ihs::log::error(
               "[SQLiteCacheStorage] Failed to decompress data for key: {}",
               key);
         }
@@ -185,8 +188,8 @@ std::optional<std::string> SQLiteCacheStorage::Retrieve(
       }
     }
   } else if (rc != SQLITE_DONE) {
-    spdlog::error("[SQLiteCacheStorage] Failed to execute select : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error("[SQLiteCacheStorage] Failed to execute select : {} ({})",
+                    sqlite3_errmsg(db_), rc);
   }
 
   sqlite3_finalize(stmt);
@@ -202,8 +205,9 @@ bool SQLiteCacheStorage::IsExpired(const std::string& key) {
 
   int rc = sqlite3_prepare_v2(db_, select_sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return true;
   }
 
@@ -221,8 +225,8 @@ bool SQLiteCacheStorage::IsExpired(const std::string& key) {
     const int64_t expiry_time = sqlite3_column_int64(stmt, 0);
     expired = current_time >= expiry_time;
   } else if (rc != SQLITE_DONE) {
-    spdlog::error("[SQLiteCacheStorage] Failed to execute select : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error("[SQLiteCacheStorage] Failed to execute select : {} ({})",
+                    sqlite3_errmsg(db_), rc);
   }
 
   sqlite3_finalize(stmt);
@@ -274,8 +278,9 @@ size_t SQLiteCacheStorage::CleanupExpired() {
 
   int rc = sqlite3_prepare_v2(db_, delete_sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return 0;
   }
 
@@ -287,8 +292,8 @@ size_t SQLiteCacheStorage::CleanupExpired() {
   if (rc == SQLITE_DONE) {
     deleted_count = static_cast<size_t>(sqlite3_changes(db_));
   } else {
-    spdlog::error("[SQLiteCacheStorage] Failed to execute delete : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error("[SQLiteCacheStorage] Failed to execute delete : {} ({})",
+                    sqlite3_errmsg(db_), rc);
   }
 
   sqlite3_finalize(stmt);
@@ -317,8 +322,9 @@ std::map<std::string, int64_t> SQLiteCacheStorage::GetStatistics() const {
   sqlite3_stmt* stmt;
   int rc = sqlite3_prepare_v2(db_, stats_sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
-                  sqlite3_errmsg(db_), rc);
+    ihs::log::error(
+        "[SQLiteCacheStorage] Failed to prepare statement : {} ({})",
+        sqlite3_errmsg(db_), rc);
     return stats;
   }
 
@@ -329,7 +335,7 @@ std::map<std::string, int64_t> SQLiteCacheStorage::GetStatistics() const {
     stats["avg_size"] = sqlite3_column_int64(stmt, 2);
     stats["compressed_count"] = sqlite3_column_int64(stmt, 3);
   } else if (rc != SQLITE_DONE) {
-    spdlog::error(
+    ihs::log::error(
         "[SQLiteCacheStorage] Failed to execute stats query : {} ({})",
         sqlite3_errmsg(db_), rc);
   }
@@ -376,7 +382,7 @@ bool SQLiteCacheStorage::CreateTables() const {
   if (const int rc =
           sqlite3_exec(db_, create_table_sql, nullptr, nullptr, &error_msg);
       rc != SQLITE_OK) {
-    spdlog::error("[SQLiteCacheStorage] SQL Error: {}", error_msg);
+    ihs::log::error("[SQLiteCacheStorage] SQL Error: {}", error_msg);
     sqlite3_free(error_msg);
     return false;
   }
@@ -396,8 +402,8 @@ std::string SQLiteCacheStorage::CompressData(const std::string& data) const {
                reinterpret_cast<const Bytef*>(data.c_str()), data.size());
 
   if (result != Z_OK) {
-    spdlog::error("[SQLiteCacheStorage] Compression failed with error: {}",
-                  result);
+    ihs::log::error("[SQLiteCacheStorage] Compression failed with error: {}",
+                    result);
     return data;
   }
 
@@ -431,12 +437,12 @@ std::string SQLiteCacheStorage::DecompressData(const std::string& data) const {
       continue;
     }
     // stop trying
-    spdlog::error("[SQLiteCacheStorage] Decompression failed with error: {}",
-                  result);
+    ihs::log::error("[SQLiteCacheStorage] Decompression failed with error: {}",
+                    result);
     break;
   }
 
-  spdlog::error("[SQLiteCacheStorage] All decompression attempts failed");
+  ihs::log::error("[SQLiteCacheStorage] All decompression attempts failed");
   return "";
 }
 
@@ -449,7 +455,7 @@ void SQLiteCacheStorage::UpdateCacheSize() {
   int rc = sqlite3_prepare_v2(db_, size_sql, -1, &stmt, nullptr);
 
   if (rc != SQLITE_OK) {
-    spdlog::error(
+    ihs::log::error(
         "[SQLiteCacheStorage] Failed to prepare cache size query: {} ({})",
         sqlite3_errmsg(db_), rc);
     return;
@@ -459,7 +465,7 @@ void SQLiteCacheStorage::UpdateCacheSize() {
   if (rc == SQLITE_ROW) {
     cache_size.store(sqlite3_column_int64(stmt, 0));
   } else if (rc != SQLITE_DONE) {
-    spdlog::error(
+    ihs::log::error(
         "[SQLiteCacheStorage] Failed to execute cache size query: {} ({})",
         sqlite3_errmsg(db_), rc);
   }

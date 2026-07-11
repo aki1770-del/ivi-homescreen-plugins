@@ -129,71 +129,71 @@ bool CurlClient::SetupCommonOptions(bool verbose) {
 
   mCode = curl_easy_setopt(mConn, CURLOPT_ERRORBUFFER, mErrorBuffer.get());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set error buffer [{}]",
-                  static_cast<int>(mCode));
+    ihs::log::error("[CurlClient] Failed to set error buffer [{}]",
+                    static_cast<int>(mCode));
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_VERBOSE, verbose ? 1L : 0L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set verbose mode [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set verbose mode [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_TIMEOUT, mTimeout);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set timeout [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set timeout [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_CONNECTTIMEOUT, mConnectionTimeout);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set connection timeout [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set connection timeout [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_FOLLOWLOCATION, 1L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set follow location [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set follow location [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_MAXREDIRS, mMaxRedirects);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set max redirects [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set max redirects [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_HEADERFUNCTION, HeaderWriter);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set header callback [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set header callback [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_HEADERDATA, &mHeaderBuffer);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set header data [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set header data [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_SSL_VERIFYPEER, 1L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set SSL verify peer [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set SSL verify peer [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_SSL_VERIFYHOST, 2L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set SSL verify host [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set SSL verify host [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
@@ -277,17 +277,18 @@ bool CurlClient::PerformRequest(bool /* verbose */) {
 
   mCode = curl_easy_perform(mConn);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to perform request: {} [{}]",
-                  curl_easy_strerror(mCode), mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to perform request: {} [{}]",
+                    curl_easy_strerror(mCode), mErrorBuffer.get());
     return false;
   }
 
   // Extract response information
   ExtractResponseInfo();
 
-  spdlog::debug("[CurlClient] Request completed - HTTP {}, {} bytes in {:.2f}s",
-                mResponseInfo.http_code, mResponseInfo.download_size,
-                mResponseInfo.total_time);
+  ihs::log::debug(
+      "[CurlClient] Request completed - HTTP {}, {} bytes in {:.2f}s",
+      mResponseInfo.http_code, mResponseInfo.download_size,
+      mResponseInfo.total_time);
 
   return true;
 }
@@ -300,7 +301,7 @@ bool CurlClient::Init(
     const bool verbose) {
   // Validate URL
   if (url.empty()) {
-    spdlog::error("[CurlClient] URL cannot be empty");
+    ihs::log::error("[CurlClient] URL cannot be empty");
     return false;
   }
 
@@ -308,16 +309,16 @@ bool CurlClient::Init(
 
   mConn = curl_easy_init();
   if (mConn == nullptr) {
-    spdlog::error("[CurlClient] Failed to create CURL connection");
+    ihs::log::error("[CurlClient] Failed to create CURL connection");
     return false;
   }
 
   mUrl = url;
-  spdlog::trace("[CurlClient] URL: {}", mUrl);
+  ihs::log::trace("[CurlClient] URL: {}", mUrl);
 
   mCode = curl_easy_setopt(mConn, CURLOPT_URL, mUrl.c_str());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
     return false;
   }
 
@@ -342,7 +343,7 @@ bool CurlClient::Init(
       curl_free(encoded_key);
       curl_free(encoded_value);
     }
-    spdlog::trace("[CurlClient] PostFields: {}", mPostFields);
+    ihs::log::trace("[CurlClient] PostFields: {}", mPostFields);
     curl_easy_setopt(mConn, CURLOPT_POSTFIELDSIZE, mPostFields.length());
     // libcurl does not copy
     curl_easy_setopt(mConn, CURLOPT_POSTFIELDS, mPostFields.c_str());
@@ -352,14 +353,14 @@ bool CurlClient::Init(
     mHeadersList = curl_slist_append(mHeadersList, mAuthHeader.c_str());
   }
   for (const auto& header : headers) {
-    spdlog::trace("[CurlClient] Header: {}", header);
+    ihs::log::trace("[CurlClient] Header: {}", header);
     mHeadersList = curl_slist_append(mHeadersList, header.c_str());
   }
   if (mHeadersList) {
     mCode = curl_easy_setopt(mConn, CURLOPT_HTTPHEADER, mHeadersList);
     if (mCode != CURLE_OK) {
-      spdlog::error("[CurlClient] Failed to set headers option [{}]",
-                    mErrorBuffer.get());
+      ihs::log::error("[CurlClient] Failed to set headers option [{}]",
+                      mErrorBuffer.get());
       return false;
     }
   }
@@ -367,14 +368,14 @@ bool CurlClient::Init(
   mCode = curl_easy_setopt(mConn, CURLOPT_FOLLOWLOCATION,
                            follow_location ? 1L : 0L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set redirect option [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set redirect option [{}]",
+                    mErrorBuffer.get());
     return false;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_VERBOSE, verbose ? 1L : 0L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set verbose", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set verbose", mErrorBuffer.get());
     return false;
   }
 
@@ -405,7 +406,7 @@ std::string CurlClient::Put(
     const std::string& data,
     const std::vector<std::string>& additional_headers) {
   if (url.empty()) {
-    spdlog::error("[CurlClient] URL cannot be empty");
+    ihs::log::error("[CurlClient] URL cannot be empty");
     return "";
   }
 
@@ -413,13 +414,13 @@ std::string CurlClient::Put(
 
   mConn = curl_easy_init();
   if (!mConn) {
-    spdlog::error("[CurlClient] Failed to create CURL connection");
+    ihs::log::error("[CurlClient] Failed to create CURL connection");
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_URL, url.c_str());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
     return "";
   }
 
@@ -429,22 +430,22 @@ std::string CurlClient::Put(
 
   mCode = curl_easy_setopt(mConn, CURLOPT_CUSTOMREQUEST, "PUT");
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set PUT method [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set PUT method [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_POSTFIELDS, data.c_str());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set PUT data [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set PUT data [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_POSTFIELDSIZE, data.length());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set PUT data size [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set PUT data size [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
@@ -457,8 +458,8 @@ std::string CurlClient::Put(
   if (mHeadersList) {
     mCode = curl_easy_setopt(mConn, CURLOPT_HTTPHEADER, mHeadersList);
     if (mCode != CURLE_OK) {
-      spdlog::error("[CurlClient] Failed to set headers [{}]",
-                    mErrorBuffer.get());
+      ihs::log::error("[CurlClient] Failed to set headers [{}]",
+                      mErrorBuffer.get());
       return "";
     }
   }
@@ -470,7 +471,7 @@ std::string CurlClient::Delete(
     const std::string& url,
     const std::vector<std::string>& additional_headers) {
   if (url.empty()) {
-    spdlog::error("[CurlClient] URL cannot be empty");
+    ihs::log::error("[CurlClient] URL cannot be empty");
     return "";
   }
 
@@ -478,13 +479,13 @@ std::string CurlClient::Delete(
 
   mConn = curl_easy_init();
   if (!mConn) {
-    spdlog::error("[CurlClient] Failed to create CURL connection");
+    ihs::log::error("[CurlClient] Failed to create CURL connection");
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_URL, url.c_str());
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set URL [{}]", mErrorBuffer.get());
     return "";
   }
 
@@ -494,8 +495,8 @@ std::string CurlClient::Delete(
 
   mCode = curl_easy_setopt(mConn, CURLOPT_CUSTOMREQUEST, "DELETE");
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set DELETE method [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set DELETE method [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
@@ -508,8 +509,8 @@ std::string CurlClient::Delete(
   if (mHeadersList) {
     mCode = curl_easy_setopt(mConn, CURLOPT_HTTPHEADER, mHeadersList);
     if (mCode != CURLE_OK) {
-      spdlog::error("[CurlClient] Failed to set headers [{}]",
-                    mErrorBuffer.get());
+      ihs::log::error("[CurlClient] Failed to set headers [{}]",
+                      mErrorBuffer.get());
       return "";
     }
   }
@@ -519,27 +520,28 @@ std::string CurlClient::Delete(
 
 std::string CurlClient::RetrieveContentAsString(const bool verbose) {
   if (mConn == nullptr) {
-    spdlog::error("[CurlClient] No connection available");
+    ihs::log::error("[CurlClient] No connection available");
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_VERBOSE, verbose ? 1L : 0L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set 'CURLOPT_VERBOSE' [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set 'CURLOPT_VERBOSE' [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEFUNCTION, StringWriter);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set writer [{}]", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set writer [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEDATA, &mStringBuffer);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set write data [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set write data [{}]",
+                    mErrorBuffer.get());
     return "";
   }
 
@@ -552,30 +554,31 @@ std::string CurlClient::RetrieveContentAsString(const bool verbose) {
 const std::vector<uint8_t>& CurlClient::RetrieveContentAsVector(
     const bool verbose) {
   if (mConn == nullptr) {
-    spdlog::error("[CurlClient] No connection available");
+    ihs::log::error("[CurlClient] No connection available");
     mVectorBuffer.clear();
     return mVectorBuffer;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_VERBOSE, verbose ? 1L : 0L);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set 'CURLOPT_VERBOSE' [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set 'CURLOPT_VERBOSE' [{}]",
+                    mErrorBuffer.get());
     mVectorBuffer.clear();
     return mVectorBuffer;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEFUNCTION, VectorWriter);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set writer [{}]", mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set writer [{}]",
+                    mErrorBuffer.get());
     mVectorBuffer.clear();
     return mVectorBuffer;
   }
 
   mCode = curl_easy_setopt(mConn, CURLOPT_WRITEDATA, &mVectorBuffer);
   if (mCode != CURLE_OK) {
-    spdlog::error("[CurlClient] Failed to set write data [{}]",
-                  mErrorBuffer.get());
+    ihs::log::error("[CurlClient] Failed to set write data [{}]",
+                    mErrorBuffer.get());
     mVectorBuffer.clear();
     return mVectorBuffer;
   }

@@ -104,7 +104,7 @@ class CacheOperationTemplate {
       auto expiry = GetExpiryTime();
       return storage->Store(key, serialized, expiry);
     } catch (const std::exception& e) {
-      spdlog::error("[CacheOperation] Failed to cache data: {}", e.what());
+      ihs::log::error("[CacheOperation] Failed to cache data: {}", e.what());
       return false;
     }
   }
@@ -132,7 +132,7 @@ class CacheOperationTemplate {
 
       return DeserializeData(serialized.value());
     } catch (const std::exception& e) {
-      spdlog::error("[CacheOperation] Failed to retrieve data: {}", e.what());
+      ihs::log::error("[CacheOperation] Failed to retrieve data: {}", e.what());
       return std::nullopt;
     }
   }

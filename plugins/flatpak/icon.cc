@@ -62,19 +62,19 @@ const std::optional<std::string>& Icon::getPath() const {
 
 void Icon::printIconDetails() const {
   if (type_.has_value()) {
-    spdlog::info("\tIcon:");
-    spdlog::info("\t\tType: {}", type_.value());
+    ihs::log::info("\tIcon:");
+    ihs::log::info("\t\tType: {}", type_.value());
   }
   if (width_.has_value()) {
-    spdlog::info("\t\tWidth: {}", width_.value());
+    ihs::log::info("\t\tWidth: {}", width_.value());
   }
   if (height_.has_value()) {
-    spdlog::info("\t\tHeight: {}", height_.value());
+    ihs::log::info("\t\tHeight: {}", height_.value());
   }
   if (scale_.has_value()) {
-    spdlog::info("\t\tScale: {}", scale_.value());
+    ihs::log::info("\t\tScale: {}", scale_.value());
   }
   if (path_.has_value()) {
-    spdlog::info("\t\tPath: {}", path_.value());
+    ihs::log::info("\t\tPath: {}", path_.value());
   }
 }

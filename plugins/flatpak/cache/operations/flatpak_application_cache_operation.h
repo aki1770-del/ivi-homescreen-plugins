@@ -24,7 +24,7 @@
 #include "encodablelist_cache_operation.h"
 #include "flatpak/cache/cache_manager.h"
 #include "flatpak/messages.g.h"
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 namespace flatpak_plugin {
 
@@ -50,7 +50,7 @@ struct ApplicationCacheOperation : CacheOperationTemplate<Application> {
 
   std::string SerializeData(const Application& data) override {
     if (!operation) {
-      spdlog::error("EncodableListCacheOperation is not initialized");
+      ihs::log::error("EncodableListCacheOperation is not initialized");
       return "";
     }
     // Serialize to List then Serialize the list
