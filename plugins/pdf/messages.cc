@@ -42,7 +42,7 @@ void PrintingApi::SetUp(flutter::BinaryMessenger* binary_messenger,
           [api](const flutter::MethodCall<EncodableValue>& call,
                 const std::unique_ptr<flutter::MethodResult<EncodableValue>>&
                     result) {
-            SPDLOG_DEBUG("[printing] {}", call.method_name());
+            IHS_DEBUG("[printing] {}", call.method_name());
             if ("printingInfo" == call.method_name()) {
               flutter::EncodableMap map = {
                   {EncodableValue("canPrint"), EncodableValue(false)},

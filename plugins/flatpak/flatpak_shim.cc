@@ -78,67 +78,70 @@ std::string FlatpakShim::getAttribute(const xmlNode* node,
 }
 
 void FlatpakShim::PrintComponent(const Component& component) {
-  spdlog::info("[FlatpakPlugin] Component [{}]", component.getId());
-  spdlog::info("[FlatpakPlugin] \tName: {}", component.getName());
-  spdlog::info("[FlatpakPlugin] \tPackage Name: {}", component.getPkgName());
-  spdlog::info("[FlatpakPlugin] \tSummary: {}", component.getSummary());
+  ihs::log::info("[FlatpakPlugin] Component [{}]", component.getId());
+  ihs::log::info("[FlatpakPlugin] \tName: {}", component.getName());
+  ihs::log::info("[FlatpakPlugin] \tPackage Name: {}", component.getPkgName());
+  ihs::log::info("[FlatpakPlugin] \tSummary: {}", component.getSummary());
 
   if (component.getReleases().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tReleases: ");
+    ihs::log::info("[FlatpakPlugin] \tReleases: ");
     for (const auto& release : component.getReleases().value()) {
-      spdlog::info("[FlatpakPlugin] \t\tVersion: {}", release.getVersion());
-      spdlog::info("[FlatpakPlugin] \t\tTimestamp: {}", release.getTimestamp());
+      ihs::log::info("[FlatpakPlugin] \t\tVersion: {}", release.getVersion());
+      ihs::log::info("[FlatpakPlugin] \t\tTimestamp: {}",
+                     release.getTimestamp());
       if (release.getDescription().has_value()) {
-        spdlog::info("[FlatpakPlugin] \t\tDescription: {}",
-                     release.getDescription().value());
+        ihs::log::info("[FlatpakPlugin] \t\tDescription: {}",
+                       release.getDescription().value());
       }
       if (release.getSize().has_value()) {
-        spdlog::info("[FlatpakPlugin] \t\tSize: {}", release.getSize().value());
+        ihs::log::info("[FlatpakPlugin] \t\tSize: {}",
+                       release.getSize().value());
       }
     }
   }
 
   // Checking and printing optional fields
   if (component.getVersion().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tVersion: {}",
-                 component.getVersion().value());
+    ihs::log::info("[FlatpakPlugin] \tVersion: {}",
+                   component.getVersion().value());
   }
   if (component.getOrigin().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tOrigin: {}", component.getOrigin().value());
+    ihs::log::info("[FlatpakPlugin] \tOrigin: {}",
+                   component.getOrigin().value());
   }
   if (component.getMediaBaseurl().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tMedia Base URL: {}",
-                 component.getMediaBaseurl().value());
+    ihs::log::info("[FlatpakPlugin] \tMedia Base URL: {}",
+                   component.getMediaBaseurl().value());
   }
   if (component.getArchitecture().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tArchitecture: {}",
-                 component.getArchitecture().value());
+    ihs::log::info("[FlatpakPlugin] \tArchitecture: {}",
+                   component.getArchitecture().value());
   }
   if (component.getProjectLicense().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tProject License: {}",
-                 component.getProjectLicense().value());
+    ihs::log::info("[FlatpakPlugin] \tProject License: {}",
+                   component.getProjectLicense().value());
   }
   if (component.getDescription().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tDescription: {}",
-                 component.getDescription().value());
+    ihs::log::info("[FlatpakPlugin] \tDescription: {}",
+                   component.getDescription().value());
   }
   if (component.getUrl().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tURL: {}", component.getUrl().value());
+    ihs::log::info("[FlatpakPlugin] \tURL: {}", component.getUrl().value());
   }
   if (component.getProjectGroup().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tProject Group: {}",
-                 component.getProjectGroup().value());
+    ihs::log::info("[FlatpakPlugin] \tProject Group: {}",
+                   component.getProjectGroup().value());
   }
   if (component.getIcons().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tIcons:");
+    ihs::log::info("[FlatpakPlugin] \tIcons:");
     for (const auto& icon : component.getIcons().value()) {
       icon.printIconDetails();
     }
   }
   if (component.getCategories().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tCategories:");
+    ihs::log::info("[FlatpakPlugin] \tCategories:");
     for (const auto& category : component.getCategories().value()) {
-      spdlog::info("[FlatpakPlugin] \t\t{}", category);
+      ihs::log::info("[FlatpakPlugin] \t\t{}", category);
     }
   }
   if (component.getScreenshots().has_value()) {
@@ -147,35 +150,36 @@ void FlatpakShim::PrintComponent(const Component& component) {
     }
   }
   if (component.getKeywords().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tKeywords:");
+    ihs::log::info("[FlatpakPlugin] \tKeywords:");
     for (const auto& keyword : component.getKeywords().value()) {
-      spdlog::info("[FlatpakPlugin] \t\t{}", keyword);
+      ihs::log::info("[FlatpakPlugin] \t\t{}", keyword);
     }
   }
   // Additional optional fields
   if (component.getSourcePkgname().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tSource Pkgname: {}",
-                 component.getSourcePkgname().value());
+    ihs::log::info("[FlatpakPlugin] \tSource Pkgname: {}",
+                   component.getSourcePkgname().value());
   }
   if (component.getBundle().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tBundle: {}", component.getBundle().value());
+    ihs::log::info("[FlatpakPlugin] \tBundle: {}",
+                   component.getBundle().value());
   }
   if (component.getContentRatingType().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tContent Rating Type: [{}]",
-                 component.getContentRatingType().value());
+    ihs::log::info("[FlatpakPlugin] \tContent Rating Type: [{}]",
+                   component.getContentRatingType().value());
   }
   if (component.getContentRating().has_value()) {
     if (!component.getContentRating().value().empty()) {
-      spdlog::info("[FlatpakPlugin] \tContent Rating:");
+      ihs::log::info("[FlatpakPlugin] \tContent Rating:");
       for (const auto& [key, value] : component.getContentRating().value()) {
-        spdlog::info("[FlatpakPlugin] \t\t{} = {}", key,
-                     Component::RatingValueToString(value));
+        ihs::log::info("[FlatpakPlugin] \t\t{} = {}", key,
+                       Component::RatingValueToString(value));
       }
     }
   }
   if (component.getAgreement().has_value()) {
-    spdlog::info("[FlatpakPlugin] \tAgreement: {}",
-                 component.getAgreement().value());
+    ihs::log::info("[FlatpakPlugin] \tAgreement: {}",
+                   component.getAgreement().value());
   }
 }
 
@@ -183,8 +187,8 @@ GPtrArray* FlatpakShim::get_system_installations() {
   GError* error = nullptr;
   const auto sys_installs = flatpak_get_system_installations(nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error getting system installations: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting system installations: {}",
+                    error->message);
     g_ptr_array_unref(sys_installs);
     g_clear_error(&error);
   }
@@ -196,7 +200,8 @@ GPtrArray* FlatpakShim::get_remotes(FlatpakInstallation* installation) {
   const auto remotes =
       flatpak_installation_list_remotes(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error listing remotes: {}", error->message);
+    ihs::log::error("[FlatpakPlugin] Error listing remotes: {}",
+                    error->message);
     g_clear_error(&error);
   }
   return remotes;
@@ -205,7 +210,7 @@ GPtrArray* FlatpakShim::get_remotes(FlatpakInstallation* installation) {
 std::time_t FlatpakShim::get_appstream_timestamp(
     const std::filesystem::path& timestamp_filepath) {
   if (timestamp_filepath.empty() || !exists(timestamp_filepath)) {
-    spdlog::debug(
+    ihs::log::debug(
         "[FlatpakPlugin] appstream_timestamp path is empty or does not exist: "
         "{}",
         timestamp_filepath.string());
@@ -220,8 +225,8 @@ std::time_t FlatpakShim::get_appstream_timestamp(
             std::chrono::system_clock::now());
     return std::chrono::system_clock::to_time_t(sctp);
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Failed to get timestamp for {}: {}",
-                  timestamp_filepath.string(), e.what());
+    ihs::log::error("[FlatpakPlugin] Failed to get timestamp for {}: {}",
+                    timestamp_filepath.string(), e.what());
     return std::time(nullptr);
   }
 }
@@ -231,15 +236,15 @@ void FlatpakShim::update_appstream() {
 
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (!installation) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                    error->message);
     g_clear_error(&error);
     return;
   }
 
   auto remotes = get_remotes(installation);
   if (!remotes) {
-    spdlog::error("[FlatpakPlugin] Failed to fetch any remotes");
+    ihs::log::error("[FlatpakPlugin] Failed to fetch any remotes");
     g_object_unref(installation);
     return;
   }
@@ -260,33 +265,33 @@ void FlatpakShim::update_appstream() {
                                                &changed, nullptr, &error);
 
     if (error) {
-      spdlog::error("[FlatpakPlugin] Can't update AppStream for {}",
-                    remote_name);
+      ihs::log::error("[FlatpakPlugin] Can't update AppStream for {}",
+                      remote_name);
       g_clear_error(&error);
       continue;
     }
 
     if (changed) {
-      spdlog::debug("[FlatpakPlugin] AppStream updated for {}", remote_name);
+      ihs::log::debug("[FlatpakPlugin] AppStream updated for {}", remote_name);
     }
   }
 
   g_ptr_array_unref(remotes);
   g_object_unref(installation);
-  spdlog::debug("[FlatpakPlugin] Background AppStream sync finished.");
+  ihs::log::debug("[FlatpakPlugin] Background AppStream sync finished.");
 }
 
 void FlatpakShim::format_time_iso8601(const time_t raw_time,
                                       char* buffer,
                                       const size_t buffer_size) {
   if (!buffer || buffer_size < 32) {
-    spdlog::error("[FlatpakPlugin] Invalid buffer for time formatting");
+    ihs::log::error("[FlatpakPlugin] Invalid buffer for time formatting");
     return;
   }
 
   tm tm_info{};
   if (localtime_r(&raw_time, &tm_info) == nullptr) {
-    spdlog::error("[FlatpakPlugin] Failed to convert time");
+    ihs::log::error("[FlatpakPlugin] Failed to convert time");
     strncpy(buffer, "1970-01-01T00:00:00+00:00", buffer_size - 1);
     buffer[buffer_size - 1] = '\0';
     return;
@@ -320,8 +325,8 @@ flutter::EncodableList FlatpakShim::installation_get_default_languages(
       flatpak_installation_get_default_languages(installation, &error);
 
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error getting default languages: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting default languages: {}",
+                    error->message);
     g_error_free(error);
     return languages;
   }
@@ -343,7 +348,7 @@ flutter::EncodableList FlatpakShim::installation_get_default_locales(
   const auto default_locales =
       flatpak_installation_get_default_locales(installation, &error);
   if (error) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] flatpak_installation_get_default_locales: {}",
         error->message);
     g_error_free(error);
@@ -383,7 +388,7 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
           static_cast<FlatpakRemote*>(g_ptr_array_index(remotes, j));
 
       if (!remote) {
-        spdlog::error("[FlatpakPlugin] Null remote at index {}", j);
+        ihs::log::error("[FlatpakPlugin] Null remote at index {}", j);
         continue;
       }
 
@@ -393,7 +398,7 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
 
         // Validate required fields before creating a Remote object
         if (!name || !url) {
-          spdlog::error(
+          ihs::log::error(
               "[FlatpakPlugin] Skipping remote with missing name or URL");
           continue;
         }
@@ -449,8 +454,8 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
           g_free(appstream_dir_path);
         }
       } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Exception processing remote: {}",
-                      e.what());
+        ihs::log::error("[FlatpakPlugin] Exception processing remote: {}",
+                        e.what());
         continue;
       }
     }
@@ -471,7 +476,7 @@ Installation FlatpakShim::get_installation(FlatpakInstallation* installation) {
 
   // Validate required fields
   if (!id || !path) {
-    spdlog::error("[FlatpakPlugin] Installation missing required fields");
+    ihs::log::error("[FlatpakPlugin] Installation missing required fields");
     // Return a valid but minimal Installation object
     return Installation("unknown", "Unknown", "", false, false, 0,
                         flutter::EncodableList{}, flutter::EncodableList{},
@@ -525,8 +530,8 @@ void FlatpakShim::get_application_list(
   const auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error listing installed refs: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error listing installed refs: {}",
+                    error->message);
     g_clear_error(&error);
     return;
   }
@@ -616,7 +621,7 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsUpdate() {
   const auto refs = flatpak_installation_list_installed_refs_for_update(
       system_installation, nullptr, &error);
   if (error) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Error listing system installed refs for update: {}",
         error->message);
     g_clear_error(&error);
@@ -627,7 +632,7 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsUpdate() {
       user_installation, nullptr, &error);
 
   if (error) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Error listing user installed refs for update: {}",
         error->message);
     g_clear_error(&error);
@@ -697,8 +702,8 @@ ErrorOr<Installation> FlatpakShim::GetUserInstallation() {
   GError* error = nullptr;
   const auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error getting user installation: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting user installation: {}",
+                    error->message);
     g_clear_error(&error);
     return ErrorOr<Installation>(
         FlutterError("INSTALLATION_ERROR", "Failed to get user installation"));
@@ -733,13 +738,13 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsRemote(
           FlutterError("INVALID_REMOTE_GET", "Remote id is required"));
     }
 
-    spdlog::info("[FlatpakPlugin] Get Applications from Remote {}", id);
+    ihs::log::info("[FlatpakPlugin] Get Applications from Remote {}", id);
     GError* error = nullptr;
 
     auto installation = flatpak_installation_new_user(nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                      error->message);
       g_clear_error(&error);
       return ErrorOr<flutter::EncodableList>(FlutterError(
           "INVALID_REMOTE_GET", "Failed to get user installation"));
@@ -747,8 +752,8 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsRemote(
     const auto remote = flatpak_installation_get_remote_by_name(
         installation, id.c_str(), nullptr, &error);
     if (!remote) {
-      spdlog::error("[FlatpakPlugin] Failed to get remote {}: {}", id.c_str(),
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to get remote {}: {}", id.c_str(),
+                      error->message);
       g_clear_error(&error);
       g_object_unref(installation);
       return ErrorOr(flutter::EncodableList{});
@@ -757,8 +762,9 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsRemote(
     auto app_refs = flatpak_installation_list_remote_refs_sync(
         installation, id.c_str(), nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get applications for remote: {}",
-                    error->message);
+      ihs::log::error(
+          "[FlatpakPlugin] Failed to get applications for remote: {}",
+          error->message);
       g_clear_error(&error);
       g_object_unref(installation);
       return ErrorOr<flutter::EncodableList>(FlutterError(
@@ -766,7 +772,7 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsRemote(
     }
 
     if (!app_refs) {
-      spdlog::error("[FlatpakPlugin] No applications found in remote {}", id);
+      ihs::log::error("[FlatpakPlugin] No applications found in remote {}", id);
       g_object_unref(installation);
       g_object_unref(remote);
       g_clear_error(&error);
@@ -778,12 +784,12 @@ ErrorOr<flutter::EncodableList> FlatpakShim::GetApplicationsRemote(
 
     g_ptr_array_unref(app_refs);
     g_object_unref(installation);
-    spdlog::info("[FlatpakPlugin] Found {} applications in remote {} ",
-                 application_list.size(), id);
+    ihs::log::info("[FlatpakPlugin] Found {} applications in remote {} ",
+                   application_list.size(), id);
 
     return ErrorOr<flutter::EncodableList>(std::move(application_list));
   } catch (const std::exception& e) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Exception getting applications from remote: {}",
         e.what());
     return ErrorOr<flutter::EncodableList>(
@@ -798,12 +804,12 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
                                         "Remote name and URL are required"));
     }
 
-    spdlog::info("[FlatpakPlugin] Adding Remote {}", configuration.name());
+    ihs::log::info("[FlatpakPlugin] Adding Remote {}", configuration.name());
     GError* error = nullptr;
     auto installation = flatpak_installation_new_user(nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                      error->message);
       g_clear_error(&error);
       return ErrorOr<bool>(FlutterError("INVALID_REMOTE_ADD",
                                         "Failed to get user installation"));
@@ -813,8 +819,8 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
     auto existing_remote = flatpak_installation_get_remote_by_name(
         installation, configuration.name().c_str(), nullptr, nullptr);
     if (existing_remote) {
-      spdlog::error("[FlatpakPlugin] Remote '{}' already exists",
-                    configuration.name());
+      ihs::log::error("[FlatpakPlugin] Remote '{}' already exists",
+                      configuration.name());
       g_object_unref(installation);
       g_object_unref(existing_remote);
       return ErrorOr<bool>(
@@ -823,7 +829,7 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
 
     auto remote = flatpak_remote_new(configuration.name().c_str());
     if (!remote) {
-      spdlog::error("[FlatpakPlugin] Failed to create remote object");
+      ihs::log::error("[FlatpakPlugin] Failed to create remote object");
       g_object_unref(installation);
       return ErrorOr<bool>(
           FlutterError("INVALID_REMOTE_ADD", "Failed to create remote object"));
@@ -872,7 +878,8 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
     gboolean result = flatpak_installation_add_remote(installation, remote,
                                                       TRUE, nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to add remote: {}", error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to add remote: {}",
+                      error->message);
       g_object_unref(installation);
       g_object_unref(remote);
       g_clear_error(&error);
@@ -881,15 +888,15 @@ ErrorOr<bool> FlatpakShim::RemoteAdd(const Remote& configuration) {
     }
 
     if (result) {
-      spdlog::info("[FlatpakPlugin] Remote '{}' added successfully",
-                   configuration.name());
+      ihs::log::info("[FlatpakPlugin] Remote '{}' added successfully",
+                     configuration.name());
     }
 
     g_object_unref(installation);
     g_object_unref(remote);
     return ErrorOr<bool>(static_cast<bool>(result));
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception adding remote: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Exception adding remote: {}", e.what());
     return ErrorOr<bool>(
         FlutterError("INVALID_REMOTE_ADD", "Exception occurred"));
   }
@@ -902,12 +909,12 @@ ErrorOr<bool> FlatpakShim::RemoteRemove(const std::string& id) {
           FlutterError("INVALID_REMOTE_REMOVE", "Remote ID is required"));
     }
 
-    spdlog::info("[FlatpakPlugin] Removing remote {}", id);
+    ihs::log::info("[FlatpakPlugin] Removing remote {}", id);
     GError* error = nullptr;
     auto installation = flatpak_installation_new_user(nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                      error->message);
       g_clear_error(&error);
       return ErrorOr<bool>(FlutterError("INVALID_REMOTE_REMOVE",
                                         "Failed to get user installation"));
@@ -916,8 +923,8 @@ ErrorOr<bool> FlatpakShim::RemoteRemove(const std::string& id) {
     gboolean result = flatpak_installation_remove_remote(
         installation, id.c_str(), nullptr, &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to remove remote: {}",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to remove remote: {}",
+                      error->message);
       g_object_unref(installation);
       g_clear_error(&error);
       return ErrorOr<bool>(
@@ -925,13 +932,13 @@ ErrorOr<bool> FlatpakShim::RemoteRemove(const std::string& id) {
     }
 
     if (result) {
-      spdlog::info("[FlatpakPlugin] Remote '{}' removed successfully", id);
+      ihs::log::info("[FlatpakPlugin] Remote '{}' removed successfully", id);
     }
 
     g_object_unref(installation);
     return ErrorOr<bool>(static_cast<bool>(result));
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception removing remote: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Exception removing remote: {}", e.what());
     return ErrorOr<bool>(
         FlutterError("INVALID_REMOTE_REMOVE", "Exception occurred"));
   }
@@ -948,14 +955,14 @@ void FlatpakShim::ApplicationInstall(
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Installing application: {}", id);
+  ihs::log::info("[FlatpakPlugin] Installing application: {}", id);
   GError* error = nullptr;
 
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
     std::string err_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  err_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                    err_msg);
     g_clear_error(&error);
     asio::post(*strand_, [callback]() {
       callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR",
@@ -968,8 +975,8 @@ void FlatpakShim::ApplicationInstall(
 
   auto remote_and_ref = find_app_in_remotes(installation, id);
   if (remote_and_ref.first.empty()) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found in any remote",
-                  id);
+    ihs::log::error("[FlatpakPlugin] Application '{}' not found in any remote",
+                    id);
     asio::post(*strand_, [callback]() {
       callback(ErrorOr<bool>(
           FlutterError("APP_NOT_FOUND", "Application not found in remotes")));
@@ -979,8 +986,8 @@ void FlatpakShim::ApplicationInstall(
 
   auto found_ref = flatpak_ref_parse(remote_and_ref.second.c_str(), &error);
   if (error || !found_ref) {
-    spdlog::error("[FlatpakPlugin] Failed to parse found ref: {}",
-                  remote_and_ref.second);
+    ihs::log::error("[FlatpakPlugin] Failed to parse found ref: {}",
+                    remote_and_ref.second);
     if (error) {
       g_clear_error(&error);
     }
@@ -993,8 +1000,8 @@ void FlatpakShim::ApplicationInstall(
 
   GObjectGuard<FlatpakRef> found_ref_guard(found_ref);
 
-  spdlog::info("[FlatpakPlugin] Found app '{}' in remote '{}' as '{}'", id,
-               remote_and_ref.first, remote_and_ref.second);
+  ihs::log::info("[FlatpakPlugin] Found app '{}' in remote '{}' as '{}'", id,
+                 remote_and_ref.first, remote_and_ref.second);
 
   auto remote_name = remote_and_ref.first;
   auto ref_name = remote_and_ref.second;
@@ -1007,7 +1014,8 @@ void FlatpakShim::ApplicationInstall(
 
   if (error && error->code != FLATPAK_ERROR_NOT_INSTALLED) {
     std::string err_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Error checking installed ref: {}", err_msg);
+    ihs::log::error("[FlatpakPlugin] Error checking installed ref: {}",
+                    err_msg);
     g_clear_error(&error);
     asio::post(*strand_, [callback, err_msg]() {
       callback(ErrorOr<bool>(FlutterError("INSTALLATION_ERROR", err_msg)));
@@ -1019,13 +1027,13 @@ void FlatpakShim::ApplicationInstall(
   }
 
   if (installed_ref) {
-    spdlog::info("[FlatpakPlugin] Application '{}' is already installed", id);
+    ihs::log::info("[FlatpakPlugin] Application '{}' is already installed", id);
     g_object_unref(installed_ref);
     asio::post(*strand_, [callback]() { callback(ErrorOr<bool>(true)); });
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Starting TWO-PHASE installation for: {}", id);
+  ihs::log::info("[FlatpakPlugin] Starting TWO-PHASE installation for: {}", id);
 
   // START QUEUE TRACKING
   operation_tracker_->TrackOperationStart(id, "install");
@@ -1035,7 +1043,7 @@ void FlatpakShim::ApplicationInstall(
 
   if (error) {
     std::string err_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    ihs::log::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
     g_clear_error(&error);
     asio::post(*strand_, [this, id, callback]() {
       operation_tracker_->SendOperationFinish(id, "install", false);
@@ -1073,8 +1081,8 @@ void FlatpakShim::ApplicationInstall(
 
   if (error || !install) {
     std::string error_msg = error ? error->message : "Failed to add install";
-    spdlog::error("[FlatpakPlugin] Failed to add install operation: {}",
-                  error_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to add install operation: {}",
+                    error_msg);
     if (error) {
       g_clear_error(&error);
     }
@@ -1085,7 +1093,8 @@ void FlatpakShim::ApplicationInstall(
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Added install operation, starting transaction");
+  ihs::log::info(
+      "[FlatpakPlugin] Added install operation, starting transaction");
 
   // Notify Flutter that the installation is starting
   flutter::EncodableMap start_event;
@@ -1110,27 +1119,27 @@ void FlatpakShim::ApplicationInstall(
 
     GError* error = nullptr;
 
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] ===== PHASE 1: Installing dependencies =====");
     gboolean success =
         flatpak_transaction_run(transaction_raw, nullptr, &error);
-    spdlog::info("[FlatpakPlugin] Phase 1 transaction returned: {}",
-                 success ? "TRUE" : "FALSE");
+    ihs::log::info("[FlatpakPlugin] Phase 1 transaction returned: {}",
+                   success ? "TRUE" : "FALSE");
 
     std::string err_msg;
     if (error) {
       err_msg = error->message;
-      spdlog::error("[FlatpakPlugin] Phase 1 error: {}", err_msg);
+      ihs::log::error("[FlatpakPlugin] Phase 1 error: {}", err_msg);
       g_clear_error(&error);
     }
 
     if (!success) {
-      spdlog::error("[FlatpakPlugin] Phase 1 (dependencies) failed");
+      ihs::log::error("[FlatpakPlugin] Phase 1 (dependencies) failed");
       asio::post(*strand_ptr, [self, callback, err_msg, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
         self->operation_tracker_->SendOperationFinish(id, "install", false);
 
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
         self->ApplicationStop(id);
 
@@ -1144,7 +1153,7 @@ void FlatpakShim::ApplicationInstall(
     }
 
     // check if the app was already installed
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] Phase 1 complete, checking if app was installed...");
 
     // wait for filesystem sync
@@ -1164,7 +1173,7 @@ void FlatpakShim::ApplicationInstall(
           flatpak_ref_get_branch(found_ref_raw), nullptr, &check_error);
 
       if (check_ref) {
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase 2.");
         g_object_unref(check_ref);
         app_already_installed = true;
@@ -1177,7 +1186,7 @@ void FlatpakShim::ApplicationInstall(
 
     // If the app is already installed, skip Phase 2
     if (app_already_installed) {
-      spdlog::info("[FlatpakPlugin] Installation complete after Phase 1");
+      ihs::log::info("[FlatpakPlugin] Installation complete after Phase 1");
       asio::post(*strand_ptr, [self, callback, ref_name, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
         self->operation_tracker_->SendOperationFinish(id, "install", true);
@@ -1191,8 +1200,9 @@ void FlatpakShim::ApplicationInstall(
         self->SendTransactionEvent(id, complete_event);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        spdlog::info("[FlatpakPlugin] Application '{}' successfully installed",
-                     ref_name);
+        ihs::log::info(
+            "[FlatpakPlugin] Application '{}' successfully installed",
+            ref_name);
         callback(ErrorOr<bool>(true));
 
         g_object_unref(transaction_raw);
@@ -1212,14 +1222,14 @@ void FlatpakShim::ApplicationInstall(
       std::string phase2_err = phase2_error
                                    ? phase2_error->message
                                    : "Failed to create phase 2 transaction";
-      spdlog::error("[FlatpakPlugin] Phase 2 transaction creation failed: {}",
-                    phase2_err);
+      ihs::log::error("[FlatpakPlugin] Phase 2 transaction creation failed: {}",
+                      phase2_err);
       if (phase2_error)
         g_clear_error(&phase2_error);
 
       asio::post(*strand_ptr, [self, callback, phase2_err, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
         self->ApplicationStop(id);
 
@@ -1253,15 +1263,15 @@ void FlatpakShim::ApplicationInstall(
     if (phase2_error || !app_added) {
       std::string add_err =
           phase2_error ? phase2_error->message : "Failed to add app install";
-      spdlog::error("[FlatpakPlugin] Failed to add app to phase 2: {}",
-                    add_err);
+      ihs::log::error("[FlatpakPlugin] Failed to add app to phase 2: {}",
+                      add_err);
       if (phase2_error)
         g_clear_error(&phase2_error);
       g_object_unref(phase2_transaction);
 
       asio::post(*strand_ptr, [self, callback, add_err, transaction_raw,
                                found_ref_raw, installation_raw, id]() {
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
         self->ApplicationStop(id);
 
@@ -1277,7 +1287,7 @@ void FlatpakShim::ApplicationInstall(
     std::string phase2_err_msg;
     if (phase2_error) {
       phase2_err_msg = phase2_error->message;
-      spdlog::error("[FlatpakPlugin] Phase 2 error: {}", phase2_err_msg);
+      ihs::log::error("[FlatpakPlugin] Phase 2 error: {}", phase2_err_msg);
       g_clear_error(&phase2_error);
     }
 
@@ -1288,7 +1298,7 @@ void FlatpakShim::ApplicationInstall(
                                found_ref_raw, installation_raw, id]() {
         self->operation_tracker_->SendOperationFinish(id, "install", false);
 
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Cleaning up artifacts for failed install: {}", id);
         self->ApplicationStop(id);
 
@@ -1301,7 +1311,7 @@ void FlatpakShim::ApplicationInstall(
       return;
     }
 
-    spdlog::info("[FlatpakPlugin] verifying installation...");
+    ihs::log::info("[FlatpakPlugin] verifying installation...");
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     bool verified = false;
@@ -1317,12 +1327,12 @@ void FlatpakShim::ApplicationInstall(
           flatpak_ref_get_branch(found_ref_raw), nullptr, &verify_error);
 
       if (verify_ref) {
-        spdlog::info("[FlatpakPlugin] Installation verified: {}", ref_name);
+        ihs::log::info("[FlatpakPlugin] Installation verified: {}", ref_name);
         g_object_unref(verify_ref);
         verified = true;
       } else if (verify_error) {
-        spdlog::error("[FlatpakPlugin] Verification failed: {}",
-                      verify_error->message);
+        ihs::log::error("[FlatpakPlugin] Verification failed: {}",
+                        verify_error->message);
         g_clear_error(&verify_error);
       }
 
@@ -1333,7 +1343,7 @@ void FlatpakShim::ApplicationInstall(
                              transaction_raw, found_ref_raw, installation_raw,
                              id]() {
       if (verified) {
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Application '{}' successfully installed and "
             "verified",
             ref_name);
@@ -1350,7 +1360,7 @@ void FlatpakShim::ApplicationInstall(
 
         callback(ErrorOr<bool>(true));
       } else {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] Installation completed but verification failed");
         self->operation_tracker_->SendOperationFinish(id, "install", false);
         flutter::EncodableMap failed_event;
@@ -1385,13 +1395,13 @@ void FlatpakShim::ApplicationUninstall(
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] Uninstalling application: {}", id);
+  ihs::log::debug("[FlatpakPlugin] Uninstalling application: {}", id);
 
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                    error->message);
     g_clear_error(&error);
     callback(ErrorOr<bool>(
         FlutterError("UNINSTALL_ERROR", "Failed to get user installation")));
@@ -1401,8 +1411,8 @@ void FlatpakShim::ApplicationUninstall(
   auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get installed apps: {}",
+                    error->message);
     g_clear_error(&error);
     g_object_unref(installation);
     callback(ErrorOr<bool>(
@@ -1493,7 +1503,7 @@ void FlatpakShim::ApplicationUninstall(
   g_ptr_array_unref(refs);
 
   if (!app_found) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
+    ihs::log::error("[FlatpakPlugin] Application '{}' not found", id);
     g_object_unref(installation);
     callback(
         ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
@@ -1505,7 +1515,7 @@ void FlatpakShim::ApplicationUninstall(
       flatpak_transaction_new_for_installation(installation, nullptr, &error);
   if (error) {
     std::string err_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    ihs::log::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
     g_clear_error(&error);
     asio::post(*strand_, [callback]() {
       callback(ErrorOr<bool>(
@@ -1537,7 +1547,8 @@ void FlatpakShim::ApplicationUninstall(
   auto found_ref = flatpak_ref_parse(ref.c_str(), &error);
   if (error || !found_ref) {
     std::string err_msg = error ? error->message : "Failed to parse ref";
-    spdlog::error("[FlatpakPlugin] Failed to parse ref '{}': {}", ref, err_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to parse ref '{}': {}", ref,
+                    err_msg);
     if (error) {
       g_clear_error(&error);
     }
@@ -1548,7 +1559,7 @@ void FlatpakShim::ApplicationUninstall(
   }
 
   GObjectGuard<FlatpakRef> found_ref_guard(found_ref);
-  spdlog::info(
+  ihs::log::info(
       "[FlatpakPlugin] Found installed app '{}' -> name: {}, arch: {}, "
       "branch: {}",
       id, found_app_name, found_arch, found_branch);
@@ -1558,7 +1569,8 @@ void FlatpakShim::ApplicationUninstall(
 
   if (error || !uninstall) {
     std::string err_msg = error ? error->message : "Failed to add uninstall";
-    spdlog::error("[FlatpakPlugin] Failed to uninstall '{}': {}", id, err_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to uninstall '{}': {}", id,
+                    err_msg);
     if (error) {
       g_clear_error(&error);
     }
@@ -1569,7 +1581,7 @@ void FlatpakShim::ApplicationUninstall(
     return;
   }
 
-  spdlog::info(
+  ihs::log::info(
       "[FlatpakPlugin] Added uninstall operation, starting transaction");
 
   // Notify Flutter that the uninstallation is starting
@@ -1592,7 +1604,7 @@ void FlatpakShim::ApplicationUninstall(
     pthread_setname_np(pthread_self(), "flatpak-uninstall");
 
     GError* error = nullptr;
-    spdlog::info("[FlatpakPlugin] Starting uninstall transaction...");
+    ihs::log::info("[FlatpakPlugin] Starting uninstall transaction...");
 
     // Run transaction with the dedicated context
     gboolean success =
@@ -1601,17 +1613,17 @@ void FlatpakShim::ApplicationUninstall(
     std::string err_msg;
     if (error) {
       err_msg = error->message;
-      spdlog::error("[FlatpakPlugin] Uninstall transaction failed: {}",
-                    err_msg);
+      ihs::log::error("[FlatpakPlugin] Uninstall transaction failed: {}",
+                      err_msg);
       g_clear_error(&error);
     }
 
     if (success) {
-      spdlog::info("[FlatpakPlugin] Uninstall {} transaction completed",
-                   found_app_name);
+      ihs::log::info("[FlatpakPlugin] Uninstall {} transaction completed",
+                     found_app_name);
     } else {
-      spdlog::error("[FlatpakPlugin] Uninstall {} transaction failed",
-                    found_app_name);
+      ihs::log::error("[FlatpakPlugin] Uninstall {} transaction failed",
+                      found_app_name);
     }
 
     // Cleanup GObjects
@@ -1638,7 +1650,7 @@ void FlatpakShim::ApplicationUninstall(
                                                               id](bool ok) {
         if (!ok) {
           // Uninstall succeeded but permissions cleanup failed
-          spdlog::error(
+          ihs::log::error(
               "[FlatpakPlugin] Permissions cleanup failed for {}, "
               "app was uninstalled successfully",
               id);
@@ -1668,15 +1680,15 @@ void FlatpakShim::ApplicationUpdate(
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] Updating application: {}", id);
+  ihs::log::debug("[FlatpakPlugin] Updating application: {}", id);
   // Check if the application is installed first
   FlatpakInstalledRef* installed = nullptr;
   std::string full_ref;
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                    error->message);
     g_clear_error(&error);
     callback(ErrorOr<bool>(
         FlutterError("UPDATE_ERROR", "Failed to get user installation")));
@@ -1685,8 +1697,8 @@ void FlatpakShim::ApplicationUpdate(
   auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get installed apps: {}",
+                    error->message);
     g_clear_error(&error);
     g_object_unref(installation);
     callback(ErrorOr<bool>(
@@ -1780,7 +1792,7 @@ void FlatpakShim::ApplicationUpdate(
   g_ptr_array_unref(refs);
 
   if (!app_found) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
+    ihs::log::error("[FlatpakPlugin] Application '{}' not found", id);
     g_object_unref(installation);
     callback(
         ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
@@ -1792,7 +1804,7 @@ void FlatpakShim::ApplicationUpdate(
       flatpak_transaction_new_for_installation(installation, nullptr, &error);
   if (error) {
     std::string err_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
+    ihs::log::error("[FlatpakPlugin] Error creating transaction: {}", err_msg);
     g_clear_error(&error);
     asio::post(*strand_, [callback]() {
       callback(ErrorOr<bool>(
@@ -1819,7 +1831,7 @@ void FlatpakShim::ApplicationUpdate(
                    this);
 
   GObjectGuard<FlatpakRef> found_ref_guard(FLATPAK_REF(installed));
-  spdlog::info(
+  ihs::log::info(
       "[FlatpakPlugin] Found installed app '{}' -> name: {}, arch: {}, "
       "branch: {}",
       id, found_app_name, found_arch, found_branch);
@@ -1829,7 +1841,7 @@ void FlatpakShim::ApplicationUpdate(
 
   if (error || !update) {
     std::string err_msg = error ? error->message : "Failed to add update";
-    spdlog::error("[FlatpakPlugin] Failed to update '{}': {}", id, err_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to update '{}': {}", id, err_msg);
     if (error) {
       g_clear_error(&error);
     }
@@ -1840,7 +1852,8 @@ void FlatpakShim::ApplicationUpdate(
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Added update operation, starting transaction");
+  ihs::log::info(
+      "[FlatpakPlugin] Added update operation, starting transaction");
 
   // Notify Flutter that the update is starting
   flutter::EncodableMap start_event;
@@ -1862,7 +1875,7 @@ void FlatpakShim::ApplicationUpdate(
     pthread_setname_np(pthread_self(), "flatpak-update");
 
     GError* error = nullptr;
-    spdlog::info("[FlatpakPlugin] Starting update transaction...");
+    ihs::log::info("[FlatpakPlugin] Starting update transaction...");
 
     // Run transaction with the dedicated context
     gboolean success =
@@ -1871,16 +1884,16 @@ void FlatpakShim::ApplicationUpdate(
     std::string err_msg;
     if (error) {
       err_msg = error->message;
-      spdlog::error("[FlatpakPlugin] update transaction failed: {}", err_msg);
+      ihs::log::error("[FlatpakPlugin] update transaction failed: {}", err_msg);
       g_clear_error(&error);
     }
 
     if (success) {
-      spdlog::info("[FlatpakPlugin] update {} transaction completed",
-                   found_app_name);
+      ihs::log::info("[FlatpakPlugin] update {} transaction completed",
+                     found_app_name);
     } else {
-      spdlog::error("[FlatpakPlugin] update {} transaction failed",
-                    found_app_name);
+      ihs::log::error("[FlatpakPlugin] update {} transaction failed",
+                      found_app_name);
     }
 
     // Cleanup GObjects
@@ -1927,7 +1940,7 @@ void FlatpakShim::ApplicationStart(
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] Starting application: {}", id);
+  ihs::log::debug("[FlatpakPlugin] Starting application: {}", id);
   auto weak_self = weak_from_this();
   auto self = weak_self.lock();
   if (!self) {
@@ -1941,8 +1954,8 @@ void FlatpakShim::ApplicationStart(
   GError* error = nullptr;
   auto installation = flatpak_installation_new_user(nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get user installation: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get user installation: {}",
+                    error->message);
     g_clear_error(&error);
     completion_callback(ErrorOr<bool>(
         FlutterError("INSTALLATION_ERROR", "Failed to get user installation")));
@@ -1952,8 +1965,8 @@ void FlatpakShim::ApplicationStart(
   auto refs =
       flatpak_installation_list_installed_refs(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to get installed apps: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to get installed apps: {}",
+                    error->message);
     g_clear_error(&error);
     g_object_unref(installation);
     completion_callback(ErrorOr<bool>(
@@ -2041,14 +2054,14 @@ void FlatpakShim::ApplicationStart(
   g_ptr_array_unref(refs);
 
   if (!app_found) {
-    spdlog::error("[FlatpakPlugin] Application '{}' not found", id);
+    ihs::log::error("[FlatpakPlugin] Application '{}' not found", id);
     g_object_unref(installation);
     completion_callback(
         ErrorOr<bool>(FlutterError("APP_NOT_FOUND", "Application not found")));
     return;
   }
 
-  spdlog::info(
+  ihs::log::info(
       "[FlatpakPlugin] Would start application: {} (name: {}, arch: {}, "
       "branch: {})",
       id, found_app_name, found_arch, found_branch);
@@ -2093,8 +2106,8 @@ void FlatpakShim::ApplicationStart(
               ErrorOr<bool>(FlutterError("CANCELLED", "Operation cancelled")));
           return;
         }
-        spdlog::info("[FlatpakPlugin] Permissions granted: {}",
-                     permissions.size());
+        ihs::log::info("[FlatpakPlugin] Permissions granted: {}",
+                       permissions.size());
         self->check_runtime(
             state->installed, state->installation, *(state->strand),
             [weak_self, state](const ErrorOr<bool>& runtime_result) {
@@ -2143,8 +2156,8 @@ void FlatpakShim::ApplicationStart(
                         &error);
 
                     if (error) {
-                      spdlog::error("[FlatpakShim] Failed to launch: {}",
-                                    error->message);
+                      ihs::log::error("[FlatpakShim] Failed to launch: {}",
+                                      error->message);
                       g_clear_error(&error);
                       state->callback(ErrorOr<bool>(
                           FlutterError("START_FAILED", "Failed to launch")));
@@ -2153,8 +2166,8 @@ void FlatpakShim::ApplicationStart(
 
                     if (instance) {
                       pid_t pid = flatpak_instance_get_pid(instance);
-                      spdlog::info("[FlatpakShim] Launched: {} (PID: {})",
-                                   state->app_name, pid);
+                      ihs::log::info("[FlatpakShim] Launched: {} (PID: {})",
+                                     state->app_name, pid);
 
                       auto app_session = std::make_shared<MonitorSession>(
                           state->strand, state->app_name, pid,
@@ -2184,7 +2197,7 @@ ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
         FlutterError("INVALID_APP_ID", "Application ID is required"));
   }
 
-  spdlog::info("[FlatpakPlugin] Stopping application: {}", id);
+  ihs::log::info("[FlatpakPlugin] Stopping application: {}", id);
   const auto app = active_sessions_.find(id);
   if (app == active_sessions_.end()) {
     return ErrorOr<bool>(false);
@@ -2194,29 +2207,30 @@ ErrorOr<bool> FlatpakShim::ApplicationStop(const std::string& id) {
 
   const pid_t child_pid = flatpak_instance_get_child_pid(instance);
   if (child_pid > 0) {
-    spdlog::info("[FlatpakPlugin] Sending SIGTERM to child PID: {}", child_pid);
+    ihs::log::info("[FlatpakPlugin] Sending SIGTERM to child PID: {}",
+                   child_pid);
     if (kill(child_pid, SIGTERM) != 0) {
-      spdlog::error("[FlatpakPlugin] Failed to send SIGTERM: {}",
-                    strerror(errno));
+      ihs::log::error("[FlatpakPlugin] Failed to send SIGTERM: {}",
+                      strerror(errno));
     }
 
     bool exited = false;
     for (int i = 0; i < 50; i++) {
       if (kill(child_pid, 0) != 0) {
         exited = true;
-        spdlog::info("[FlatpakPlugin] App exited gracefully: {}", id);
+        ihs::log::info("[FlatpakPlugin] App exited gracefully: {}", id);
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     if (!exited) {
-      spdlog::error("[FlatpakPlugin] Forcing kill of entire process group");
+      ihs::log::error("[FlatpakPlugin] Forcing kill of entire process group");
       kill(child_pid, SIGKILL);
     }
   }
 
   active_sessions_.erase(app);
-  spdlog::info("[FlatpakPlugin] App stopped and cleaned up: {}", id);
+  ihs::log::info("[FlatpakPlugin] App stopped and cleaned up: {}", id);
   return ErrorOr<bool>(true);
 }
 
@@ -2279,12 +2293,12 @@ ErrorOr<flutter::EncodableList> FlatpakShim::get_remotes_by_installation_id(
     g_ptr_array_unref(remotes);
     g_object_unref(installation);
 
-    spdlog::debug(
+    ihs::log::debug(
         "[FlatpakPlugin] Successfully retrieved {} remotes for installation {}",
         remote_list.size(), installation_id);
     return ErrorOr(std::move(remote_list));
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception getting remotes: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Exception getting remotes: {}", e.what());
     return ErrorOr<flutter::EncodableList>(FlutterError(
         "UNKNOWN_ERROR", "Failed to get remotes: " + std::string(e.what())));
   }
@@ -2298,7 +2312,8 @@ std::string FlatpakShim::find_remote_for_app(FlatpakInstallation* installation,
   auto remotes =
       flatpak_installation_list_remotes(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error getting remotes: {}", error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting remotes: {}",
+                    error->message);
     g_clear_error(&error);
     return "";
   }
@@ -2355,8 +2370,8 @@ std::pair<std::string, std::string> FlatpakShim::find_app_in_remotes(
         ref_string += "/";
         ref_string += branch_name;
 
-        spdlog::info("[FlatpakPlugin] Found '{}' in remote '{}' as '{}'",
-                     app_id, remote_name, ref_string);
+        ihs::log::info("[FlatpakPlugin] Found '{}' in remote '{}' as '{}'",
+                       app_id, remote_name, ref_string);
         g_object_unref(remote_ref);
         return {remote_name, ref_string};
       }
@@ -2377,7 +2392,8 @@ std::pair<std::string, std::string> FlatpakShim::find_app_in_remotes_fallback(
   auto remotes =
       flatpak_installation_list_remotes(installation, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Error getting remotes: {}", error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting remotes: {}",
+                    error->message);
     g_clear_error(&error);
     return {"", ""};
   }
@@ -2409,8 +2425,8 @@ std::pair<std::string, std::string> FlatpakShim::search_in_single_remote(
       installation, remote_name, nullptr, &error);
 
   if (error) {
-    spdlog::error("[FlatpakPlugin] Skipping remote '{}': {}", remote_name,
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Skipping remote '{}': {}", remote_name,
+                    error->message);
     g_clear_error(&error);
     return {"", ""};
   }
@@ -2430,8 +2446,8 @@ std::pair<std::string, std::string> FlatpakShim::search_in_single_remote(
                                "/" +
                                flatpak_ref_get_branch(FLATPAK_REF(remote_ref));
 
-      spdlog::info("[FlatpakPlugin] Found '{}' in remote '{}' as '{}'", app_id,
-                   remote_name, ref_string);
+      ihs::log::info("[FlatpakPlugin] Found '{}' in remote '{}' as '{}'",
+                     app_id, remote_name, ref_string);
       g_ptr_array_unref(remote_refs);
       return {std::string(remote_name), ref_string};
     }
@@ -2446,7 +2462,7 @@ flutter::EncodableList FlatpakShim::convert_remotes_to_EncodableList(
   flutter::EncodableList result;
 
   if (!remotes) {
-    spdlog::error("[FlatpakPlugin] Received null remotes array");
+    ihs::log::error("[FlatpakPlugin] Received null remotes array");
     return result;
   }
 
@@ -2454,7 +2470,7 @@ flutter::EncodableList FlatpakShim::convert_remotes_to_EncodableList(
     const auto remote =
         static_cast<FlatpakRemote*>(g_ptr_array_index(remotes, j));
     if (!remote) {
-      spdlog::error("[FlatpakPlugin] Null remote at index {}", j);
+      ihs::log::error("[FlatpakPlugin] Null remote at index {}", j);
       continue;
     }
 
@@ -2515,11 +2531,11 @@ flutter::EncodableList FlatpakShim::convert_remotes_to_EncodableList(
         g_free(appstream_dir_path);
       }
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Received exception {}", e.what());
+      ihs::log::error("[FlatpakPlugin] Received exception {}", e.what());
     }
   }
-  spdlog::debug("[FlatpakPlugin] Converted {} remotes to encodable list ",
-                result.size());
+  ihs::log::debug("[FlatpakPlugin] Converted {} remotes to encodable list ",
+                  result.size());
   return result;
 }
 
@@ -2528,7 +2544,7 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
     FlatpakRemote* remote) {
   auto result = flutter::EncodableList();
   if (!applications) {
-    spdlog::error("[FlatpakPlugin] Converter received null apps array");
+    ihs::log::error("[FlatpakPlugin] Converter received null apps array");
     return result;
   }
 
@@ -2540,8 +2556,8 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
       const std::string appstream_file =
           std::string(appstream_path) + "/appstream.xml";
       catalog = AppstreamCatalog(appstream_file, "en");
-      spdlog::debug("[FlatpakPlugin] AppstreamCatalog loaded {} components",
-                    catalog->getTotalComponentCount());
+      ihs::log::debug("[FlatpakPlugin] AppstreamCatalog loaded {} components",
+                      catalog->getTotalComponentCount());
       g_free(appstream_path);
     }
   }
@@ -2551,7 +2567,7 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
     const auto app_ref =
         static_cast<FlatpakRemoteRef*>(g_ptr_array_index(applications, j));
     if (!app_ref) {
-      spdlog::error("[FlatpakPlugin] null application at index {}", j);
+      ihs::log::error("[FlatpakPlugin] null application at index {}", j);
       continue;
     }
 
@@ -2561,7 +2577,7 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
     try {
       const auto name = flatpak_ref_get_name(FLATPAK_REF(app_ref));
       if (!name) {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] Application at index {} has no name, skipping", j);
         continue;
       }
@@ -2583,11 +2599,11 @@ flutter::EncodableList FlatpakShim::convert_applications_to_EncodableList(
         }
       }
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Received exception {}", e.what());
+      ihs::log::error("[FlatpakPlugin] Received exception {}", e.what());
     }
   }
-  spdlog::debug("[FlatpakPlugin] Converted {} applications to encodable list",
-                result.size());
+  ihs::log::debug("[FlatpakPlugin] Converted {} applications to encodable list",
+                  result.size());
   return result;
 }
 
@@ -2600,8 +2616,8 @@ std::string FlatpakShim::get_metadata_as_string(
 
   if (!g_bytes) {
     if (error != nullptr) {
-      spdlog::error("[FlatpakPlugin] Error loading metadata: {}\n",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Error loading metadata: {}\n",
+                      error->message);
       g_clear_error(&error);
     }
     return {};
@@ -2621,7 +2637,7 @@ std::string FlatpakShim::get_appdata_as_string(
       flatpak_installed_ref_load_appdata(installed_ref, nullptr, &error);
   if (!g_bytes) {
     if (error != nullptr) {
-      spdlog::error("[FlatpakPlugin] {}", error->message);
+      ihs::log::error("[FlatpakPlugin] {}", error->message);
       g_clear_error(&error);
     }
     return {};
@@ -2643,7 +2659,7 @@ std::vector<char> FlatpakShim::decompress_gzip(
     std::vector<char>& decompressedData) {
   z_stream zs = {};
   if (inflateInit2(&zs, 16 + MAX_WBITS) != Z_OK) {
-    spdlog::error("[FlatpakPlugin] Unable to initialize zlib inflate");
+    ihs::log::error("[FlatpakPlugin] Unable to initialize zlib inflate");
     return {};
   }
   zs.next_in =
@@ -2660,7 +2676,7 @@ std::vector<char> FlatpakShim::decompress_gzip(
   } while (zlibResult == Z_OK);
   inflateEnd(&zs);
   if (zlibResult != Z_STREAM_END) {
-    spdlog::error("[FlatpakPlugin] Gzip decompression error");
+    ihs::log::error("[FlatpakPlugin] Gzip decompression error");
     return {};
   }
   return decompressedData;
@@ -2670,7 +2686,7 @@ std::optional<Application> FlatpakShim::create_component(
     FlatpakRemoteRef* app_ref,
     const std::optional<AppstreamCatalog>& app_catalog) {
   if (!app_ref) {
-    spdlog::error("[FlatpakPlugin] Cannot create component from null");
+    ihs::log::error("[FlatpakPlugin] Cannot create component from null");
     return std::nullopt;
   }
 
@@ -2726,8 +2742,8 @@ std::optional<Application> FlatpakShim::create_component(
         content_rating, "", eol ? std::string(eol) : "",
         eol_rebase ? std::string(eol_rebase) : "", subpaths, metadata, appdata);
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Component creation failed for : {}",
-                  e.what());
+    ihs::log::error("[FlatpakPlugin] Component creation failed for : {}",
+                    e.what());
     return std::nullopt;
   }
 }
@@ -3032,21 +3048,21 @@ void FlatpakShim::create_sandbox(FlatpakInstalledRef* installed_ref,
                                  PortalManager* portal_manager) {
   const std::string metadata = get_metadata_as_string(installed_ref);
   const FlatpakShim::sandbox sandbox = parse_metadata(metadata);
-  spdlog::debug("[FlatpakPlugin] Create sandbox for: {}",
-                sandbox.application.name);
+  ihs::log::debug("[FlatpakPlugin] Create sandbox for: {}",
+                  sandbox.application.name);
 
   setup_portal_sessions(
       sandbox, strand, portal_manager,
       [sandbox, callback](const ErrorOr<bool>& success) {
         if (!success.value()) {
-          spdlog::error(
+          ihs::log::error(
               "[FlatpakPlugin] Failed to setup portal interfaces for {}",
               sandbox.application.name);
           callback(false);
           return;
         }
-        spdlog::debug("[FlatpakPlugin] Sandbox setup completed for {}",
-                      sandbox.application.name);
+        ihs::log::debug("[FlatpakPlugin] Sandbox setup completed for {}",
+                        sandbox.application.name);
         callback(true);
       });
 }
@@ -3095,8 +3111,8 @@ void FlatpakShim::setup_portal_sessions(
   }
   if (interfaces.empty()) {
     asio::post(strand, [callback, name = configs.application.name]() {
-      spdlog::error("[FlatpakPlugin] No portal interfaces to register for {}",
-                    name);
+      ihs::log::error("[FlatpakPlugin] No portal interfaces to register for {}",
+                      name);
       callback(ErrorOr<bool>(true));
     });
     return;
@@ -3104,18 +3120,18 @@ void FlatpakShim::setup_portal_sessions(
 
   try {
     portal_manager->register_application(configs.application.name, interfaces);
-    asio::post(
-        strand, [callback, name = configs.application.name, interfaces]() {
-          spdlog::info("[FlatpakPlugin] Registered {} D-Bus interfaces for {}",
-                       interfaces.size(), name);
+    asio::post(strand, [callback, name = configs.application.name,
+                        interfaces]() {
+      ihs::log::info("[FlatpakPlugin] Registered {} D-Bus interfaces for {}",
+                     interfaces.size(), name);
 
-          callback(ErrorOr<bool>(true));
-        });
+      callback(ErrorOr<bool>(true));
+    });
   } catch (const std::exception& e) {
     std::string error_message = e.what();
     asio::post(strand, [callback, error_message]() {
-      spdlog::error("[FlatpakPlugin] Failed to register interfaces: {}",
-                    error_message);
+      ihs::log::error("[FlatpakPlugin] Failed to register interfaces: {}",
+                      error_message);
       callback(ErrorOr<bool>(false));
     });
   }
@@ -3261,7 +3277,7 @@ void FlatpakShim::monitor_app(const std::shared_ptr<MonitorSession>& session) {
 
   FlatpakInstance* live = find_running_instance(session->name);
   if (!live) {
-    spdlog::info("[FlatpakPlugin] App {} stopped", session->name);
+    ihs::log::info("[FlatpakPlugin] App {} stopped", session->name);
     cleanup_app(session);
     return;
   }
@@ -3288,18 +3304,18 @@ void FlatpakShim::cleanup_app(const std::shared_ptr<MonitorSession>& session) {
   if (auto pm = session->portal_manager.lock()) {
     try {
       pm->unregister_application(session->name);
-      spdlog::debug("[FlatpakPlugin] Unregister portal for App {}",
-                    session->name);
+      ihs::log::debug("[FlatpakPlugin] Unregister portal for App {}",
+                      session->name);
     } catch (std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Unregister portal for App {} failed: {}",
-                    session->name, e.what());
+      ihs::log::error("[FlatpakPlugin] Unregister portal for App {} failed: {}",
+                      session->name, e.what());
     }
   }
   {
     std::lock_guard<std::mutex> lock(monitor_mutex_);
     active_sessions_.erase(session->name);
   }
-  spdlog::info("[FlatpakPlugin] Cleaning up App {} completed", session->name);
+  ihs::log::info("[FlatpakPlugin] Cleaning up App {} completed", session->name);
 }
 
 void FlatpakShim::schedule_next_check(
@@ -3309,20 +3325,20 @@ void FlatpakShim::schedule_next_check(
   }
   std::lock_guard<std::mutex> lock(monitor_mutex_);
   if (active_sessions_.find(session->name) == active_sessions_.end()) {
-    spdlog::error("[FlatpakPlugin] Session not found for app: {}",
-                  session->name);
+    ihs::log::error("[FlatpakPlugin] Session not found for app: {}",
+                    session->name);
     return;
   }
 
   if (!session->timer) {
-    spdlog::error("[FlatpakPlugin] Timer is null for app: {}", session->name);
+    ihs::log::error("[FlatpakPlugin] Timer is null for app: {}", session->name);
     cleanup_app(session);
     return;
   }
 
   if (!session->strand) {
-    spdlog::error("[FlatpakPlugin] io_context is null for app: {}",
-                  session->name);
+    ihs::log::error("[FlatpakPlugin] io_context is null for app: {}",
+                    session->name);
     cleanup_app(session);
     return;
   }
@@ -3338,19 +3354,19 @@ void FlatpakShim::schedule_next_check(
           }
           if (ec) {
             if (ec == asio::error::operation_aborted) {
-              spdlog::debug("[FlatpakPlugin] Timer cancelled for {}",
-                            session->name);
+              ihs::log::debug("[FlatpakPlugin] Timer cancelled for {}",
+                              session->name);
             } else {
-              spdlog::error("[FlatpakPlugin] Timer error for {}: {}",
-                            session->name, ec.message());
+              ihs::log::error("[FlatpakPlugin] Timer error for {}: {}",
+                              session->name, ec.message());
             }
             return;
           }
           monitor_app(session);
         }));
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Application {} failed: {}", session->name,
-                  e.what());
+    ihs::log::error("[FlatpakPlugin] Application {} failed: {}", session->name,
+                    e.what());
     cleanup_app(session);
   }
 }
@@ -3360,8 +3376,8 @@ void FlatpakShim::stop_all_monitoring() {
   {
     std::lock_guard<std::mutex> lock(monitor_mutex_);
 
-    spdlog::info("[FlatpakPlugin] Stopping {} active monitors",
-                 active_sessions_.size());
+    ihs::log::info("[FlatpakPlugin] Stopping {} active monitors",
+                   active_sessions_.size());
     to_cleanup.reserve(active_sessions_.size());
     for (auto& [_, session] : active_sessions_) {
       if (session)
@@ -3385,8 +3401,8 @@ bool FlatpakShim::is_app_running(const std::string& app_name) {
 
   FlatpakInstance* live = find_running_instance(app_name);
   if (!live) {
-    spdlog::error("[FlatpakPlugin] is_app_running: stale session for {} — ",
-                  app_name);
+    ihs::log::error("[FlatpakPlugin] is_app_running: stale session for {} — ",
+                    app_name);
     if (it->second) {
       it->second->cancelled.store(true);
       if (it->second->timer)
@@ -3429,8 +3445,8 @@ void FlatpakShim::check_runtime(
       installation, remote.c_str(), ref, nullptr, &error);
 
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to list related refs: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to list related refs: {}",
+                    error->message);
     g_clear_error(&error);
   } else if (related_extensions) {
     for (guint i = 0; i < related_extensions->len; i++) {
@@ -3452,8 +3468,8 @@ void FlatpakShim::check_runtime(
   const std::string& extension_remote = remote;
   const std::string& runtime_remote = remote;
   if (runtime.empty()) {
-    spdlog::error("[FlatpakPlugin] No runtime specified for {}",
-                  sandbox.application.name);
+    ihs::log::error("[FlatpakPlugin] No runtime specified for {}",
+                    sandbox.application.name);
     asio::dispatch(strand, [callback]() {
       callback(ErrorOr<bool>(
           FlutterError("NO_RUNTIME", "App has no runtime requirement")));
@@ -3461,29 +3477,29 @@ void FlatpakShim::check_runtime(
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] Checking runtime: {} for {}", runtime,
-                sandbox.application.name);
+  ihs::log::debug("[FlatpakPlugin] Checking runtime: {} for {}", runtime,
+                  sandbox.application.name);
 
   if (!is_runtime_installed_for_app(runtime, installation)) {
-    spdlog::info("[FlatpakPlugin] Runtime {} not installed, installing...",
-                 runtime);
+    ihs::log::info("[FlatpakPlugin] Runtime {} not installed, installing...",
+                   runtime);
 
     install_runtime(
         runtime, runtime_remote, strand, installation,
         [callback, strand = &strand, installation, extensions, extension_remote,
          self = shared_from_this()](const ErrorOr<bool>& runtime_result) {
           if (!runtime_result.value()) {
-            spdlog::error("[FlatpakPlugin] Failed to install runtime");
+            ihs::log::error("[FlatpakPlugin] Failed to install runtime");
             asio::post(*strand, [callback, runtime_result]() {
               callback(runtime_result);
             });
             return;
           }
 
-          spdlog::info("[FlatpakPlugin] Runtime installed successfully");
+          ihs::log::info("[FlatpakPlugin] Runtime installed successfully");
 
           if (!extensions.empty()) {
-            spdlog::debug(
+            ihs::log::debug(
                 "[FlatpakPlugin] Checking Extensions after installing runtime");
             self->install_extensions(
                 extensions, extension_remote, *strand, installation,
@@ -3505,22 +3521,22 @@ void FlatpakShim::check_runtime(
   }
 
   // Runtime installed, check extensions
-  spdlog::debug(
+  ihs::log::debug(
       "[FlatpakPlugin] Runtime already installed, checking extensions");
 
   if (extensions.empty()) {
-    spdlog::info("[FlatpakPlugin] No extensions needed for {}",
-                 sandbox.application.name);
+    ihs::log::info("[FlatpakPlugin] No extensions needed for {}",
+                   sandbox.application.name);
 
     asio::dispatch(strand, [callback, installation]() {
-      spdlog::debug("[FlatpakPlugin] Executing callback (no extensions)");
+      ihs::log::debug("[FlatpakPlugin] Executing callback (no extensions)");
       g_object_unref(installation);
       callback(ErrorOr<bool>(true));
     });
     return;
   }
 
-  spdlog::debug("[FlatpakPlugin] checking {} extensions", extensions.size());
+  ihs::log::debug("[FlatpakPlugin] checking {} extensions", extensions.size());
   install_extensions(extensions, extension_remote, strand, installation,
                      [callback, strand_ptr = &strand,
                       installation](const ErrorOr<bool>& result) {
@@ -3539,8 +3555,8 @@ bool FlatpakShim::is_runtime_installed_for_app(
   auto refs = flatpak_installation_list_installed_refs_by_kind(
       installation, FLATPAK_REF_KIND_RUNTIME, nullptr, &error);
   if (error) {
-    spdlog::error("[FlatpakPlugin] Failed to fetch runtimes : {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Failed to fetch runtimes : {}",
+                    error->message);
     g_clear_error(&error);
     return false;
   }
@@ -3558,7 +3574,7 @@ bool FlatpakShim::is_runtime_installed_for_app(
 
     if (ref_runtime == runtime) {
       found = true;
-      spdlog::debug("[FlatpakPlugin] Found runtime : {}", ref_runtime);
+      ihs::log::debug("[FlatpakPlugin] Found runtime : {}", ref_runtime);
     }
   }
   g_clear_error(&error);
@@ -3580,11 +3596,11 @@ void FlatpakShim::install_runtime(
     return;
   }
   GError* error = nullptr;
-  spdlog::info("[FlatpakPlugin] Installing runtime {}", runtime);
+  ihs::log::info("[FlatpakPlugin] Installing runtime {}", runtime);
   FlatpakTransaction* transaction =
       flatpak_transaction_new_for_installation(installation, nullptr, &error);
   if (error) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Error installing runtime creating transction : {}",
         error->message);
     g_clear_error(&error);
@@ -3612,8 +3628,8 @@ void FlatpakShim::install_runtime(
   auto install = flatpak_transaction_add_install(
       transaction, remote.c_str(), runtime.c_str(), nullptr, &error);
   if (error || !install) {
-    spdlog::error("[FlatpakPlugin] Error installing runtime : {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error installing runtime : {}",
+                    error->message);
     g_clear_error(&error);
     asio::post(strand, [complete_callback]() {
       complete_callback(ErrorOr<bool>(
@@ -3628,8 +3644,8 @@ void FlatpakShim::install_runtime(
                runtime]() {
     pthread_setname_np(pthread_self(), "flatpak-runtime");
 
-    spdlog::info("[FlatpakPlugin] Starting runtime installation for: {}",
-                 runtime);
+    ihs::log::info("[FlatpakPlugin] Starting runtime installation for: {}",
+                   runtime);
 
     GError* error = nullptr;
     auto success = flatpak_transaction_run(transaction, nullptr, &error);
@@ -3637,27 +3653,27 @@ void FlatpakShim::install_runtime(
     std::string error_message;
     if (error) {
       error_message = error->message;
-      spdlog::error("[FlatpakPlugin] Runtime installation error: {}",
-                    error_message);
+      ihs::log::error("[FlatpakPlugin] Runtime installation error: {}",
+                      error_message);
       g_clear_error(&error);
     }
 
     asio::post(*strand_ptr, [complete_callback, success, error_message,
                              runtime]() {
       if (success) {
-        spdlog::info("[FlatpakPlugin] Runtime '{}' installed successfully",
-                     runtime);
+        ihs::log::info("[FlatpakPlugin] Runtime '{}' installed successfully",
+                       runtime);
         complete_callback(ErrorOr<bool>(true));
       } else {
-        spdlog::error("[FlatpakPlugin] Runtime '{}' installation failed: {}",
-                      runtime, error_message);
+        ihs::log::error("[FlatpakPlugin] Runtime '{}' installation failed: {}",
+                        runtime, error_message);
         complete_callback(
             ErrorOr<bool>(FlutterError("INSTALL_RUNTIME", error_message)));
       }
     });
 
     g_object_unref(transaction);
-    spdlog::debug("[FlatpakPlugin] Runtime installation thread exiting");
+    ihs::log::debug("[FlatpakPlugin] Runtime installation thread exiting");
   }).detach();
 }
 
@@ -3668,9 +3684,10 @@ void FlatpakShim::install_extensions(
     FlatpakInstallation* installation,
     const std::function<void(ErrorOr<bool>)>& complete_callback) {
   if (extensions.empty()) {
-    spdlog::debug("[FlatpakPlugin] Installing extensions is empty");
+    ihs::log::debug("[FlatpakPlugin] Installing extensions is empty");
     asio::dispatch(strand, [complete_callback]() {
-      spdlog::debug("[FlatpakPlugin] Completing with success (no extensions)");
+      ihs::log::debug(
+          "[FlatpakPlugin] Completing with success (no extensions)");
       complete_callback(ErrorOr<bool>(true));
     });
     return;
@@ -3678,13 +3695,13 @@ void FlatpakShim::install_extensions(
 
   GError* error = nullptr;
   std::vector<std::string> missing_extensions;
-  spdlog::info("[FlatpakPlugin] Installing {} extensions", extensions.size());
+  ihs::log::info("[FlatpakPlugin] Installing {} extensions", extensions.size());
 
   for (const auto& extension : extensions) {
     FlatpakRef* ref = flatpak_ref_parse(extension.c_str(), &error);
     if (error) {
-      spdlog::error("[FlatpakPlugin] Error parsing extension : {}",
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Error parsing extension : {}",
+                      error->message);
       g_clear_error(&error);
       continue;
     }
@@ -3694,8 +3711,8 @@ void FlatpakShim::install_extensions(
         &error);
 
     if (is_installed) {
-      spdlog::debug("[FlatpakPlugin] Extension {} already installed",
-                    extension);
+      ihs::log::debug("[FlatpakPlugin] Extension {} already installed",
+                      extension);
       g_object_unref(is_installed);
       g_object_unref(ref);
       continue;
@@ -3703,24 +3720,26 @@ void FlatpakShim::install_extensions(
     if (error) {
       if (error->code == FLATPAK_ERROR_NOT_INSTALLED) {
         missing_extensions.emplace_back(extension);
-        spdlog::debug("[FlatpakPlugin] Extension {} not installed", extension);
+        ihs::log::debug("[FlatpakPlugin] Extension {} not installed",
+                        extension);
       } else {
-        spdlog::error("[FlatpakPlugin] Error checking extension {}: {}",
-                      extension, error->message);
+        ihs::log::error("[FlatpakPlugin] Error checking extension {}: {}",
+                        extension, error->message);
       }
       g_clear_error(&error);
     } else {
       missing_extensions.emplace_back(extension);
-      spdlog::debug("[FlatpakPlugin] Extension {} not installed", extension);
+      ihs::log::debug("[FlatpakPlugin] Extension {} not installed", extension);
     }
     g_object_unref(ref);
   }
 
   if (missing_extensions.empty()) {
-    spdlog::info("[FlatpakPlugin] All {} extensions already installed",
-                 extensions.size());
+    ihs::log::info("[FlatpakPlugin] All {} extensions already installed",
+                   extensions.size());
     asio::dispatch(strand, [complete_callback]() {
-      spdlog::debug("[FlatpakPlugin] Completing with success (all installed)");
+      ihs::log::debug(
+          "[FlatpakPlugin] Completing with success (all installed)");
       complete_callback(ErrorOr<bool>(true));
     });
     return;
@@ -3730,8 +3749,8 @@ void FlatpakShim::install_extensions(
 
   if (error) {
     std::string error_msg = error->message;
-    spdlog::error("[FlatpakPlugin] Failed to create transaction: {}",
-                  error_msg);
+    ihs::log::error("[FlatpakPlugin] Failed to create transaction: {}",
+                    error_msg);
     g_clear_error(&error);
     asio::post(strand, [complete_callback, error_msg]() {
       complete_callback(
@@ -3762,8 +3781,8 @@ void FlatpakShim::install_extensions(
                                     nullptr, &error);
 
     if (error) {
-      spdlog::error("[FlatpakPlugin] Failed to add extension '{}': {}", ext,
-                    error->message);
+      ihs::log::error("[FlatpakPlugin] Failed to add extension '{}': {}", ext,
+                      error->message);
       g_clear_error(&error);
       continue;
     }
@@ -3774,7 +3793,7 @@ void FlatpakShim::install_extensions(
                count = missing_extensions.size(), self]() {
     pthread_setname_np(pthread_self(), "flatpak-ext");
 
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] Extension installation thread started for {} "
         "extensions",
         count);
@@ -3785,8 +3804,8 @@ void FlatpakShim::install_extensions(
     std::string error_message;
     if (error) {
       error_message = error->message;
-      spdlog::error("[FlatpakPlugin] Extension installation error: {}",
-                    error_message);
+      ihs::log::error("[FlatpakPlugin] Extension installation error: {}",
+                      error_message);
       g_clear_error(&error);
     }
 
@@ -3794,19 +3813,19 @@ void FlatpakShim::install_extensions(
     asio::post(
         *strand_ptr, [complete_callback, success, error_message, count]() {
           if (success) {
-            spdlog::info("[FlatpakPlugin] Successfully installed {} extensions",
-                         count);
+            ihs::log::info(
+                "[FlatpakPlugin] Successfully installed {} extensions", count);
             complete_callback(ErrorOr<bool>(true));
           } else {
-            spdlog::error("[FlatpakPlugin] Extension installation failed: {}",
-                          error_message);
+            ihs::log::error("[FlatpakPlugin] Extension installation failed: {}",
+                            error_message);
             complete_callback(ErrorOr<bool>(
                 FlutterError("EXTENSION_INSTALL_FAILED", error_message)));
           }
         });
 
     g_object_unref(transaction);
-    spdlog::debug("[FlatpakPlugin] Extension installation thread exiting");
+    ihs::log::debug("[FlatpakPlugin] Extension installation thread exiting");
   }).detach();
 }
 
@@ -3815,15 +3834,15 @@ void FlatpakShim::SetupTransactionEventChannel(
     flutter::BinaryMessenger* messenger) {
   std::lock_guard<std::mutex> lock(event_sink_mutex_);
   if (!messenger) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
     return;
   }
   // check for exists channels first
   if (transactions_event_channels_.find(id) !=
       transactions_event_channels_.end()) {
-    spdlog::error("[FlatpakPlugin] Messenger channel is already in use : {}",
-                  id);
+    ihs::log::error("[FlatpakPlugin] Messenger channel is already in use : {}",
+                    id);
     return;
   }
 
@@ -3834,7 +3853,7 @@ void FlatpakShim::SetupTransactionEventChannel(
             messenger, channel_name,
             &flutter::StandardMethodCodec::GetInstance());
 
-    spdlog::info("[FlatpakPlugin] Channel name: {}", channel_name);
+    ihs::log::info("[FlatpakPlugin] Channel name: {}", channel_name);
 
     event_channel->SetStreamHandler(std::make_unique<
                                     flutter::StreamHandlerFunctions<
@@ -3849,7 +3868,7 @@ void FlatpakShim::SetupTransactionEventChannel(
           {
             std::lock_guard<std::mutex> lock(event_sink_mutex_);
             transactions_event_sinks_[id] = std::move(events);
-            spdlog::info(
+            ihs::log::info(
                 "[FlatpakPlugin] Event sink connected for transaction:{}", id);
           }
 
@@ -3870,7 +3889,7 @@ void FlatpakShim::SetupTransactionEventChannel(
           {
             std::lock_guard<std::mutex> lock(event_sink_mutex_);
             transactions_event_sinks_.erase(id);
-            spdlog::info(
+            ihs::log::info(
                 "[FlatpakPlugin] Event sink disconnected for transaction: {}",
                 id);
           }
@@ -3878,8 +3897,8 @@ void FlatpakShim::SetupTransactionEventChannel(
         }));
     transactions_event_channels_[id] = std::move(event_channel);
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
-                  e.what());
+    ihs::log::error("[FlatpakPlugin] Exception setting up event channel: {}",
+                    e.what());
     return;
   }
 }
@@ -3888,13 +3907,13 @@ void FlatpakShim::SetupAccessEventChannel(
     flutter::BinaryMessenger* messenger,
     const asio::io_context::strand& strand) {
   if (!messenger) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Messenger is null, cannot setup event channel");
     return;
   }
 
   if (access_event_channel_) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Event channel already exists, "
         "re-registering stream handler");
     return;
@@ -3905,7 +3924,7 @@ void FlatpakShim::SetupAccessEventChannel(
             messenger, "flutter.io/flatpakPlugin/accessEvents",
             &flutter::StandardMethodCodec::GetInstance());
 
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] Channel name: "
         "flutter.io/flatpakPlugin/accessEvents");
 
@@ -3922,7 +3941,7 @@ void FlatpakShim::SetupAccessEventChannel(
               {
                 std::lock_guard<std::mutex> lock(access_sink_mutex_);
                 access_sink_ = std::move(events);
-                spdlog::info("[FlatpakPlugin] Event sink connected");
+                ihs::log::info("[FlatpakPlugin] Event sink connected");
               }
               return nullptr;
             },
@@ -3933,15 +3952,15 @@ void FlatpakShim::SetupAccessEventChannel(
               {
                 std::lock_guard<std::mutex> lock(access_sink_mutex_);
                 access_sink_ = nullptr;
-                spdlog::info("[FlatpakPlugin] Event sink disconnected");
+                ihs::log::info("[FlatpakPlugin] Event sink disconnected");
               }
               return nullptr;
             }));
 
-    spdlog::info("[FlatpakPlugin] Access portal created and initialized");
+    ihs::log::info("[FlatpakPlugin] Access portal created and initialized");
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception setting up event channel: {}",
-                  e.what());
+    ihs::log::error("[FlatpakPlugin] Exception setting up event channel: {}",
+                    e.what());
     return;
   }
 }
@@ -3952,7 +3971,8 @@ void FlatpakShim::SendTransactionEvent(const std::string& id,
 
   auto it = transactions_event_sinks_.find(id);
   if (it == transactions_event_sinks_.end() || !it->second) {
-    spdlog::error("[FlatpakPlugin] Cannot send event for transaction: {}", id);
+    ihs::log::error("[FlatpakPlugin] Cannot send event for transaction: {}",
+                    id);
     return;
   }
 
@@ -3964,12 +3984,12 @@ void FlatpakShim::SendTransactionEvent(const std::string& id,
     if (event.find(flutter::EncodableValue("type")) != event.end()) {
       auto type_value = event[flutter::EncodableValue("type")];
       if (std::holds_alternative<std::string>(type_value)) {
-        spdlog::debug("[FlatpakPlugin] Event sent: {}",
-                      std::get<std::string>(type_value));
+        ihs::log::debug("[FlatpakPlugin] Event sent: {}",
+                        std::get<std::string>(type_value));
       }
     }
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception sending event: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Exception sending event: {}", e.what());
   }
 }
 
@@ -3978,14 +3998,14 @@ void FlatpakShim::RemoveTransactionEvent(const std::string& id) {
 
   transactions_event_sinks_.erase(id);
   transactions_event_channels_.erase(id);
-  spdlog::debug("[FlatpakPlugin] Channel cl: {}", id);
+  ihs::log::debug("[FlatpakPlugin] Channel cl: {}", id);
 }
 
 void FlatpakShim::SendPermissionEvent(
     const flutter::EncodableMap& event,
     const std::function<void(bool)>& callback) {
   if (!access_sink_) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] Cannot send event - sink is null. "
         "Flutter may not be listening yet.");
     if (event.count(flutter::EncodableValue("request_id"))) {
@@ -4008,7 +4028,7 @@ void FlatpakShim::SendPermissionEvent(
     if (callback)
       callback(true);
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Exception sending event: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Exception sending event: {}", e.what());
     if (event.count(flutter::EncodableValue("request_id"))) {
       auto request_id = std::get_if<std::string>(
           &event.at(flutter::EncodableValue("request_id")));
@@ -4103,8 +4123,8 @@ void FlatpakShim::OnProgressChanged(FlatpakTransactionProgress* progress,
 
         handler->SendTransactionEvent(id, ProgressMap);
       } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending progress event: {}",
-                      e.what());
+        ihs::log::error("[FlatpakPlugin] Error sending progress event: {}",
+                        e.what());
       }
     });
   }
@@ -4169,8 +4189,8 @@ void FlatpakShim::OnNewOperation(FlatpakTransaction* transaction,
 
             handler->SendTransactionEvent(id, OperationMap);
           } catch (const std::exception& e) {
-            spdlog::error("[FlatpakPlugin] Error sending operation event: {}",
-                          e.what());
+            ihs::log::error("[FlatpakPlugin] Error sending operation event: {}",
+                            e.what());
           }
         });
   }
@@ -4207,7 +4227,7 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
   std::string ref_str = ref ? std::string(ref) : std::string("");
 
   if (ref) {
-    spdlog::info(
+    ihs::log::info(
         "[FlatpakPlugin] Operation completed: {} {} (result: {})", type_str,
         ref_str,
         result == FLATPAK_TYPE_TRANSACTION_RESULT ? "SUCCESS" : "FAILED");
@@ -4250,8 +4270,8 @@ void FlatpakShim::OnOperationComplete(FlatpakTransaction* transaction,
 
         handler->SendTransactionEvent(id, OperationCompleteMap);
       } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending complete event: {}",
-                      e.what());
+        ihs::log::error("[FlatpakPlugin] Error sending complete event: {}",
+                        e.what());
       }
     });
   }
@@ -4292,8 +4312,8 @@ gboolean FlatpakShim::OnOperationError(
 
             handler->SendTransactionEvent(id, OperationErrorMap);
           } catch (const std::exception& e) {
-            spdlog::error("[FlatpakPlugin] Error sending error event: {}",
-                          e.what());
+            ihs::log::error("[FlatpakPlugin] Error sending error event: {}",
+                            e.what());
           }
         });
   }
@@ -4312,7 +4332,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
   GList* operations = flatpak_transaction_get_operations(transaction);
   int total_ops = static_cast<int>(g_list_length(operations));
 
-  spdlog::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
+  ihs::log::info("[FlatpakPlugin] Total operations to perform: {}", total_ops);
 
   std::string tx_app_id = id ? id : "";
   guint64 total_download_size = 0;
@@ -4351,7 +4371,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
     }
 
     std::string ref_str = ref ? ref : "unknown";
-    spdlog::info("[FlatpakPlugin] - Operation: {} {}", type_str, ref_str);
+    ihs::log::info("[FlatpakPlugin] - Operation: {} {}", type_str, ref_str);
 
     std::string kind = "unknown";
     if (ref_str.find("app/") == 0) {
@@ -4371,7 +4391,7 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
   if (is_download_transaction && installation && !tx_app_id.empty()) {
     if (!handler->check_disk_usage(installation, total_download_size,
                                    tx_app_id)) {
-      spdlog::error(
+      ihs::log::error(
           "[FlatpakPlugin] Transaction aborted natively due to insufficient "
           "disk space.");
       return FALSE;  // Cleanly aborts Flatpak transaction
@@ -4395,8 +4415,8 @@ gboolean FlatpakShim::OnTransactionReady(FlatpakTransaction* transaction,
             flutter::EncodableValue(tx_app_id);
         handler->SendTransactionEvent(id, ready_event);
       } catch (const std::exception& e) {
-        spdlog::error("[FlatpakPlugin] Error sending ready event: {}",
-                      e.what());
+        ihs::log::error("[FlatpakPlugin] Error sending ready event: {}",
+                        e.what());
       }
     });
   }
@@ -4411,14 +4431,14 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
 
   if (!flatpak_installation_get_min_free_space_bytes(installation,
                                                      &min_free_space, &error)) {
-    spdlog::error("[FlatpakPlugin] Error getting min free space: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting min free space: {}",
+                    error->message);
     g_error_free(error);
     return false;
   }
 
   guint64 total_requirement = min_free_space + estimated_download;
-  spdlog::info(
+  ihs::log::info(
       "[FlatpakPlugin] Total storage requirement (buffer + download): {} MB",
       total_requirement / 1024 / 1024);
 
@@ -4427,8 +4447,8 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
       repo_path, G_FILE_ATTRIBUTE_FILESYSTEM_FREE, nullptr, &error);
 
   if (!info) {
-    spdlog::error("[FlatpakPlugin] Error getting free space: {}",
-                  error->message);
+    ihs::log::error("[FlatpakPlugin] Error getting free space: {}",
+                    error->message);
     g_error_free(error);
     return false;
   }
@@ -4450,11 +4470,11 @@ bool FlatpakShim::check_disk_usage(FlatpakInstallation* installation,
   std::string available_free_space_str =
       "Available free space (adjusted for queue): " +
       std::to_string(effective_free_space / 1024 / 1024) + " MB";
-  spdlog::info("[FlatpakPlugin] {}", available_free_space_str);
+  ihs::log::info("[FlatpakPlugin] {}", available_free_space_str);
 
   // check if we have enough space based on the COMPLETE requirement
   if (effective_free_space < total_requirement) {
-    spdlog::error("[FlatpakPlugin] Not enough free space!");
+    ihs::log::error("[FlatpakPlugin] Not enough free space!");
 
     flutter::EncodableMap disk_usage_event;
     disk_usage_event[flutter::EncodableValue("type")] =
@@ -4540,7 +4560,7 @@ void FlatpakShim::ShowNextDialog(const std::string& request_id) {
     std::lock_guard<std::mutex> lock(permissions_mutex_);
     auto it = active_permissions_.find(request_id);
     if (it == active_permissions_.end()) {
-      spdlog::error(
+      ihs::log::error(
           "[FlatpakPlugin] Failed to retrieve {} request for permission",
           request_id);
       return;
@@ -4550,8 +4570,8 @@ void FlatpakShim::ShowNextDialog(const std::string& request_id) {
 
     // Check if all permissions processed
     if (request.permission_index >= request.requests.size()) {
-      spdlog::debug("[FlatpakPlugin] All Permissions processed for {}",
-                    request.app_id);
+      ihs::log::debug("[FlatpakPlugin] All Permissions processed for {}",
+                      request.app_id);
       auto callback = request.callback;
       auto result = request.result;
       active_permissions_.erase(it);
@@ -4586,8 +4606,8 @@ void FlatpakShim::ShowNextDialog(const std::string& request_id) {
   event[flutter::EncodableValue("timestamp")] = flutter::EncodableValue(
       std::chrono::system_clock::now().time_since_epoch().count());
 
-  spdlog::debug("[FlatpakPlugin] Showing permission Dialog : {} {}/{}",
-                current_permission, permission_index + 1, total_requests);
+  ihs::log::debug("[FlatpakPlugin] Showing permission Dialog : {} {}/{}",
+                  current_permission, permission_index + 1, total_requests);
 
   SendPermissionEvent(
       event, [weak_self = weak_from_this(), request_id](bool success) {
@@ -4596,7 +4616,7 @@ void FlatpakShim::ShowNextDialog(const std::string& request_id) {
           if (!self)
             return;
 
-          spdlog::error("[FlatpakPlugin] Failed to show dialog");
+          ihs::log::error("[FlatpakPlugin] Failed to show dialog");
 
           std::lock_guard<std::mutex> lock(self->permissions_mutex_);
           auto it = self->active_permissions_.find(request_id);
@@ -4614,8 +4634,8 @@ void FlatpakShim::ShowNextDialog(const std::string& request_id) {
 void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
                                            const std::string& permission,
                                            bool granted) {
-  spdlog::debug("[FlatpakPlugin] Permission response : {} -> {}", permission,
-                granted ? "granted" : "denied");
+  ihs::log::debug("[FlatpakPlugin] Permission response : {} -> {}", permission,
+                  granted ? "granted" : "denied");
   std::string table = "devices";
   if (permission == "location") {
     table = "location";
@@ -4659,10 +4679,10 @@ void FlatpakShim::HandlePermissionResponse(const std::string& request_id,
             return;
 
           if (success) {
-            spdlog::debug("[FlatpakPlugin] Stored: {} -> {}", permission,
-                          granted ? "granted" : "denied");
+            ihs::log::debug("[FlatpakPlugin] Stored: {} -> {}", permission,
+                            granted ? "granted" : "denied");
           } else {
-            spdlog::error("[FlatpakPlugin] Failed to store permission");
+            ihs::log::error("[FlatpakPlugin] Failed to store permission");
           }
 
           // Show next dialog
@@ -4676,7 +4696,7 @@ void FlatpakShim::RequestAppLaunchPermission(
     FlatpakInstalledRef* installed_ref,
     const std::function<void(const std::map<std::string, bool>&)>& callback) {
   if (!permissions_portal_) {
-    spdlog::error("[FlatpakPlugin] Access portal not initialized");
+    ihs::log::error("[FlatpakPlugin] Access portal not initialized");
     callback({});
     return;
   }
@@ -4721,13 +4741,14 @@ void FlatpakShim::RequestAppLaunchPermission(
   }
 
   if (requested_permissions.empty()) {
-    spdlog::info("[FlatpakPlugin] No permissions needed for app : {}", app_id);
+    ihs::log::info("[FlatpakPlugin] No permissions needed for app : {}",
+                   app_id);
     callback({});
     return;
   }
 
-  spdlog::info("[FlatpakPlugin] Check Existing permissions for app : {}",
-               app_id);
+  ihs::log::info("[FlatpakPlugin] Check Existing permissions for app : {}",
+                 app_id);
 
   CheckExistingPermissions(
       app_id, requested_permissions,
@@ -4749,7 +4770,7 @@ void FlatpakShim::RequestAppLaunchPermission(
         }
 
         if (permissions_to_ask.empty()) {
-          spdlog::info(
+          ihs::log::info(
               "[FlatpakPlugin] No permissions needed to ask for app : {}",
               app_id);
           callback(final_results);
@@ -4771,7 +4792,7 @@ void FlatpakShim::RequestAppLaunchPermission(
           self->active_permissions_[request_id] = std::move(request);
         }
 
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] Starting Permissions dialog for {} permission",
             permissions_to_ask.size());
         self->ShowNextDialog(request_id);

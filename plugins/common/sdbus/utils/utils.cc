@@ -66,7 +66,7 @@ void Utils::print_changed_properties(
     os << "[" << interfaceName << "] Invalidated property: " << name
        << std::endl;
   }
-  spdlog::info(os.str());
+  ihs::log::info(os.str());
 }
 
 std::vector<std::string> Utils::ListNames(sdbus::IConnection& connection) {

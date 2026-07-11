@@ -17,10 +17,10 @@ void Image::parseXmlNode(const xmlNode* node) {
     try {
       width_ = std::stoi(*widthAttr);
     } catch (const std::invalid_argument& e) {
-      spdlog::error("Invalid width attribute: {} - {}", *widthAttr, e.what());
+      ihs::log::error("Invalid width attribute: {} - {}", *widthAttr, e.what());
     } catch (const std::out_of_range& e) {
-      spdlog::error("Width attribute out of range: {} - {}", *widthAttr,
-                    e.what());
+      ihs::log::error("Width attribute out of range: {} - {}", *widthAttr,
+                      e.what());
     }
   }
   if (const auto heightAttr =
@@ -28,10 +28,11 @@ void Image::parseXmlNode(const xmlNode* node) {
     try {
       height_ = std::stoi(*heightAttr);
     } catch (const std::invalid_argument& e) {
-      spdlog::error("Invalid height attribute: {} - {}", *heightAttr, e.what());
+      ihs::log::error("Invalid height attribute: {} - {}", *heightAttr,
+                      e.what());
     } catch (const std::out_of_range& e) {
-      spdlog::error("Height attribute out of range: {} - {}", *heightAttr,
-                    e.what());
+      ihs::log::error("Height attribute out of range: {} - {}", *heightAttr,
+                      e.what());
     }
   }
   if (const xmlChar* content = xmlNodeGetContent(node)) {
@@ -40,7 +41,7 @@ void Image::parseXmlNode(const xmlNode* node) {
     url_ = plugin_common::StringTools::trimSpaces(rawUrl);
     xmlFree(const_cast<xmlChar*>(content));
   } else {
-    spdlog::error("Failed to retrieve content for node.");
+    ihs::log::error("Failed to retrieve content for node.");
   }
 }
 
@@ -61,15 +62,15 @@ const std::optional<std::string>& Image::getUrl() const {
 }
 
 void Image::printImageDetails() const {
-  spdlog::info("\tImage:");
+  ihs::log::info("\tImage:");
   if (type_.has_value())
-    spdlog::info("\t\tType: {}", type_.value());
+    ihs::log::info("\t\tType: {}", type_.value());
   if (width_.has_value())
-    spdlog::info("\t\tWidth: {}", width_.value());
+    ihs::log::info("\t\tWidth: {}", width_.value());
   if (height_.has_value())
-    spdlog::info("\t\tHeight: {}", height_.value());
+    ihs::log::info("\t\tHeight: {}", height_.value());
   if (url_.has_value())
-    spdlog::info("\t\tURL: {}", url_.value());
+    ihs::log::info("\t\tURL: {}", url_.value());
 }
 
 Video::Video(const xmlNode* node) {
@@ -83,10 +84,10 @@ void Video::parseXmlNode(const xmlNode* node) {
     try {
       width_ = std::stoi(*widthAttr);
     } catch (const std::invalid_argument& e) {
-      spdlog::error("Invalid width attribute: {} - {}", *widthAttr, e.what());
+      ihs::log::error("Invalid width attribute: {} - {}", *widthAttr, e.what());
     } catch (const std::out_of_range& e) {
-      spdlog::error("Width attribute out of range: {} - {}", *widthAttr,
-                    e.what());
+      ihs::log::error("Width attribute out of range: {} - {}", *widthAttr,
+                      e.what());
     }
   }
   if (const auto heightAttr =
@@ -94,10 +95,11 @@ void Video::parseXmlNode(const xmlNode* node) {
     try {
       height_ = std::stoi(*heightAttr);
     } catch (const std::invalid_argument& e) {
-      spdlog::error("Invalid height attribute: {} - {}", *heightAttr, e.what());
+      ihs::log::error("Invalid height attribute: {} - {}", *heightAttr,
+                      e.what());
     } catch (const std::out_of_range& e) {
-      spdlog::error("Height attribute out of range: {} - {}", *heightAttr,
-                    e.what());
+      ihs::log::error("Height attribute out of range: {} - {}", *heightAttr,
+                      e.what());
     }
   }
   if (const xmlChar* content = xmlNodeGetContent(node)) {
@@ -105,7 +107,7 @@ void Video::parseXmlNode(const xmlNode* node) {
     url_ = plugin_common::StringTools::trimSpaces(rawUrl);
     xmlFree(const_cast<xmlChar*>(content));
   } else {
-    spdlog::error("Failed to retrieve content for node.");
+    ihs::log::error("Failed to retrieve content for node.");
   }
 }
 
@@ -130,17 +132,17 @@ const std::optional<std::string>& Video::getUrl() const {
 }
 
 void Video::printVideoDetails() const {
-  spdlog::info("\tVideo:");
+  ihs::log::info("\tVideo:");
   if (container_.has_value())
-    spdlog::info("\t\tContainer: {}", container_.value());
+    ihs::log::info("\t\tContainer: {}", container_.value());
   if (codec_.has_value())
-    spdlog::info("\t\tCodec: {}", codec_.value());
+    ihs::log::info("\t\tCodec: {}", codec_.value());
   if (width_.has_value())
-    spdlog::info("\t\tWidth: {}", width_.value());
+    ihs::log::info("\t\tWidth: {}", width_.value());
   if (height_.has_value())
-    spdlog::info("\t\tHeight: {}", height_.value());
+    ihs::log::info("\t\tHeight: {}", height_.value());
   if (url_.has_value())
-    spdlog::info("\t\tURL: {}", url_.value());
+    ihs::log::info("\t\tURL: {}", url_.value());
 }
 
 Screenshot::Screenshot(const xmlNode* node) {
@@ -164,7 +166,7 @@ void Screenshot::parseXmlNode(const xmlNode* node) {
             plugin_common::StringTools::trimSpaces(rawCaption));
         xmlFree(const_cast<xmlChar*>(content));
       } else {
-        spdlog::error("Failed to retrieve caption content.");
+        ihs::log::error("Failed to retrieve caption content.");
       }
     } else if (xmlStrEqual(current->name,
                            reinterpret_cast<const xmlChar*>("image"))) {
@@ -198,14 +200,14 @@ const std::optional<Video>& Screenshot::getVideo() const {
 
 void Screenshot::printScreenshotDetails() const {
   if (type_.has_value()) {
-    spdlog::info("\tScreenshot:");
-    spdlog::info("\t\tType: {}", type_.value());
+    ihs::log::info("\tScreenshot:");
+    ihs::log::info("\t\tType: {}", type_.value());
   } else {
     return;
   }
 
   for (const auto& caption : captions_) {
-    spdlog::info("\t\tCaption: {}", caption);
+    ihs::log::info("\t\tCaption: {}", caption);
   }
 
   if (images_.has_value()) {

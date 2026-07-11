@@ -20,7 +20,7 @@
 #include <iomanip>
 #include "asio/post.hpp"
 #include "flatpak/flatpak_shim.h"
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 namespace flatpak_plugin {
 
@@ -34,7 +34,7 @@ void PermissionsPortal::CheckAllPermissions(
     const std::function<void(std::map<std::string, PermissionStatus>)>&
         callback) const {
   if (permissions.empty()) {
-    spdlog::error("[AccessPortal] CheckAllPermissions: empty");
+    ihs::log::error("[AccessPortal] CheckAllPermissions: empty");
     callback({});
     return;
   }
@@ -84,8 +84,8 @@ void PermissionsPortal::GetPermission(
                              std::vector<std::string> permissions)>& callback)
     const {
   std::vector<std::string> permissions;
-  spdlog::debug("[AccessPortal] GetPermission table={}, id={}, app={}", table,
-                id, app);
+  ihs::log::debug("[AccessPortal] GetPermission table={}, id={}, app={}", table,
+                  id, app);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -114,14 +114,15 @@ void PermissionsPortal::GetPermission(
                           "org.freedesktop.DBus.Error.UnknownMethod" ||
                       error->getName() ==
                           "org.freedesktop.portal.Error.NotFound") {
-                    spdlog::debug(
+                    ihs::log::debug(
                         "[AccessPortal] Permission not set for {}/{}/{}", table,
                         id, app);
                     callback(PermissionStatus::NOT_SET, {});
                     return;
                   }
-                  spdlog::error("[AccessPortal] GetPermission failed: {} ({})",
-                                error->getMessage(), error->getName());
+                  ihs::log::error(
+                      "[AccessPortal] GetPermission failed: {} ({})",
+                      error->getMessage(), error->getName());
                   callback(PermissionStatus::NOT_SET, {});
                   return;
                 }
@@ -136,14 +137,14 @@ void PermissionsPortal::GetPermission(
                 } else if (permissions[0] == "ask") {
                   callback(PermissionStatus::ASK, permissions);
                 } else {
-                  spdlog::warn("[AccessPortal] Unknown permission value: {}",
-                               permissions[0]);
+                  ihs::log::warn("[AccessPortal] Unknown permission value: {}",
+                                 permissions[0]);
                   callback(PermissionStatus::NOT_SET, permissions);
                 }
               });
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(PermissionStatus::NOT_SET, {});
   }
 }
@@ -154,7 +155,7 @@ void PermissionsPortal::SetPermission(
     const std::string& app,
     const std::vector<std::string>& permission,
     const std::function<void(bool ready)>& callback) const {
-  spdlog::debug(
+  ihs::log::debug(
       "[AccessPortal] SetPermission: table={}, id={}, app={}, perm={}", table,
       id, app, permission.empty() ? "empty" : permission[0]);
   try {
@@ -172,24 +173,24 @@ void PermissionsPortal::SetPermission(
             [callback, proxy]  // proxy captured to extend lifetime
             (std::optional<sdbus::Error>
                  error) {  // NOLINT(performance-unnecessary-value-param)
-              spdlog::debug(
+              ihs::log::debug(
                   "[AccessPortal] SetPermission callback received: error={}",
                   error.has_value());
 
               if (error) {
-                spdlog::error("[AccessPortal] SetPermission failed: {}",
-                              error->getMessage());
+                ihs::log::error("[AccessPortal] SetPermission failed: {}",
+                                error->getMessage());
                 callback(false);
               } else {
-                spdlog::debug("[AccessPortal] SetPermission successful");
+                ihs::log::debug("[AccessPortal] SetPermission successful");
                 callback(true);
               }
             });
 
-    spdlog::debug("[AccessPortal] SetPermission async call started");
+    ihs::log::debug("[AccessPortal] SetPermission async call started");
 
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] SetPermission exception: {}", e.what());
+    ihs::log::error("[AccessPortal] SetPermission exception: {}", e.what());
     callback(false);
   }
 }
@@ -199,8 +200,8 @@ void PermissionsPortal::DeletePermission(
     const std::string& id,
     const std::string& app,
     const std::function<void(bool ready)>& callback) const {
-  spdlog::debug("[AccessPortal] DeletePermission: table={}, id={},app={}",
-                table, id, app);
+  ihs::log::debug("[AccessPortal] DeletePermission: table={}, id={},app={}",
+                  table, id, app);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -222,13 +223,13 @@ void PermissionsPortal::DeletePermission(
                   const auto& msg = error->getMessage();
                   if (msg.find("No entry") != std::string::npos ||
                       msg.find("not found") != std::string::npos) {
-                    spdlog::debug(
+                    ihs::log::debug(
                         "[AccessPortal] DeletePermission: no entry, skipping");
                     callback(true);
                     return;
                   }
-                  spdlog::error("[AccessPortal] DeletePermission failed: {}",
-                                msg);
+                  ihs::log::error("[AccessPortal] DeletePermission failed: {}",
+                                  msg);
                   callback(false);
                 } else {
                   callback(true);
@@ -236,7 +237,7 @@ void PermissionsPortal::DeletePermission(
               });
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(false);
   }
 }
@@ -251,7 +252,7 @@ void PermissionsPortal::SetResource(
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&now_c), "%F %T");
   std::string log = oss.str();
-  spdlog::debug("[AccessPortal] SetResource: table={}, id={}", table, id);
+  ihs::log::debug("[AccessPortal] SetResource: table={}, id={}", table, id);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -270,17 +271,17 @@ void PermissionsPortal::SetResource(
                  error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
-                  spdlog::error("[AccessPortal] Set Resource failed: {}",
-                                error->getMessage());
+                  ihs::log::error("[AccessPortal] Set Resource failed: {}",
+                                  error->getMessage());
                   callback(false);
                 } else {
-                  spdlog::debug("Set Resource successfully");
+                  ihs::log::debug("Set Resource successfully");
                   callback(true);
                 }
               });
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(false);
   }
 }
@@ -289,7 +290,7 @@ void PermissionsPortal::DeleteResource(
     const std::string& table,
     const std::string& id,
     const std::function<void(bool ready)>& callback) const {
-  spdlog::debug("[AccessPortal] DeleteResource: table={}, id={}", table, id);
+  ihs::log::debug("[AccessPortal] DeleteResource: table={}, id={}", table, id);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -308,17 +309,17 @@ void PermissionsPortal::DeleteResource(
                  error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
-                  spdlog::error("[AccessPortal] Delete Resource failed: {}",
-                                error->getMessage());
+                  ihs::log::error("[AccessPortal] Delete Resource failed: {}",
+                                  error->getMessage());
                   callback(false);
                 } else {
-                  spdlog::debug("Delete Resource successfully");
+                  ihs::log::debug("Delete Resource successfully");
                   callback(true);
                 }
               });
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(false);
   }
 }
@@ -326,7 +327,7 @@ void PermissionsPortal::GetAllResource(
     const std::string& table,
     const std::function<void(bool success, std::vector<std::string> resources)>&
         callback) const {
-  spdlog::debug("[AccessPortal] GetAllResources: table={}", table);
+  ihs::log::debug("[AccessPortal] GetAllResources: table={}", table);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -346,11 +347,11 @@ void PermissionsPortal::GetAllResource(
              const std::vector<std::string>& resources) {
               asio::post(io_context_, [callback, error, resources]() {
                 if (error) {
-                  spdlog::error("[AccessPortal] Get all Resource failed: {}",
-                                error->getMessage());
+                  ihs::log::error("[AccessPortal] Get all Resource failed: {}",
+                                  error->getMessage());
                   callback(false, resources);
                 } else {
-                  spdlog::debug(
+                  ihs::log::debug(
                       "Get all Resource successfully fetched {} resource",
                       resources.size());
                   callback(true, resources);
@@ -359,7 +360,7 @@ void PermissionsPortal::GetAllResource(
             });
 
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(false, {});
   }
 }
@@ -369,8 +370,8 @@ void PermissionsPortal::GetAllPermissions(
     const std::string& id,
     const std::string& app,
     const std::function<void(PermissionStatus status)>& callback) const {
-  spdlog::debug("[AccessPortal] GetAllPermissions: table={}, id={}, app={}",
-                table, id, app);
+  ihs::log::debug("[AccessPortal] GetAllPermissions: table={}, id={}, app={}",
+                  table, id, app);
 
   try {
     auto& conn = session_bus_.GetConnection();
@@ -390,7 +391,7 @@ void PermissionsPortal::GetAllPermissions(
                  error,  // NOLINT(performance-unnecessary-value-param)
              const std::map<std::string, std::vector<std::string>>&
                  permissions) {
-              spdlog::debug(
+              ihs::log::debug(
                   "[AccessPortal] Callback received: table={}, id={}, error={}",
                   table, id, error.has_value());
 
@@ -402,7 +403,8 @@ void PermissionsPortal::GetAllPermissions(
                   callback(PermissionStatus::NOT_SET);
                   return;
                 }
-                spdlog::error("[AccessPortal] Error: {}", error->getMessage());
+                ihs::log::error("[AccessPortal] Error: {}",
+                                error->getMessage());
                 callback(PermissionStatus::NOT_SET);
                 return;
               }
@@ -424,7 +426,7 @@ void PermissionsPortal::GetAllPermissions(
                 callback(PermissionStatus::NOT_SET);
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(PermissionStatus::NOT_SET);
   }
 }
@@ -483,8 +485,8 @@ void PermissionsPortal::StoreTimestamp(
     const std::string& id,
     const std::string& data,
     const std::function<void(bool ready)>& callback) const {
-  spdlog::debug("[AccessPortal] StoreTimestamp: table={}, id={}, data={}",
-                table, id, data);
+  ihs::log::debug("[AccessPortal] StoreTimestamp: table={}, id={}, data={}",
+                  table, id, data);
   try {
     auto& conn = session_bus_.GetConnection();
     auto proxy =
@@ -503,17 +505,17 @@ void PermissionsPortal::StoreTimestamp(
                  error) {  // NOLINT(performance-unnecessary-value-param)
               asio::post(io_context_, [callback, error]() {
                 if (error) {
-                  spdlog::error("[AccessPortal] StoreTimestamp failed: {}",
-                                error->getMessage());
+                  ihs::log::error("[AccessPortal] StoreTimestamp failed: {}",
+                                  error->getMessage());
                   callback(false);
                 } else {
-                  spdlog::debug("[AccessPortal] SetPermission successful");
+                  ihs::log::debug("[AccessPortal] SetPermission successful");
                   callback(true);
                 }
               });
             });
   } catch (const std::exception& e) {
-    spdlog::error("[AccessPortal] Exception: {}", e.what());
+    ihs::log::error("[AccessPortal] Exception: {}", e.what());
     callback(false);
   }
 }

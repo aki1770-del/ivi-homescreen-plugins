@@ -10,7 +10,7 @@
 
 #include "flatpak/component.h"
 #include "flatpak/flatpak_shim.h"
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 using namespace flatpak_plugin;
 class TestBinaryMessenger : public flutter::BinaryMessenger {
@@ -631,7 +631,7 @@ TEST_F(FlatpakPluginTest, RunMultipleAppsTest) {
     shim->ApplicationStart(
         app_id, *strand, portal_manager,
         [guard](const ErrorOr<bool>& start_result) {
-          spdlog::debug("[FlatpakPlugin] ApplicationStart callback received");
+          ihs::log::debug("[FlatpakPlugin] ApplicationStart callback received");
           guard->set_value(start_result);
         });
 

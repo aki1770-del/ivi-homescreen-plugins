@@ -105,7 +105,7 @@ class Shader {
 
     auto status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-      spdlog::error("FramebufferStatus: 0x{:X}", status);
+      ihs::log::error("FramebufferStatus: 0x{:X}", status);
     }
 
     if (double_buffer) {
@@ -132,7 +132,7 @@ class Shader {
 
       auto backStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
       if (backStatus != GL_FRAMEBUFFER_COMPLETE) {
-        spdlog::error("Back FramebufferStatus: 0x{:X}", backStatus);
+        ihs::log::error("Back FramebufferStatus: 0x{:X}", backStatus);
       }
     }
 
@@ -234,7 +234,7 @@ class Shader {
                    const GLsizei uv_s) {
     (void)y_p_s;
     (void)uv_p_s;
-    SPDLOG_TRACE("[VideoPlayer] load_pixels");
+    IHS_TRACE("[VideoPlayer] load_pixels");
 
     const GLuint target_fb = render_target();
     glBindFramebuffer(GL_FRAMEBUFFER, target_fb);
@@ -302,8 +302,8 @@ class Shader {
 
     auto fbo_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (fbo_status != GL_FRAMEBUFFER_COMPLETE)
-      spdlog::error("[VideoPlayer] Framebuffer is not complete: 0x{:X}",
-                    fbo_status);
+      ihs::log::error("[VideoPlayer] Framebuffer is not complete: 0x{:X}",
+                      fbo_status);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
   }
@@ -320,7 +320,7 @@ class Shader {
     glGetShaderiv(vertex_shader_, GL_COMPILE_STATUS, &result);
     if (result == GL_FALSE) {
       glGetShaderInfoLog(vertex_shader_, info.size(), &length, info.data());
-      SPDLOG_ERROR("Failed to compile {}", std::string(info.data(), length));
+      ihs::log::error("Failed to compile {}", std::string(info.data(), length));
       return 0;
     }
 
@@ -330,7 +330,7 @@ class Shader {
     glGetShaderiv(fragment_shader_, GL_COMPILE_STATUS, &result);
     if (result == GL_FALSE) {
       glGetShaderInfoLog(fragment_shader_, info.size(), &length, info.data());
-      SPDLOG_ERROR("Failed to compile {}", std::string(info.data(), length));
+      ihs::log::error("Failed to compile {}", std::string(info.data(), length));
       return 0;
     }
 
@@ -342,7 +342,7 @@ class Shader {
     glGetProgramiv(shaderProgram, GL_LINK_STATUS, &result);
     if (result == GL_FALSE) {
       glGetProgramInfoLog(shaderProgram, info.size(), &length, info.data());
-      SPDLOG_ERROR("Fail to link {}", std::string(info.data(), length));
+      ihs::log::error("Fail to link {}", std::string(info.data(), length));
       return 0;
     }
 
@@ -354,7 +354,7 @@ class Shader {
   }
 
   void draw_core() const {
-    SPDLOG_TRACE("[VideoPlayer] draw_core");
+    IHS_TRACE("[VideoPlayer] draw_core");
     glViewport(0, 0, width, height);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -379,7 +379,7 @@ class Shader {
   }
 
   void load_rgb_pixels(gpointer data) const {
-    SPDLOG_DEBUG("[VideoPlayer] load_rgb_pixels");
+    IHS_DEBUG("[VideoPlayer] load_rgb_pixels");
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);

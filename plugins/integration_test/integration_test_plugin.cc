@@ -37,7 +37,7 @@ void IntegrationTestPlugin::ArgResults(const flutter::EncodableMap& map) {
   for (const auto& [fst, snd] : map) {
     auto k = std::get<std::string>(fst);
     auto v = std::get<std::string>(snd);
-    spdlog::debug("{}={}", k, v);
+    ihs::log::debug("{}={}", k, v);
   }
 }
 

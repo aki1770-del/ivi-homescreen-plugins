@@ -48,7 +48,7 @@ GLuint LoadShader(const GLchar* shaderSrc, const GLenum type) {
       auto* infoLog = static_cast<GLchar*>(
           malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
-      spdlog::error("Error compiling shader:\n{}\n", infoLog);
+      ihs::log::error("Error compiling shader:\n{}\n", infoLog);
       free(infoLog);
     }
     glDeleteShader(shader);
@@ -86,7 +86,7 @@ void WebviewFlutterPlugin::RegisterWithRegistrar(
 
 void WebviewPlatformView::GetViewRect(CefRefPtr<CefBrowser> /* browser */,
                                       CefRect& rect) {
-  spdlog::debug("[webview_flutter] GetViewRect");
+  ihs::log::debug("[webview_flutter] GetViewRect");
   rect.width = static_cast<int>(width_);
   rect.height = static_cast<int>(height_);
 }
@@ -97,8 +97,8 @@ void WebviewPlatformView::OnPaint(CefRefPtr<CefBrowser> /* browser */,
                                   const void* buffer,
                                   int width,
                                   int height) {
-  spdlog::trace("[webview_flutter] OnPaint, width: {}, height: {}, type: {}",
-                width, height, (uint8_t)type);
+  ihs::log::trace("[webview_flutter] OnPaint, width: {}, height: {}, type: {}",
+                  width, height, (uint8_t)type);
   if (eglGetCurrentContext() != egl_context_) {
     eglMakeCurrent(egl_display_, egl_surface_, egl_surface_, egl_context_);
   }
@@ -135,7 +135,7 @@ void WebviewPlatformView::OnAcceleratedPaint(
     PaintElementType /* type */,
     const RectList& /* dirtyRects */,
     const CefAcceleratedPaintInfo& /* info */) {
-  spdlog::trace("[webview_flutter] OnAcceleratedPaint");
+  ihs::log::trace("[webview_flutter] OnAcceleratedPaint");
 }
 
 WebviewFlutterPlugin::WebviewFlutterPlugin() {}
@@ -190,7 +190,7 @@ WebviewPlatformView::WebviewPlatformView(
       callback_(nullptr),
       width_(width),
       height_(height) {
-  spdlog::debug(
+  ihs::log::debug(
       "++WebviewPlatformView::WebviewPlatformView: Top: {}, Left: {}, Width: "
       "{}, Height: {}, direction: {}, viewType: {}",
       top, left, width, height, direction, viewType);
@@ -224,7 +224,7 @@ WebviewPlatformView::WebviewPlatformView(
 }
 
 WebviewPlatformView::~WebviewPlatformView() {
-  spdlog::debug("[webview_flutter] ~WebviewPlatformView");
+  ihs::log::debug("[webview_flutter] ~WebviewPlatformView");
   removeListener_(platformViewsContext_, id_);
 }
 
@@ -259,12 +259,12 @@ void WebviewPlatformView::CefThreadMain() {
   // Load libcef.so
   std::string libcef_path_str = "libcef.so";
   std::filesystem::path libcef_file_path(libcef_path_str);
-  spdlog::debug("[webview_flutter] cef_load_library");
+  ihs::log::debug("[webview_flutter] cef_load_library");
   int cef_load_ok = cef_load_library(libcef_path_str.c_str());
   if (!cef_load_ok) {
     exit(-1);
   }
-  spdlog::debug("[webview_flutter] cef_load_library OK!");
+  ihs::log::debug("[webview_flutter] cef_load_library OK!");
 
   //  Set-up main args and settings for CEF
   CefMainArgs main_args(static_cast<int>(args.size()),
@@ -291,35 +291,36 @@ void WebviewPlatformView::CefThreadMain() {
   CefString(&settings.browser_subprocess_path)
       .FromASCII(browser_subprocess_path);
 
-  spdlog::debug("[webview_flutter] ++CefInitialize");
+  ihs::log::debug("[webview_flutter] ++CefInitialize");
   if (!CefInitialize(main_args, settings, this, nullptr)) {
     int error_code;
     error_code = CefGetExitCode();
-    spdlog::error("[webview_flutter] CefInitialize: {}", error_code);
+    ihs::log::error("[webview_flutter] CefInitialize: {}", error_code);
     exit(EXIT_FAILURE);
   }
-  spdlog::debug("[webview_flutter] --CefInitialize");
+  ihs::log::debug("[webview_flutter] --CefInitialize");
 
   // Run the CEF message loop. This will block until CefQuitMessageLoop() is
   // called.
-  spdlog::debug("[webview_cef_thread] ++CefRunMessageLoop");
+  ihs::log::debug("[webview_cef_thread] ++CefRunMessageLoop");
   CefRunMessageLoop();
-  spdlog::debug("[webview_cef_thread] --CefRunMessageLoop");
+  ihs::log::debug("[webview_cef_thread] --CefRunMessageLoop");
 
   // Shut down CEF.
-  spdlog::debug("[webview_cef_thread] ++CefShutdown");
+  ihs::log::debug("[webview_cef_thread] ++CefShutdown");
   CefShutdown();
-  spdlog::debug("[webview_cef_thread] --CefShutdown");
+  ihs::log::debug("[webview_cef_thread] --CefShutdown");
 }
 
 WebviewFlutterPlugin::~WebviewFlutterPlugin() {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_cef_thread] WebviewFlutterPlugin::~WebviewFlutterPlugin");
   CefPostTask(TID_UI, base::BindOnce(CefQuitMessageLoop));
 };
 
 void WebviewPlatformView::OnContextInitialized() {
-  spdlog::debug("[webview_flutter] WebviewPlatformView::OnContextInitialized");
+  ihs::log::debug(
+      "[webview_flutter] WebviewPlatformView::OnContextInitialized");
   CefWindowInfo window_info;
   window_info.SetAsWindowless(true);
   // window_info.shared_texture_enabled = true; // For OnAcceleratedPaint
@@ -328,11 +329,11 @@ void WebviewPlatformView::OnContextInitialized() {
   CefBrowserSettings browserSettings;
   browserSettings.windowless_frame_rate = 60;  // 30 is default
 
-  spdlog::debug("[webview_flutter] CreateBrowserSync++");
+  ihs::log::debug("[webview_flutter] CreateBrowserSync++");
   browser_ = CefBrowserHost::CreateBrowserSync(
       window_info, this, "https://www.google.com", browserSettings, nullptr,
       nullptr);
-  spdlog::debug("[webview_flutter] CreateBrowserSync--");
+  ihs::log::debug("[webview_flutter] CreateBrowserSync--");
 }
 
 void WebviewPlatformView::InitializeScene() {
@@ -387,7 +388,7 @@ void WebviewPlatformView::InitializeScene() {
       auto* infoLog = static_cast<GLchar*>(
           malloc(sizeof(char) * static_cast<unsigned long>(infoLen)));
       glGetProgramInfoLog(programObject, infoLen, nullptr, infoLog);
-      spdlog::error("Error linking program:\n{}\n", infoLog);
+      ihs::log::error("Error linking program:\n{}\n", infoLog);
       free(infoLog);
     }
     glDeleteProgram(programObject);
@@ -445,7 +446,7 @@ void WebviewPlatformView::InitializeEGL() {
   EGLint count;
   eglGetConfigs(egl_display_, nullptr, 0, &count);
   assert(count);
-  spdlog::debug("[webview_flutter] InitializeEGL: EGL has {} configs", count);
+  ihs::log::debug("[webview_flutter] InitializeEGL: EGL has {} configs", count);
 
   auto* configs = static_cast<EGLConfig*>(
       calloc(static_cast<size_t>(count), sizeof(EGLConfig)));
@@ -459,7 +460,7 @@ void WebviewPlatformView::InitializeEGL() {
   EGLint size;
   for (EGLint i = 0; i < n; i++) {
     eglGetConfigAttrib(egl_display_, configs[i], EGL_BUFFER_SIZE, &size);
-    spdlog::debug(
+    ihs::log::debug(
         "[webview_flutter] InitializeEGL: Buffer size for config {} is {}", i,
         size);
     if (buffer_size_ <= size) {
@@ -469,7 +470,7 @@ void WebviewPlatformView::InitializeEGL() {
   }
   free(configs);
   if (egl_config_ == nullptr) {
-    spdlog::critical(
+    ihs::log::critical(
         "[webview_flutter] InitializeEGL: did not find config with buffer size "
         "{}",
         buffer_size_);
@@ -479,7 +480,7 @@ void WebviewPlatformView::InitializeEGL() {
   egl_context_ = eglCreateContext(egl_display_, egl_config_, EGL_NO_CONTEXT,
                                   kEglContextAttribs.data());
   assert(egl_context_);
-  spdlog::debug("[webview_flutter] InitializeEGL: Context={}", egl_context_);
+  ihs::log::debug("[webview_flutter] InitializeEGL: Context={}", egl_context_);
 }
 
 //
@@ -492,7 +493,7 @@ WebviewFlutterInstanceManagerHostApi::~WebviewFlutterInstanceManagerHostApi() =
     default;
 
 std::optional<FlutterError> WebviewFlutterInstanceManagerHostApi::Clear() {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterInstanceManagerHostApi: Clear");
   return std::nullopt;
 }
@@ -507,7 +508,7 @@ WebviewFlutterWebStorageHostApi::~WebviewFlutterWebStorageHostApi() = default;
 
 std::optional<FlutterError> WebviewFlutterWebStorageHostApi::Create(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebStorageHostApi: Create, instance_id: "
       "{}",
       instance_id);
@@ -516,7 +517,7 @@ std::optional<FlutterError> WebviewFlutterWebStorageHostApi::Create(
 
 std::optional<FlutterError> WebviewFlutterWebStorageHostApi::DeleteAllData(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebStorageHostApi: DeleteAllData, "
       "instance_id: {}",
       instance_id);
@@ -533,7 +534,7 @@ WebviewFlutterWebViewHostApi::~WebviewFlutterWebViewHostApi() = default;
 
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::Create(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: Create, instance_id: {}",
       instance_id);
   return std::nullopt;
@@ -544,7 +545,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::LoadData(
     const std::string& /* data */,
     const std::string* mime_type,
     const std::string* encoding) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: LoadData, instance_id: "
       "{}, mime_type: {}, encoding: "
       "{}",
@@ -559,7 +560,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::LoadDataWithBaseUrl(
     const std::string* mime_type,
     const std::string* encoding,
     const std::string* history_url) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: LoadDataWithBaseUrl, "
       "instance_id: {}, base_url: {}, "
       "mime_type: "
@@ -572,7 +573,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::LoadUrl(
     int64_t instance_id,
     const std::string& url,
     const flutter::EncodableMap& headers) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: LoadUrl, instance_id: "
       "{}, url: {}",
       instance_id, url);
@@ -586,7 +587,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::PostUrl(
     int64_t instance_id,
     const std::string& url,
     const std::vector<uint8_t>& /* data */) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: PostUrl: instance_id: "
       "{}, url: {}",
       instance_id, url);
@@ -595,7 +596,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::PostUrl(
 
 ErrorOr<std::optional<std::string>> WebviewFlutterWebViewHostApi::GetUrl(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GetUrl, instance_id: {}",
       instance_id);
   // TODO - set favorite in test case calls this
@@ -603,7 +604,7 @@ ErrorOr<std::optional<std::string>> WebviewFlutterWebViewHostApi::GetUrl(
 }
 
 ErrorOr<bool> WebviewFlutterWebViewHostApi::CanGoBack(int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: CanGoBack, instance_id: "
       "{}",
       instance_id);
@@ -611,7 +612,7 @@ ErrorOr<bool> WebviewFlutterWebViewHostApi::CanGoBack(int64_t instance_id) {
 }
 
 ErrorOr<bool> WebviewFlutterWebViewHostApi::CanGoForward(int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: CanGoForward, "
       "instance_id: {}",
       instance_id);
@@ -620,7 +621,7 @@ ErrorOr<bool> WebviewFlutterWebViewHostApi::CanGoForward(int64_t instance_id) {
 
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::GoBack(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GoBack, instance_id: {}",
       instance_id);
   return std::nullopt;
@@ -628,7 +629,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::GoBack(
 
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::GoForward(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GoForward, instance_id: "
       "{}",
       instance_id);
@@ -637,7 +638,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::GoForward(
 
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::Reload(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: Reload, instance_id: {}",
       instance_id);
   return std::nullopt;
@@ -646,7 +647,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::Reload(
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::ClearCache(
     int64_t instance_id,
     bool include_disk_files) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: ClearCache, "
       "instance_id: {}, include_disk_files: {}",
       instance_id, include_disk_files);
@@ -658,7 +659,7 @@ void WebviewFlutterWebViewHostApi::EvaluateJavascript(
     const std::string& javascript_string,
     std::function<
         void(ErrorOr<std::optional<std::string>> reply)> /* result */) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: EvaluateJavascript, "
       "instance_id: {}, "
       "javascript_string: {}",
@@ -667,7 +668,7 @@ void WebviewFlutterWebViewHostApi::EvaluateJavascript(
 
 ErrorOr<std::optional<std::string>> WebviewFlutterWebViewHostApi::GetTitle(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GetTitle, instance_id: "
       "{}",
       instance_id);
@@ -677,7 +678,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::ScrollTo(
     int64_t instance_id,
     int64_t x,
     int64_t y) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: ScrollTo, instance_id: "
       "{}, x: {}, y: {}",
       instance_id, x, y);
@@ -688,7 +689,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::ScrollBy(
     int64_t instance_id,
     int64_t x,
     int64_t y) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: ScrollBy, instance_id: "
       "{}, x: {}, y: {}",
       instance_id, x, y);
@@ -696,7 +697,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::ScrollBy(
 }
 
 ErrorOr<int64_t> WebviewFlutterWebViewHostApi::GetScrollX(int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GetScrollX, "
       "instance_id: {}",
       instance_id);
@@ -704,7 +705,7 @@ ErrorOr<int64_t> WebviewFlutterWebViewHostApi::GetScrollX(int64_t instance_id) {
 }
 
 ErrorOr<int64_t> WebviewFlutterWebViewHostApi::GetScrollY(int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GetScrollY, "
       "instance_id: {}",
       instance_id);
@@ -713,7 +714,7 @@ ErrorOr<int64_t> WebviewFlutterWebViewHostApi::GetScrollY(int64_t instance_id) {
 
 ErrorOr<WebViewPoint> WebviewFlutterWebViewHostApi::GetScrollPosition(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: GetScrollPosition, "
       "instance_id: {}",
       instance_id);
@@ -722,7 +723,7 @@ ErrorOr<WebViewPoint> WebviewFlutterWebViewHostApi::GetScrollPosition(
 
 std::optional<FlutterError>
 WebviewFlutterWebViewHostApi::SetWebContentsDebuggingEnabled(bool enabled) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: "
       "SetWebContentsDebuggingEnabled, enabled: {}",
       enabled);
@@ -732,7 +733,7 @@ WebviewFlutterWebViewHostApi::SetWebContentsDebuggingEnabled(bool enabled) {
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetWebViewClient(
     int64_t instance_id,
     int64_t web_view_client_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: SetWebViewClient, "
       "instance_id: {}, "
       "web_view_client_instance_id: {}",
@@ -743,7 +744,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetWebViewClient(
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::AddJavaScriptChannel(
     int64_t instance_id,
     int64_t java_script_channel_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: AddJavaScriptChannel, "
       "instance_id: {}, "
       "java_script_channel_instance_id: {}",
@@ -755,7 +756,7 @@ std::optional<FlutterError>
 WebviewFlutterWebViewHostApi::RemoveJavaScriptChannel(
     int64_t instance_id,
     int64_t java_script_channel_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: "
       "RemoveJavaScriptChannel, instance_id: {}, "
       "java_script_channel_instance_id: {}",
@@ -766,7 +767,7 @@ WebviewFlutterWebViewHostApi::RemoveJavaScriptChannel(
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetDownloadListener(
     int64_t instance_id,
     const int64_t* listener_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: SetDownloadListener, "
       "instance_id: {}, "
       "listener_instance_id: {}",
@@ -777,7 +778,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetDownloadListener(
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetWebChromeClient(
     int64_t instance_id,
     const int64_t* client_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: SetWebChromeClient, "
       "instance_id: {}, "
       "client_instance_id: {}",
@@ -788,7 +789,7 @@ std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetWebChromeClient(
 std::optional<FlutterError> WebviewFlutterWebViewHostApi::SetBackgroundColor(
     int64_t instance_id,
     int64_t color) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewHostApi: SetWebChromeClient, "
       "instance_id: {}, color: 0x{:08}",
       instance_id, color);
@@ -806,7 +807,7 @@ WebviewFlutterWebSettingsHostApi::~WebviewFlutterWebSettingsHostApi() = default;
 std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::Create(
     int64_t instance_id,
     int64_t web_view_instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: Create, "
       "instance_id: {}, web_view_instance_id: {}",
       instance_id, web_view_instance_id);
@@ -816,7 +817,7 @@ std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::Create(
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetDomStorageEnabled(int64_t instance_id,
                                                        bool flag) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetDomStorageEnabled, instance_id: {}, flag: {}",
       instance_id, flag);
@@ -827,7 +828,7 @@ std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetJavaScriptCanOpenWindowsAutomatically(
     int64_t instance_id,
     bool flag) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetJavaScriptCanOpenWindowsAutomatically, "
       "instance_id: {}, flag: {}",
@@ -838,7 +839,7 @@ WebviewFlutterWebSettingsHostApi::SetJavaScriptCanOpenWindowsAutomatically(
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetSupportMultipleWindows(int64_t instance_id,
                                                             bool support) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetSupportMultipleWindows, instance_id: {}. support: "
       "{}",
@@ -849,7 +850,7 @@ WebviewFlutterWebSettingsHostApi::SetSupportMultipleWindows(int64_t instance_id,
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetJavaScriptEnabled(int64_t instance_id,
                                                        bool flag) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetJavaScriptEnabled, instance_id: {}, flag: {}",
       instance_id, flag);
@@ -860,7 +861,7 @@ std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetUserAgentString(
     int64_t instance_id,
     const std::string* user_agent_string) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: SetUserAgentString, "
       "instance_id: {}, "
       "user_agent_string: {}",
@@ -872,7 +873,7 @@ std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetMediaPlaybackRequiresUserGesture(
     int64_t instance_id,
     bool require) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetMediaPlaybackRequiresUserGesture, instance_id: {}, "
       "require: {}",
@@ -883,7 +884,7 @@ WebviewFlutterWebSettingsHostApi::SetMediaPlaybackRequiresUserGesture(
 std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::SetSupportZoom(
     int64_t instance_id,
     bool support) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: SetSupportZoom, "
       "instance_id: {}, support: {}",
       instance_id, support);
@@ -893,7 +894,7 @@ std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::SetSupportZoom(
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetLoadWithOverviewMode(int64_t instance_id,
                                                           bool overview) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetLoadWithOverviewMode, instance_id: {}, overview: "
       "{}",
@@ -904,7 +905,7 @@ WebviewFlutterWebSettingsHostApi::SetLoadWithOverviewMode(int64_t instance_id,
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetUseWideViewPort(int64_t instance_id,
                                                      bool use) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: SetUseWideViewPort, "
       "instance_id: {}, use: {}",
       instance_id, use);
@@ -914,7 +915,7 @@ WebviewFlutterWebSettingsHostApi::SetUseWideViewPort(int64_t instance_id,
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetDisplayZoomControls(int64_t instance_id,
                                                          bool enabled) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetDisplayZoomControls, instance_id: {}, enabled: {}",
       instance_id, enabled);
@@ -924,7 +925,7 @@ WebviewFlutterWebSettingsHostApi::SetDisplayZoomControls(int64_t instance_id,
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetBuiltInZoomControls(int64_t instance_id,
                                                          bool enabled) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: "
       "SetBuiltInZoomControls, instance_id: {}, enabled: {}",
       instance_id, enabled);
@@ -934,7 +935,7 @@ WebviewFlutterWebSettingsHostApi::SetBuiltInZoomControls(int64_t instance_id,
 std::optional<FlutterError>
 WebviewFlutterWebSettingsHostApi::SetAllowFileAccess(int64_t instance_id,
                                                      bool enabled) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: SetAllowFileAccess, "
       "instance_id: {}, enabled: {}",
       instance_id, enabled);
@@ -944,7 +945,7 @@ WebviewFlutterWebSettingsHostApi::SetAllowFileAccess(int64_t instance_id,
 std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::SetTextZoom(
     int64_t instance_id,
     int64_t text_zoom) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: SetTextZoom, "
       "instance_id: {}, text_zoom: {}",
       instance_id, text_zoom);
@@ -953,7 +954,7 @@ std::optional<FlutterError> WebviewFlutterWebSettingsHostApi::SetTextZoom(
 
 ErrorOr<std::string> WebviewFlutterWebSettingsHostApi::GetUserAgentString(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebSettingsHostApi: GetUserAgentString, "
       "instance_id: {}",
       instance_id);
@@ -971,7 +972,7 @@ WebviewFlutterWebChromeClientHostApi::~WebviewFlutterWebChromeClientHostApi() =
 
 std::optional<FlutterError> WebviewFlutterWebChromeClientHostApi::Create(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: Create, "
       "instance_id: {}",
       instance_id);
@@ -981,7 +982,7 @@ std::optional<FlutterError> WebviewFlutterWebChromeClientHostApi::Create(
 std::optional<FlutterError> WebviewFlutterWebChromeClientHostApi::
     SetSynchronousReturnValueForOnShowFileChooser(int64_t instance_id,
                                                   bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: "
       "SetSynchronousReturnValueForOnShowFileChooser, "
       "instance_id: {}, value: {}",
@@ -992,7 +993,7 @@ std::optional<FlutterError> WebviewFlutterWebChromeClientHostApi::
 std::optional<FlutterError> WebviewFlutterWebChromeClientHostApi::
     SetSynchronousReturnValueForOnConsoleMessage(int64_t instance_id,
                                                  bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: "
       "SetSynchronousReturnValueForOnConsoleMessage, "
       "instance_id: {}, value: {}",
@@ -1004,7 +1005,7 @@ std::optional<FlutterError>
 WebviewFlutterWebChromeClientHostApi::SetSynchronousReturnValueForOnJsAlert(
     int64_t instance_id,
     bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: "
       "SetSynchronousReturnValueForOnJsAlert, instance_id: "
       "{}, value: {}",
@@ -1016,7 +1017,7 @@ std::optional<FlutterError>
 WebviewFlutterWebChromeClientHostApi::SetSynchronousReturnValueForOnJsConfirm(
     int64_t instance_id,
     bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: "
       "SetSynchronousReturnValueForOnJsConfirm, instance_id: "
       "{}, value: {}",
@@ -1028,7 +1029,7 @@ std::optional<FlutterError>
 WebviewFlutterWebChromeClientHostApi::SetSynchronousReturnValueForOnJsPrompt(
     int64_t instance_id,
     bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebChromeClientHostApi: "
       "SetSynchronousReturnValueForOnJsPrompt: instance_id: "
       "{}, value: {}",
@@ -1047,7 +1048,7 @@ WebviewFlutterCookieManagerHostApi::~WebviewFlutterCookieManagerHostApi() =
 
 std::optional<FlutterError> WebviewFlutterCookieManagerHostApi::AttachInstance(
     int64_t instance_identifier) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterCookieManagerHostApiAttachInstance, "
       "instance_identifier: {}",
       instance_identifier);
@@ -1058,7 +1059,7 @@ std::optional<FlutterError> WebviewFlutterCookieManagerHostApi::SetCookie(
     int64_t identifier,
     const std::string& url,
     const std::string& value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterCookieManagerHostApiSetCookie, "
       "identifier: {}, url: {}, value: {}",
       identifier, url, value);
@@ -1068,7 +1069,7 @@ std::optional<FlutterError> WebviewFlutterCookieManagerHostApi::SetCookie(
 void WebviewFlutterCookieManagerHostApi::RemoveAllCookies(
     int64_t identifier,
     const std::function<void(ErrorOr<bool> reply)> result) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterCookieManagerHostApiRemoveAllCookies, "
       "identifier: {}",
       identifier);
@@ -1080,7 +1081,7 @@ WebviewFlutterCookieManagerHostApi::SetAcceptThirdPartyCookies(
     int64_t identifier,
     int64_t web_view_identifier,
     bool accept) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] "
       "WebviewFlutterCookieManagerHostApiSetAcceptThirdPartyCookies, "
       "identifier: {}, "
@@ -1100,7 +1101,7 @@ WebviewFlutterWebViewClientHostApi::~WebviewFlutterWebViewClientHostApi() =
 
 std::optional<FlutterError> WebviewFlutterWebViewClientHostApi::Create(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterDownloadListenerHostApi: Create, "
       "instance_id: {}",
       instance_id);
@@ -1110,7 +1111,7 @@ std::optional<FlutterError> WebviewFlutterWebViewClientHostApi::Create(
 std::optional<FlutterError> WebviewFlutterWebViewClientHostApi::
     SetSynchronousReturnValueForShouldOverrideUrlLoading(int64_t instance_id,
                                                          bool value) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterWebViewClientHostApi: "
       "SetSynchronousReturnValueForShouldOverrideUrlLoading, "
       "instance_id: {}, value: {}",
@@ -1129,7 +1130,7 @@ WebviewFlutterDownloadListenerHostApi::
 
 std::optional<FlutterError> WebviewFlutterDownloadListenerHostApi::Create(
     int64_t instance_id) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterDownloadListenerHostApi: Create, "
       "instance_id: {}",
       instance_id);
@@ -1148,7 +1149,7 @@ WebviewFlutterJavaScriptChannelHostApi::
 std::optional<FlutterError> WebviewFlutterJavaScriptChannelHostApi::Create(
     int64_t instance_id,
     const std::string& channel_name) {
-  spdlog::debug(
+  ihs::log::debug(
       "[webview_flutter] WebviewFlutterJavaScriptChannelHostApi: Create, "
       "instance_id: {}, channel_name: {}",
       instance_id, channel_name);
@@ -1163,33 +1164,33 @@ std::optional<FlutterError> WebviewFlutterJavaScriptChannelHostApi::Create(
 void WebviewPlatformView::on_resize(double /* width */,
                                     double /* height */,
                                     void* /* data */) {
-  spdlog::debug("[webview_flutter] on_resize");
+  ihs::log::debug("[webview_flutter] on_resize");
   // if (const auto plugin = static_cast<WebviewPlatformView*>(data)) {
   //   plugin->width_ = static_cast<int32_t>(width);
   //   plugin->height_ = static_cast<int32_t>(height);
-  //   spdlog::debug("[webview_flutter] Resize: {} {}", width, height);
+  //   ihs::log::debug("[webview_flutter] Resize: {} {}", width, height);
   // }
 }
 
 void WebviewPlatformView::on_set_direction(const int32_t direction,
                                            void* data) {
-  spdlog::debug("[webview_flutter] on_set_direction");
+  ihs::log::debug("[webview_flutter] on_set_direction");
   if (auto plugin = static_cast<WebviewPlatformView*>(data)) {
     plugin->direction_ = direction;
-    spdlog::debug("[webview_flutter] SetDirection: {}", plugin->direction_);
+    ihs::log::debug("[webview_flutter] SetDirection: {}", plugin->direction_);
   }
 }
 
 void WebviewPlatformView::on_set_offset(const double left,
                                         const double top,
                                         void* data) {
-  spdlog::debug("[webview_flutter] on_set_offset");
+  ihs::log::debug("[webview_flutter] on_set_offset");
   if (const auto plugin = static_cast<WebviewPlatformView*>(data)) {
     plugin->left_ = static_cast<int32_t>(left);
     plugin->top_ = static_cast<int32_t>(top);
     if (plugin->subsurface_) {
-      spdlog::debug("[webview_flutter] SetOffset: left: {}, top: {}",
-                    plugin->left_, plugin->top_);
+      ihs::log::debug("[webview_flutter] SetOffset: left: {}, top: {}",
+                      plugin->left_, plugin->top_);
       wl_subsurface_set_position(plugin->subsurface_, plugin->left_,
                                  plugin->top_);
       if (!plugin->callback_) {
@@ -1204,7 +1205,7 @@ void WebviewPlatformView::on_touch(int32_t action,
                                    const size_t point_data_size,
                                    const double* point_data,
                                    void* data) {
-  spdlog::trace(
+  ihs::log::trace(
       "[webview_flutter] on_touch: action: {}  point_count: {}  data_size: {}  "
       "location: {}x:{}y",
       action, point_count, point_data_size, *(point_data + 7),
@@ -1249,12 +1250,12 @@ void WebviewPlatformView::SendTouch(int id,
   touch_event.y = data_y;
   touch_event.type = action_type;
 
-  spdlog::trace("[webview_flutter] SendTouch");
+  ihs::log::trace("[webview_flutter] SendTouch");
   host->SendTouchEvent(touch_event);
 }
 
 void WebviewPlatformView::on_dispose(bool /* hybrid */, void* data) {
-  spdlog::debug("[webview_flutter] on_dispose");
+  ihs::log::debug("[webview_flutter] on_dispose");
   const auto plugin = static_cast<WebviewPlatformView*>(data);
   if (plugin->callback_) {
     wl_callback_destroy(plugin->callback_);
@@ -1286,7 +1287,7 @@ const struct platform_view_listener
 void WebviewPlatformView::on_frame(void* /* data */,
                                    wl_callback* /* callback */,
                                    const uint32_t /* time */) {
-  spdlog::debug("[webview_flutter] on_frame");
+  ihs::log::debug("[webview_flutter] on_frame");
 }
 
 const wl_callback_listener WebviewPlatformView::frame_listener = {.done =

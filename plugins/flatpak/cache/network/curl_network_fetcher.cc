@@ -61,9 +61,9 @@ std::optional<std::string> CurlNetworkFetcher::PerformWithRetry(
         return std::nullopt;
       }
     } catch (std::exception& e) {
-      spdlog::error("Network operation failed: {}", e.what());
+      ihs::log::error("Network operation failed: {}", e.what());
       ++attempts;
-      spdlog::error("Retrying network operation (attempt {})", attempts);
+      ihs::log::error("Retrying network operation (attempt {})", attempts);
       if (attempts <= max_retries_) {
         // exponential backoff
         std::this_thread::sleep_for(std::chrono::seconds(1 << (attempts - 1)));
@@ -94,7 +94,7 @@ std::optional<std::string> CurlNetworkFetcher::Fetch(
 
       return std::nullopt;
     } catch (const std::exception& e) {
-      spdlog::error("Network operation failed: {}", e.what());
+      ihs::log::error("Network operation failed: {}", e.what());
       return std::nullopt;
     }
   };
@@ -123,7 +123,7 @@ std::optional<std::string> CurlNetworkFetcher::Post(
 
       return std::nullopt;
     } catch (const std::exception& e) {
-      spdlog::error("Network operation failed: {}", e.what());
+      ihs::log::error("Network operation failed: {}", e.what());
       return std::nullopt;
     }
   };
@@ -139,7 +139,7 @@ bool CurlNetworkFetcher::IsNetworkAvailable() {
 
     return response_code > 0;
   } catch (const std::exception& e) {
-    spdlog::error("Network operation failed: {}", e.what());
+    ihs::log::error("Network operation failed: {}", e.what());
     return false;
   }
 }
@@ -160,14 +160,14 @@ std::optional<flutter::EncodableList> CurlNetworkFetcher::FetchRemotes(
         flatpak_plugin::FlatpakShim::get_remotes_by_installation_id(
             installation_id);
     if (installation_result.has_error()) {
-      spdlog::error("[Network Fetcher] Error fetching remotes : {}",
-                    installation_result.error().message());
+      ihs::log::error("[Network Fetcher] Error fetching remotes : {}",
+                      installation_result.error().message());
       return std::nullopt;
     }
 
     return installation_result.value();
   } catch (const std::exception& e) {
-    spdlog::error("Network operation failed: {}", e.what());
+    ihs::log::error("Network operation failed: {}", e.what());
     return std::nullopt;
   }
 }

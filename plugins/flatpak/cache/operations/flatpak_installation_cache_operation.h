@@ -48,7 +48,7 @@ struct InstallationCacheOperation final : CacheOperationTemplate<Installation> {
 
   std::string SerializeData(const Installation& data) override {
     if (!operation) {
-      spdlog::error("EncodableListCacheOperation is not initialized");
+      ihs::log::error("EncodableListCacheOperation is not initialized");
       return "";
     }
     // Serialize to List then Serialize the list

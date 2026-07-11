@@ -18,7 +18,7 @@
 #include "portal_manager.h"
 
 #include "asio/post.hpp"
-#include "spdlog/spdlog.h"
+#include "logging/logging.h"
 
 namespace flatpak_plugin {
 
@@ -89,7 +89,7 @@ PortalContext& PortalManager::get_app_context(const std::string& app_id) {
   std::lock_guard<std::mutex> lock(app_mutex_);
   const auto it = app_context_.find(app_id);
   if (it == app_context_.end()) {
-    spdlog::error(
+    ihs::log::error(
         "[FlatpakPlugin] PortalManager::get_app_context: app_id not found");
     throw std::runtime_error(
         "PortalManager::get_app_context: app_id not found");

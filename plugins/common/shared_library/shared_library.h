@@ -58,7 +58,7 @@ void PluginGetFuncAddress(void* library,
   auto symbol = dlsym(library, function_name);
   if (!symbol) {
     const char* reason = dlerror();
-    spdlog::debug("GetFuncAddress: {} - {}", function_name, reason);
+    ihs::log::debug("GetFuncAddress: {} - {}", function_name, reason);
   }
   *out = reinterpret_cast<FunctionPointer>(symbol);
 }

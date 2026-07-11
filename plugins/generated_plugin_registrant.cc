@@ -159,7 +159,7 @@ void PluginsAoiPlatformViewCreate(
   }
 
   if (width == 0 || height == 0) {
-    spdlog::critical(
+    ihs::log::critical(
         "[platform_views_handler] UiKitView is not supported.  Change to "
         "AndroidView or PlatformView");
     exit(EXIT_FAILURE);
@@ -207,7 +207,7 @@ void PluginsAoiPlatformViewCreate(
     (void)width;
     (void)height;
     (void)params;
-    spdlog::error("Platform View type not registered: {}", viewType);
+    ihs::log::error("Platform View type not registered: {}", viewType);
     result->NotImplemented();
   }
 }

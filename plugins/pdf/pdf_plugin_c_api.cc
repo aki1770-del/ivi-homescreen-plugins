@@ -29,6 +29,6 @@ void PrintingPluginCApiRegisterWithRegistrar(
         flutter::PluginRegistrarManager::GetInstance()
             ->GetRegistrar<flutter::PluginRegistrar>(registrar));
   } else {
-    spdlog::debug("libpdfium.so not found. PDF plugin will not be loaded.");
+    ihs::log::debug("libpdfium.so not found. PDF plugin will not be loaded.");
   }
 }

@@ -71,8 +71,8 @@ LibPdfiumExports* LibPdfium::loadExports() {
 
     if (const auto icudtl_path = folder.parent_path() / "icudtl.dat";
         !exists(icudtl_path)) {
-      spdlog::error("[libpdfium.so] Failed find icudtl.dat in {}",
-                    folder.c_str());
+      ihs::log::error("[libpdfium.so] Failed find icudtl.dat in {}",
+                      folder.c_str());
       return LibPdfiumExports(nullptr);
     }
 
@@ -80,8 +80,8 @@ LibPdfiumExports* LibPdfium::loadExports() {
     if (const auto snapshot_blob_path =
             folder.parent_path() / "snapshot_blob.bin";
         !exists(snapshot_blob_path)) {
-      spdlog::error("[libpdfium.so] Failed find snapshot_blob.bin in {}",
-                    folder.c_str());
+      ihs::log::error("[libpdfium.so] Failed find snapshot_blob.bin in {}",
+                      folder.c_str());
       return LibPdfiumExports(nullptr);
     }
 #endif

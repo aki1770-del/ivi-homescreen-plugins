@@ -55,11 +55,11 @@ CameraPlugin::CameraPlugin(flutter::PluginRegistrar* plugin_registrar,
   g_camera_manager->cameraAdded.connect(this, &CameraPlugin::camera_added);
   g_camera_manager->cameraRemoved.connect(this, &CameraPlugin::camera_removed);
 
-  spdlog::debug("[camera_plugin] libcamera {}",
-                libcamera::CameraManager::version());
+  ihs::log::debug("[camera_plugin] libcamera {}",
+                  libcamera::CameraManager::version());
 
   if (const auto res = g_camera_manager->start(); res != 0) {
-    spdlog::critical("Failed to start camera manager: {}", strerror(-res));
+    ihs::log::critical("Failed to start camera manager: {}", strerror(-res));
   }
 }
 
@@ -68,12 +68,12 @@ CameraPlugin::~CameraPlugin() {
 }
 
 void CameraPlugin::camera_added(const std::shared_ptr<libcamera::Camera>& cam) {
-  spdlog::debug("[camera_plugin] Camera added: {}", cam->id());
+  ihs::log::debug("[camera_plugin] Camera added: {}", cam->id());
 }
 
 void CameraPlugin::camera_removed(
     const std::shared_ptr<libcamera::Camera>& cam) {
-  spdlog::debug("[camera_plugin] Camera removed: {}", cam->id());
+  ihs::log::debug("[camera_plugin] Camera removed: {}", cam->id());
   for (const auto& camera : g_cameras) {
     if (camera->getCameraId() == cam->id()) {
       switch (camera->getCameraState()) {
@@ -117,7 +117,7 @@ std::string CameraPlugin::get_camera_lens_facing(
 
 void CameraPlugin::availableCameras(
     const std::function<void(ErrorOr<flutter::EncodableList> reply)> result) {
-  spdlog::debug("[camera_plugin] availableCameras:");
+  ihs::log::debug("[camera_plugin] availableCameras:");
 
   const auto cameras = g_camera_manager->cameras();
   flutter::EncodableList list;
@@ -125,9 +125,9 @@ void CameraPlugin::availableCameras(
     std::string id = camera->id();
     std::string lensFacing = get_camera_lens_facing(camera);
     int64_t sensorOrientation = 0;
-    spdlog::debug("\tid: {}", id);
-    spdlog::debug("\tlensFacing: {}", lensFacing);
-    spdlog::debug("\tsensorOrientation: {}", sensorOrientation);
+    ihs::log::debug("\tid: {}", id);
+    ihs::log::debug("\tlensFacing: {}", lensFacing);
+    ihs::log::debug("\tsensorOrientation: {}", sensorOrientation);
     list.emplace_back(
         flutter::EncodableMap{{flutter::EncodableValue("name"),
                                flutter::EncodableValue(std::move(id))},
@@ -142,7 +142,7 @@ void CameraPlugin::availableCameras(
 void CameraPlugin::create(
     const flutter::EncodableMap& args,
     const std::function<void(ErrorOr<flutter::EncodableMap> reply)> result) {
-  spdlog::debug("[camera_plugin] create:");
+  ihs::log::debug("[camera_plugin] create:");
   Encodable::PrintFlutterEncodableMap("create", args);
 
   // method arguments
@@ -203,7 +203,7 @@ void CameraPlugin::initialize(
   if (static_cast<size_t>(cameraId - 1) < g_cameras.size()) {
     const auto& camera = g_cameras[static_cast<unsigned long>(cameraId - 1)];
     if (!camera) {
-      spdlog::error("Invalid cameraId");
+      ihs::log::error("Invalid cameraId");
       result(ErrorOr<std::string>("Invalid cameraId"));
       return;
     }
@@ -327,7 +327,7 @@ void CameraPlugin::pausePreview(
   }
   (void)cameraId;
 
-  SPDLOG_DEBUG("[camera_plugin] pausePreview: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] pausePreview: camera_id: {}", cameraId);
   result(ErrorOr<double>(1));
 }
 
@@ -344,7 +344,7 @@ void CameraPlugin::resumePreview(
     }
   }
 
-  SPDLOG_DEBUG("[camera_plugin] resumePreview: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] resumePreview: camera_id: {}", cameraId);
   result(ErrorOr<double>(cameraId));
 }
 
@@ -365,7 +365,7 @@ void CameraPlugin::lockCaptureOrientation(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG(
+  IHS_DEBUG(
       "[camera_plugin] lockCaptureOrientation: camera_id: {}, orientation: {}",
       cameraId, orientation);
   result(ErrorOr(orientation));
@@ -384,8 +384,8 @@ void CameraPlugin::unlockCaptureOrientation(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] unlockCaptureOrientation: camera_id: {}",
-               cameraId);
+  IHS_DEBUG("[camera_plugin] unlockCaptureOrientation: camera_id: {}",
+            cameraId);
   const std::string res;
   result(ErrorOr(res));
 }
@@ -407,8 +407,8 @@ void CameraPlugin::setFlashMode(
   }
   (void)cameraId;
   (void)mode;
-  SPDLOG_DEBUG("[camera_plugin] setFlashMode: camera_id: {}, orientation: {}",
-               cameraId, mode);
+  IHS_DEBUG("[camera_plugin] setFlashMode: camera_id: {}, orientation: {}",
+            cameraId, mode);
 
   result(std::nullopt);
 }
@@ -430,8 +430,8 @@ void CameraPlugin::setFocusMode(
   }
   (void)cameraId;
   (void)mode;
-  SPDLOG_DEBUG("[camera_plugin] setFocusMode: camera_id: {}, mode: {}",
-               cameraId, mode);
+  IHS_DEBUG("[camera_plugin] setFocusMode: camera_id: {}, mode: {}", cameraId,
+            mode);
 
   result(std::nullopt);
 }
@@ -475,8 +475,8 @@ void CameraPlugin::setExposureOffset(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] setExposureOffset: camera_id: {}, offset: {}",
-               cameraId, offset);
+  IHS_DEBUG("[camera_plugin] setExposureOffset: camera_id: {}, offset: {}",
+            cameraId, offset);
   result(ErrorOr(offset));
 }
 
@@ -493,8 +493,8 @@ void CameraPlugin::getExposureOffsetStepSize(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] getExposureOffsetStepSize: camera_id: {}",
-               cameraId);
+  IHS_DEBUG("[camera_plugin] getExposureOffsetStepSize: camera_id: {}",
+            cameraId);
 
   result(ErrorOr<double>(2));
 }
@@ -512,7 +512,7 @@ void CameraPlugin::getMinExposureOffset(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] getMinExposureOffset: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] getMinExposureOffset: camera_id: {}", cameraId);
   result(ErrorOr<double>(0));
 }
 
@@ -529,7 +529,7 @@ void CameraPlugin::getMaxExposureOffset(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] getMaxExposureOffset: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] getMaxExposureOffset: camera_id: {}", cameraId);
   result(ErrorOr<double>(64));
 }
 
@@ -546,7 +546,7 @@ void CameraPlugin::getMaxZoomLevel(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] getMaxZoomLevel: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] getMaxZoomLevel: camera_id: {}", cameraId);
   result(ErrorOr<double>(32));
 }
 
@@ -563,7 +563,7 @@ void CameraPlugin::getMinZoomLevel(
     }
   }
   (void)cameraId;
-  SPDLOG_DEBUG("[camera_plugin] getMinZoomLevel: camera_id: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] getMinZoomLevel: camera_id: {}", cameraId);
 
   result(ErrorOr<double>(0));
 }
@@ -582,7 +582,7 @@ void CameraPlugin::dispose(
   }
   auto camera = g_cameras[static_cast<unsigned long>(cameraId - 1)];
   camera.reset();
-  SPDLOG_DEBUG("[camera_plugin] dispose: {}", cameraId);
+  IHS_DEBUG("[camera_plugin] dispose: {}", cameraId);
   result(std::nullopt);
 }
 

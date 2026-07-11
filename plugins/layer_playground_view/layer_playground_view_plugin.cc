@@ -72,7 +72,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
       id_(id),
       platformViewsContext_(platform_view_context),
       removeListener_(removeListener) {
-  SPDLOG_TRACE("++LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
+  IHS_TRACE("++LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
 
 #if BUILD_COMPOSITOR
   pending_width_ = static_cast<int32_t>(width);
@@ -88,10 +88,10 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
           // PluginRegistrar, not by this shared_ptr. The compositor's
           // copy is dropped on UnregisterCompositorSurface.
         }));
-    SPDLOG_TRACE("[pv-trace] LayerPlaygroundView registered: id={} size={}x{}",
-                 id_, pending_width_.load(), pending_height_.load());
+    IHS_TRACE("[pv-trace] LayerPlaygroundView registered: id={} size={}x{}",
+              id_, pending_width_.load(), pending_height_.load());
   } else {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] LayerPlaygroundView could NOT register (state/view null): "
         "id={}",
         id_);
@@ -101,7 +101,7 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
 #endif
 
   addListener(platformViewsContext_, id, &platform_view_listener_, this);
-  SPDLOG_TRACE("--LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
+  IHS_TRACE("--LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin");
 }
 
 LayerPlaygroundViewPlugin::~LayerPlaygroundViewPlugin() {
@@ -118,7 +118,7 @@ void LayerPlaygroundViewPlugin::on_resize(double width,
     plugin->pending_width_ = static_cast<int32_t>(width);
     plugin->pending_height_ = static_cast<int32_t>(height);
 #endif
-    SPDLOG_TRACE("Resize: {} {}", width, height);
+    IHS_TRACE("Resize: {} {}", width, height);
   }
 }
 
@@ -126,7 +126,7 @@ void LayerPlaygroundViewPlugin::on_set_direction(const int32_t direction,
                                                  void* data) {
   if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
     plugin->direction_ = direction;
-    SPDLOG_TRACE("SetDirection: {}", plugin->direction_);
+    IHS_TRACE("SetDirection: {}", plugin->direction_);
   }
 }
 
@@ -138,7 +138,7 @@ void LayerPlaygroundViewPlugin::on_set_offset(const double left,
   if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
     plugin->left_ = static_cast<int32_t>(left);
     plugin->top_ = static_cast<int32_t>(top);
-    SPDLOG_TRACE("SetOffset: {} {}", left, top);
+    IHS_TRACE("SetOffset: {} {}", left, top);
   }
 }
 
@@ -189,7 +189,8 @@ GLuint LoadShader(const GLchar* src, GLenum type) {
     if (len > 0) {
       glGetShaderInfoLog(shader, len, nullptr, log.data());
     }
-    spdlog::error("LayerPlaygroundViewPlugin: shader compile failed: {}", log);
+    ihs::log::error("LayerPlaygroundViewPlugin: shader compile failed: {}",
+                    log);
     glDeleteShader(shader);
     return 0;
   }
@@ -268,7 +269,7 @@ void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                          color_texture_, 0);
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    spdlog::error("LayerPlaygroundViewPlugin: FBO incomplete at {}x{}", w, h);
+    ihs::log::error("LayerPlaygroundViewPlugin: FBO incomplete at {}x{}", w, h);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glBindTexture(GL_TEXTURE_2D, 0);
@@ -292,7 +293,8 @@ void LayerPlaygroundViewPlugin::EnsureGlState(int32_t w, int32_t h) {
       if (len > 0) {
         glGetProgramInfoLog(program_, len, nullptr, log.data());
       }
-      spdlog::error("LayerPlaygroundViewPlugin: program link failed: {}", log);
+      ihs::log::error("LayerPlaygroundViewPlugin: program link failed: {}",
+                      log);
       glDeleteProgram(program_);
       program_ = 0;
     } else {
@@ -388,7 +390,7 @@ bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
   static thread_local bool first_fire = true;
   const bool size_changed = (target_w != last_w) || (target_h != last_h);
   if (first_fire || size_changed) {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] LayerPlaygroundView::OnPresent id={} target={}x{} "
         "tex={}x{} gl_init={} (first={}, size_changed={})",
         id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
@@ -402,7 +404,7 @@ bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
   }
   EnsureGlState(target_w, target_h);
   if (!gl_initialized_) {
-    SPDLOG_TRACE(
+    IHS_TRACE(
         "[pv-trace] LayerPlaygroundView::OnPresent id={} gl NOT initialised "
         "(program link failed?); returning false",
         id_);

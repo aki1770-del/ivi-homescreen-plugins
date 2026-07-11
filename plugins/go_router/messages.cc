@@ -64,19 +64,19 @@ void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
             args->Accept(writer);
 
             if (method == "selectSingleEntryHistory") {
-              spdlog::debug("[go_router] selectSingleEntryHistory");
+              ihs::log::debug("[go_router] selectSingleEntryHistory");
             } else if (method == "selectMultiEntryHistory") {
-              spdlog::debug("[go_router] selectMultiEntryHistory");
+              ihs::log::debug("[go_router] selectMultiEntryHistory");
             } else if (method == "routeInformationUpdated") {
-              spdlog::debug("[go_router] routeInformationUpdated");
+              ihs::log::debug("[go_router] routeInformationUpdated");
               if (args->HasMember("uri") && (*args)["uri"].IsString()) {
                 std::string uri = (*args)["uri"].GetString();
-                spdlog::debug("\turi: {}", uri);
+                ihs::log::debug("\turi: {}", uri);
               }
               bool replace{};
               if (args->HasMember("replace") && (*args)["replace"].IsBool()) {
                 replace = (*args)["replace"].GetBool();
-                spdlog::debug("\treplace: {}", replace);
+                ihs::log::debug("\treplace: {}", replace);
               }
               (void)replace;
               std::string codec;
@@ -105,11 +105,11 @@ void GoRouterApi::SetUp(flutter::BinaryMessenger* binary_messenger,
                   auto val = (*args)["imperativeMatches"].GetArray();
                 }
               }
-              spdlog::debug("\tlocation: [{}]", location);
-              spdlog::debug("\tstate::codec: [{}]", codec);
-              spdlog::debug("\tstate::encoded: [{}]", encoded);
+              ihs::log::debug("\tlocation: [{}]", location);
+              ihs::log::debug("\tstate::codec: [{}]", codec);
+              ihs::log::debug("\tstate::encoded: [{}]", encoded);
             } else if (method == "SystemNavigator.pop") {
-              spdlog::debug("SystemNavigator.pop");
+              ihs::log::debug("SystemNavigator.pop");
             } else {
               result->NotImplemented();
               return;

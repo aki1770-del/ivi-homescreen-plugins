@@ -119,7 +119,7 @@ Component::Component(const xmlNode* node, std::string language)
       } else if (nodeName == "agreement") {
         agreement_ = content;
       } else {
-        spdlog::warn("Unhandled: {}", nodeName);
+        ihs::log::warn("Unhandled: {}", nodeName);
       }
     }
   }
@@ -163,7 +163,7 @@ void Component::parseKeywords(const xmlNode* node) {
           keywords_->insert(reinterpret_cast<const char*>(keywordContent));
           xmlFree(keywordContent);
         } else {
-          spdlog::warn("Empty <keyword> element found");
+          ihs::log::warn("Empty <keyword> element found");
         }
       } else if (langAttr &&
                  xmlStrcmp(langAttr, reinterpret_cast<const xmlChar*>(
@@ -172,7 +172,7 @@ void Component::parseKeywords(const xmlNode* node) {
           keywords_->insert(reinterpret_cast<const char*>(keywordContent));
           xmlFree(keywordContent);
         } else {
-          spdlog::warn("Empty <keyword> element found");
+          ihs::log::warn("Empty <keyword> element found");
         }
       }
       xmlFree(langAttr);

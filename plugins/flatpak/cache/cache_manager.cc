@@ -52,7 +52,7 @@ CacheManager::CacheManager(CacheConfig config,
       config_(std::move(config)),
       metrics_{} {
   if (Initialize()) {
-    spdlog::info("Cache manager initialized");
+    ihs::log::info("Cache manager initialized");
   }
 }
 
@@ -67,7 +67,7 @@ CacheManager::~CacheManager() noexcept {
 bool CacheManager::Initialize() {
   {
     std::lock_guard lock(init_mutex_);
-    spdlog::info(
+    ihs::log::info(
         "Initializing CacheManager with config: db_path={}, ttl={}, policy={}, "
         "max_size={}",
         config_.db_path, config_.default_ttl.count(),
@@ -78,7 +78,7 @@ bool CacheManager::Initialize() {
           config_.db_path, config_.enable_compression);
     }
     if (!storage_->Initialize()) {
-      spdlog::error("Failed to initialize cache storage");
+      ihs::log::error("Failed to initialize cache storage");
       return false;
     }
 
@@ -97,7 +97,7 @@ bool CacheManager::Initialize() {
     }
 
     is_initialized_ = true;
-    spdlog::info("Cache Manager initialized successfully");
+    ihs::log::info("Cache Manager initialized successfully");
   }
 
   if (config_.enable_auto_cleanup) {
@@ -110,7 +110,7 @@ bool CacheManager::Initialize() {
 std::optional<flutter::EncodableList> CacheManager::GetApplicationsInstalled(
     const bool force_refresh) {
   if (!is_initialized_) {
-    spdlog::error("Cache manager is not initialized");
+    ihs::log::error("Cache manager is not initialized");
     return std::nullopt;
   }
 
@@ -128,7 +128,7 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsInstalled(
       const auto apps_result = FlatpakShim::GetApplicationsInstalled();
 
       if (apps_result.has_error()) {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] Failed to get applications installed: {}",
             apps_result.error().message());
         return std::nullopt;
@@ -136,38 +136,41 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsInstalled(
 
       const flutter::EncodableList& apps = apps_result.value();
       if (apps.empty()) {
-        spdlog::info(
+        ihs::log::info(
             "[FlatpakPlugin] GetApplicationInstalled returned empty list");
         return flutter::EncodableList{};
       }
       return apps;
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Exception in GetApplicationsInstalled: {}",
-                    e.what());
+      ihs::log::error(
+          "[FlatpakPlugin] Exception in GetApplicationsInstalled: {}",
+          e.what());
       return std::nullopt;
     } catch (...) {
-      spdlog::error(
+      ihs::log::error(
           "[FlatpakPlugin] Unknown error in GetApplicationsInstalled");
       return std::nullopt;
     }
   };
 
   try {
-    spdlog::debug("Performing cache operation with key: {}", key);
+    ihs::log::debug("Performing cache operation with key: {}", key);
     auto result = PerformCacheOperation<flutter::EncodableList>(
         key, network_ops, &cache_operation);
     if (result.has_value()) {
-      spdlog::debug("Cache operation completed successfully, returned {} items",
-                    result->size());
+      ihs::log::debug(
+          "Cache operation completed successfully, returned {} items",
+          result->size());
     } else {
-      spdlog::debug("Cache operation returned no data");
+      ihs::log::debug("Cache operation returned no data");
     }
     return result;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error during cache operation: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Error during cache operation: {}",
+                    e.what());
     return std::nullopt;
   } catch (...) {
-    spdlog::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
+    ihs::log::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
     return std::nullopt;
   }
 }
@@ -176,7 +179,7 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsRemote(
     const std::string& remote_id,
     const bool force_refresh) {
   if (!is_initialized_) {
-    spdlog::error("Cache manager is not initialized");
+    ihs::log::error("Cache manager is not initialized");
     return std::nullopt;
   }
 
@@ -195,7 +198,7 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsRemote(
       const auto apps_result = FlatpakShim::GetApplicationsRemote(remote_id);
 
       if (apps_result.has_error()) {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] Failed to get applications from remote {}: {}",
             remote_id, apps_result.error().message());
         return std::nullopt;
@@ -203,7 +206,7 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsRemote(
 
       const flutter::EncodableList& apps = apps_result.value();
       if (apps.empty()) {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] GetApplicationsRemote returned empty list for "
             "remote: {}",
             remote_id);
@@ -211,34 +214,35 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsRemote(
       }
       return apps;
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Exception in GetApplicationsRemote: {}",
-                    e.what());
+      ihs::log::error("[FlatpakPlugin] Exception in GetApplicationsRemote: {}",
+                      e.what());
       return std::nullopt;
     } catch (...) {
-      spdlog::error("[FlatpakPlugin] Unknown error in GetApplicationsRemote");
+      ihs::log::error("[FlatpakPlugin] Unknown error in GetApplicationsRemote");
       return std::nullopt;
     }
   };
 
   try {
-    spdlog::debug("Performing cache operation with key: {}", key);
+    ihs::log::debug("Performing cache operation with key: {}", key);
     auto result = PerformCacheOperation<flutter::EncodableList>(
         key, network_ops, &cache_operation);
     if (result.has_value()) {
-      spdlog::debug(
+      ihs::log::debug(
           "Cache operation completed successfully, returned {} items from "
           "remote {}",
           result->size(), remote_id);
     } else {
-      spdlog::debug("Cache operation returned no data for remote {}",
-                    remote_id);
+      ihs::log::debug("Cache operation returned no data for remote {}",
+                      remote_id);
     }
     return result;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error during cache operation: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Error during cache operation: {}",
+                    e.what());
     return std::nullopt;
   } catch (...) {
-    spdlog::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
+    ihs::log::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
     return std::nullopt;
   }
 }
@@ -246,7 +250,7 @@ std::optional<flutter::EncodableList> CacheManager::GetApplicationsRemote(
 std::optional<flutter::EncodableList> CacheManager::GetSystemInstallations(
     const bool force_refresh) {
   if (!is_initialized_) {
-    spdlog::error("Cache manager is not initialized");
+    ihs::log::error("Cache manager is not initialized");
     return std::nullopt;
   }
 
@@ -264,45 +268,48 @@ std::optional<flutter::EncodableList> CacheManager::GetSystemInstallations(
       const auto system_installations = FlatpakShim::GetSystemInstallations();
 
       if (system_installations.has_error()) {
-        spdlog::error("[FlatpakPlugin] Failed to GetSystemInstallations: {}",
-                      system_installations.error().message());
+        ihs::log::error("[FlatpakPlugin] Failed to GetSystemInstallations: {}",
+                        system_installations.error().message());
         return std::nullopt;
       }
 
       flutter::EncodableList installations = system_installations.value();
       if (installations.empty()) {
-        spdlog::error(
+        ihs::log::error(
             "[FlatpakPlugin] GetSystemInstallations returned empty list");
         return flutter::EncodableList{};
       }
 
       return installations;
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Exception in GetSystemInstallations: {}",
-                    e.what());
+      ihs::log::error("[FlatpakPlugin] Exception in GetSystemInstallations: {}",
+                      e.what());
       return std::nullopt;
     } catch (...) {
-      spdlog::error("[FlatpakPlugin] Unknown error in GetSystemInstallations");
+      ihs::log::error(
+          "[FlatpakPlugin] Unknown error in GetSystemInstallations");
       return std::nullopt;
     }
   };
 
   try {
-    spdlog::debug("Performing cache operation with key: {}", key);
+    ihs::log::debug("Performing cache operation with key: {}", key);
     auto result = PerformCacheOperation<flutter::EncodableList>(
         key, network_ops, &cache_operation);
     if (result.has_value()) {
-      spdlog::debug("Cache operation completed successfully, returned {} items",
-                    result->size());
+      ihs::log::debug(
+          "Cache operation completed successfully, returned {} items",
+          result->size());
     } else {
-      spdlog::debug("Cache operation returned no data");
+      ihs::log::debug("Cache operation returned no data");
     }
     return result;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error during cache operation: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Error during cache operation: {}",
+                    e.what());
     return std::nullopt;
   } catch (...) {
-    spdlog::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
+    ihs::log::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
     return std::nullopt;
   }
 }
@@ -311,7 +318,7 @@ std::optional<flutter::EncodableList> CacheManager::GetRemotes(
     const std::string& installation_id,
     const bool force_refresh) {
   if (!is_initialized_) {
-    spdlog::error("Cache manager is not initialized");
+    ihs::log::error("Cache manager is not initialized");
     return std::nullopt;
   }
 
@@ -328,28 +335,29 @@ std::optional<flutter::EncodableList> CacheManager::GetRemotes(
     try {
       return network_fetcher_->FetchRemotes(installation_id);
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] FetchRemotes failed: {}", e.what());
+      ihs::log::error("[FlatpakPlugin] FetchRemotes failed: {}", e.what());
       return std::nullopt;
     }
   };
 
   try {
-    spdlog::debug("Performing cache operation with key: {}", key);
+    ihs::log::debug("Performing cache operation with key: {}", key);
     auto result = PerformCacheOperation<flutter::EncodableList>(
         key, network_ops, &cache_operation);
     if (result.has_value()) {
-      spdlog::debug(
+      ihs::log::debug(
           "Cache operation completed successfully, returned {} remotes",
           result->size());
     } else {
-      spdlog::debug("Cache operation returned no data");
+      ihs::log::debug("Cache operation returned no data");
     }
     return result;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error during cache operation: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Error during cache operation: {}",
+                    e.what());
     return std::nullopt;
   } catch (...) {
-    spdlog::error("[FlatpakPlugin] Unknown error in PerformCacheOperation");
+    ihs::log::error("[FlatpakPlugin] Unknown error in PerformCacheOperation");
     return std::nullopt;
   }
 }
@@ -357,7 +365,7 @@ std::optional<flutter::EncodableList> CacheManager::GetRemotes(
 std::optional<Installation> CacheManager::GetUserInstallation(
     const bool force_refresh) {
   if (!is_initialized_) {
-    spdlog::error("Cache manager is not initialized");
+    ihs::log::error("Cache manager is not initialized");
     return std::nullopt;
   }
 
@@ -375,42 +383,43 @@ std::optional<Installation> CacheManager::GetUserInstallation(
       const auto installations_result = FlatpakShim::GetUserInstallation();
 
       if (installations_result.has_error()) {
-        spdlog::error("[FlatpakPlugin] Failed to get user installations: {}",
-                      installations_result.error().message());
+        ihs::log::error("[FlatpakPlugin] Failed to get user installations: {}",
+                        installations_result.error().message());
         return std::nullopt;
       }
 
       const auto& installation = installations_result.value();
-      spdlog::debug("[FlatpakPlugin] Got user installation: {}",
-                    installation.id());
+      ihs::log::debug("[FlatpakPlugin] Got user installation: {}",
+                      installation.id());
       return installation;
     } catch (const std::exception& e) {
-      spdlog::error("[FlatpakPlugin] Exception in GetUserInstallation: {}",
-                    e.what());
+      ihs::log::error("[FlatpakPlugin] Exception in GetUserInstallation: {}",
+                      e.what());
       return std::nullopt;
     } catch (...) {
-      spdlog::error("[FlatpakPlugin] Unknown error in GetUserInstallation");
+      ihs::log::error("[FlatpakPlugin] Unknown error in GetUserInstallation");
       return std::nullopt;
     }
   };
 
   try {
-    spdlog::debug("Performing cache operation with key: {}", key);
+    ihs::log::debug("Performing cache operation with key: {}", key);
     auto result =
         PerformCacheOperation<Installation>(key, network_ops, &cache_operation);
     if (result.has_value()) {
-      spdlog::debug(
+      ihs::log::debug(
           "Cache operation completed successfully, returned Installation ID {}",
           result->id());
     } else {
-      spdlog::debug("Cache operation returned no data");
+      ihs::log::debug("Cache operation returned no data");
     }
     return result;
   } catch (const std::exception& e) {
-    spdlog::error("[FlatpakPlugin] Error during cache operation: {}", e.what());
+    ihs::log::error("[FlatpakPlugin] Error during cache operation: {}",
+                    e.what());
     return std::nullopt;
   } catch (...) {
-    spdlog::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
+    ihs::log::error("[FlatpakPlugin] PerformCacheOperation: unknown error");
     return std::nullopt;
   }
 }
@@ -455,9 +464,9 @@ void CacheManager::NotifyObservers(
     try {
       notification(observer);
     } catch (const std::exception& e) {
-      spdlog::error("Observer notification failed: {}", e.what());
+      ihs::log::error("Observer notification failed: {}", e.what());
     } catch (...) {
-      spdlog::error("Observer notification failed with unknown exception");
+      ihs::log::error("Observer notification failed with unknown exception");
     }
   }
 }
@@ -481,18 +490,18 @@ void CacheManager::CleanupWorker() {
       }
 
       if (cleaned > 0) {
-        spdlog::info("Cleaned up {} expired cache entries", cleaned);
+        ihs::log::info("Cleaned up {} expired cache entries", cleaned);
         NotifyObservers([cleaned](ICacheObserver* observer) {
           observer->OnCacheCleanup(cleaned);
         });
       }
     } catch (const std::exception& e) {
-      spdlog::error("Error during cache cleanup: {}", e.what());
+      ihs::log::error("Error during cache cleanup: {}", e.what());
     } catch (...) {
-      spdlog::error("Unknown error during cache cleanup");
+      ihs::log::error("Unknown error during cache cleanup");
     }
   }
-  spdlog::info("Cleanup thread finished");
+  ihs::log::info("Cleanup thread finished");
 }
 
 template <typename T>
@@ -604,7 +613,7 @@ std::optional<T> CacheManager::TryNetworkOperation(
   } catch (const std::exception& e) {
     if (config_.enable_metrics) {
       ++metrics_.network_errors;
-      spdlog::error("Network operation failed for key {}: {}", key, e.what());
+      ihs::log::error("Network operation failed for key {}: {}", key, e.what());
       NotifyObservers([&key](ICacheObserver* observer) {
         observer->OnNetworkError(key, -1);
       });
@@ -621,7 +630,7 @@ std::optional<T> CacheManager::TryNetworkAndCache(
   auto result = TryNetworkOperation(key, std::move(network_operation));
   if (result.has_value() && storage_) {
     if (!cache_operation->CacheData(key, result.value(), storage_.get())) {
-      spdlog::error("Failed to cache data for Key: {}", key);
+      ihs::log::error("Failed to cache data for Key: {}", key);
     }
   }
   return result;
@@ -658,7 +667,7 @@ void CacheManager::InvalidateAll() const {
     }
   }
   NotifyObservers(
-      [](ICacheObserver*) { spdlog::info("All cache entries invalidated"); });
+      [](ICacheObserver*) { ihs::log::info("All cache entries invalidated"); });
 }
 
 void CacheManager::InvalidateKey(const std::string& key) const {
@@ -668,7 +677,7 @@ void CacheManager::InvalidateKey(const std::string& key) const {
       storage_->Invalidate(key);
     }
   }
-  spdlog::info("Invalidated cache key: '{}'", key);
+  ihs::log::info("Invalidated cache key: '{}'", key);
   NotifyObservers(
       [&key](ICacheObserver* observer) { observer->OnCacheExpired(key); });
 }
@@ -682,18 +691,18 @@ bool CacheManager::IsHealthy() const {
   {
     std::lock_guard network_lock(network_mutex_);
     if (network_fetcher_ && !network_fetcher_->IsNetworkAvailable()) {
-      spdlog::error("Network not available");
+      ihs::log::error("Network not available");
     }
   }
 
   size_t current_size = storage_->GetCacheSize();
   if (current_size > config_.max_cache_size_mb * 1024 * 1024) {
-    spdlog::error("Cache size {} exceeds limit {}", current_size,
-                  config_.max_cache_size_mb * 1024 * 1024);
+    ihs::log::error("Cache size {} exceeds limit {}", current_size,
+                    config_.max_cache_size_mb * 1024 * 1024);
   }
 
-  spdlog::info("[FlatpakPlugin] Cache is healthy, cache size: {}",
-               current_size);
+  ihs::log::info("[FlatpakPlugin] Cache is healthy, cache size: {}",
+                 current_size);
   return true;
 }
 
@@ -705,7 +714,7 @@ size_t CacheManager::GetCacheSize() const {
 void CacheManager::SetCachePolicy(CachePolicy policy) {
   std::lock_guard lock(config_mutex_);
   config_.policy = policy;
-  spdlog::info("Cache policy changed to {}", static_cast<int>(policy));
+  ihs::log::info("Cache policy changed to {}", static_cast<int>(policy));
 }
 
 CachePolicy CacheManager::GetCachePolicy() const {
@@ -719,7 +728,7 @@ size_t CacheManager::ForceCleanup() const {
   NotifyObservers([cleaned](ICacheObserver* observer) {
     observer->OnCacheCleanup(cleaned);
   });
-  spdlog::info("Manual cleanup removed {} expired entries", cleaned);
+  ihs::log::info("Manual cleanup removed {} expired entries", cleaned);
   return cleaned;
 }
 
@@ -731,13 +740,13 @@ bool CacheManager::ExportCache(const std::string& filepath) const {
   std::lock_guard lock(storage_mutex_);
   try {
     if (const std::ofstream file(filepath, std::ios::binary); !file.is_open()) {
-      spdlog::error("Failed to open export file: {}", filepath);
+      ihs::log::error("Failed to open export file: {}", filepath);
       return false;
     }
-    spdlog::info("Cache exported to {}", filepath);
+    ihs::log::info("Cache exported to {}", filepath);
     return true;
   } catch (const std::exception& e) {
-    spdlog::error("Failed to export cache: {}", e.what());
+    ihs::log::error("Failed to export cache: {}", e.what());
     return false;
   }
 }
@@ -746,12 +755,12 @@ bool CacheManager::ImportCache(const std::string& filepath) const {
   std::lock_guard lock(storage_mutex_);
   try {
     if (const std::ifstream file(filepath, std::ios::binary); !file.is_open()) {
-      spdlog::error("Failed to open import file: {}", filepath);
+      ihs::log::error("Failed to open import file: {}", filepath);
       return false;
     }
     return true;
   } catch (const std::exception& e) {
-    spdlog::error("Failed to import cache: {}", e.what());
+    ihs::log::error("Failed to import cache: {}", e.what());
     return false;
   }
 }

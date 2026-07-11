@@ -22,7 +22,7 @@ namespace plugin_common::Encodable {
 
 void PrintFlutterEncodableMap(const char* name,  // NOLINT(misc-no-recursion)
                               const flutter::EncodableMap& args) {
-  spdlog::warn("[{}]", name);
+  ihs::log::warn("[{}]", name);
   for (const auto& [fst, snd] : args) {
     auto key = std::get<std::string>(fst);
     PrintFlutterEncodableValue(key.c_str(), snd);
@@ -31,7 +31,7 @@ void PrintFlutterEncodableMap(const char* name,  // NOLINT(misc-no-recursion)
 
 void PrintFlutterEncodableList(const char* name,  // NOLINT(misc-no-recursion)
                                const flutter::EncodableList& list) {
-  spdlog::warn("[EncodableList]");
+  ihs::log::warn("[EncodableList]");
   for (auto& it : list) {
     PrintFlutterEncodableValue(name, it);
   }
@@ -40,62 +40,62 @@ void PrintFlutterEncodableList(const char* name,  // NOLINT(misc-no-recursion)
 void PrintFlutterEncodableValue(const char* key,  // NOLINT(misc-no-recursion)
                                 const flutter::EncodableValue& it) {
   if (std::holds_alternative<std::monostate>(it)) {
-    spdlog::warn("\t{}: []", key);
+    ihs::log::warn("\t{}: []", key);
   } else if (std::holds_alternative<bool>(it)) {
     auto value = std::get<bool>(it);
-    spdlog::warn("\t{}: bool: {}", key, value);
+    ihs::log::warn("\t{}: bool: {}", key, value);
   } else if (std::holds_alternative<int32_t>(it)) {
     auto value = std::get<int32_t>(it);
-    spdlog::warn("\t{}: int32_t: {}", key, value);
+    ihs::log::warn("\t{}: int32_t: {}", key, value);
   } else if (std::holds_alternative<int64_t>(it)) {
     auto value = std::get<int64_t>(it);
-    spdlog::warn("\t{}: int64_t: {}", key, value);
+    ihs::log::warn("\t{}: int64_t: {}", key, value);
   } else if (std::holds_alternative<double>(it)) {
     auto value = std::get<double>(it);
-    spdlog::warn("\t{}: double: {}", key, value);
+    ihs::log::warn("\t{}: double: {}", key, value);
   } else if (std::holds_alternative<std::string>(it)) {
     auto value = std::get<std::string>(it);
-    spdlog::warn("\t{}: std::string: [{}]", key, value);
+    ihs::log::warn("\t{}: std::string: [{}]", key, value);
   } else if (std::holds_alternative<std::vector<uint8_t>>(it)) {
     const auto value = std::get<std::vector<uint8_t>>(it);
-    spdlog::warn("\t{}: std::vector<uint8_t>", key);
+    ihs::log::warn("\t{}: std::vector<uint8_t>", key);
     for (auto const& v : value) {
-      spdlog::warn("\t\t{}", v);
+      ihs::log::warn("\t\t{}", v);
     }
   } else if (std::holds_alternative<std::vector<int32_t>>(it)) {
     const auto value = std::get<std::vector<int32_t>>(it);
-    spdlog::warn("\t{}: std::vector<int32_t>", key);
+    ihs::log::warn("\t{}: std::vector<int32_t>", key);
     for (auto const& v : value) {
-      spdlog::warn("\t\t{}", v);
+      ihs::log::warn("\t\t{}", v);
     }
   } else if (std::holds_alternative<std::vector<int64_t>>(it)) {
     const auto value = std::get<std::vector<int64_t>>(it);
-    spdlog::warn("\t{}: std::vector<int64_t>", key);
+    ihs::log::warn("\t{}: std::vector<int64_t>", key);
     for (auto const& v : value) {
-      spdlog::warn("\t\t{}", v);
+      ihs::log::warn("\t\t{}", v);
     }
   } else if (std::holds_alternative<std::vector<float>>(it)) {
     const auto value = std::get<std::vector<float>>(it);
-    spdlog::warn("\t{}: std::vector<float>", key);
+    ihs::log::warn("\t{}: std::vector<float>", key);
     for (auto const& v : value) {
-      spdlog::warn("\t\t{}", v);
+      ihs::log::warn("\t\t{}", v);
     }
   } else if (std::holds_alternative<std::vector<double>>(it)) {
     const auto value = std::get<std::vector<double>>(it);
-    spdlog::warn("\t{}: std::vector<double>", key);
+    ihs::log::warn("\t{}: std::vector<double>", key);
     for (auto const& v : value) {
-      spdlog::warn("\t\t{}", v);
+      ihs::log::warn("\t\t{}", v);
     }
   } else if (std::holds_alternative<flutter::EncodableList>(it)) {
-    spdlog::warn("\t{}: flutter::EncodableList", key);
+    ihs::log::warn("\t{}: flutter::EncodableList", key);
     const auto val = std::get<flutter::EncodableList>(it);
     PrintFlutterEncodableList(key, val);
   } else if (std::holds_alternative<flutter::EncodableMap>(it)) {
-    spdlog::warn("\t{}: flutter::EncodableMap", key);
+    ihs::log::warn("\t{}: flutter::EncodableMap", key);
     const auto val = std::get<flutter::EncodableMap>(it);
     PrintFlutterEncodableMap(key, val);
   } else {
-    spdlog::error("\t{}: unknown type", key);
+    ihs::log::error("\t{}: unknown type", key);
     assert(false);
   }
 }
