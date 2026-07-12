@@ -15,6 +15,7 @@
  */
 
 #include "command.h"
+#include <memory>
 
 #include "../logging.h"
 

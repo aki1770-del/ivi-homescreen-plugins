@@ -15,6 +15,7 @@
  */
 
 #include "google_sign_in.h"
+#include <memory>
 
 #include "engine.h"
 #include "plugins/common/common.h"

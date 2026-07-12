@@ -16,6 +16,7 @@
  */
 
 #include "portal_manager.h"
+#include <memory>
 
 #include "asio/post.hpp"
 #include "logging/logging.h"

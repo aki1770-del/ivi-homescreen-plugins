@@ -17,6 +17,7 @@
 #include "flatpak_plugin.h"
 
 #include <filesystem>
+#include <memory>
 #include <sstream>
 #include <system_error>
 #include <vector>

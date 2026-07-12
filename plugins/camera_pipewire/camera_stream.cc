@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <future>
+#include <memory>
 #include <sstream>
 #include <utility>
 

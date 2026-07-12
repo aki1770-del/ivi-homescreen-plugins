@@ -15,6 +15,7 @@
  */
 
 #include "desktop_window_plugin.h"
+#include <memory>
 
 #include "messages.h"
 

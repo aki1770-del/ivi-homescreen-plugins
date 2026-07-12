@@ -18,6 +18,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 
 #include "rapidjson/filewritestream.h"
 #include "rapidjson/istreamwrapper.h"

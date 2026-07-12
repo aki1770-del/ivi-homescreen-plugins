@@ -17,6 +17,7 @@
 #include "layer_playground_view_plugin.h"
 
 #include <flutter/standard_message_codec.h>
+#include <memory>
 
 #include "plugins/common/common.h"
 #include "view/flutter_view.h"

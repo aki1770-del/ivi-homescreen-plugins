@@ -17,6 +17,7 @@
 #include "google_sign_in_plugin.h"
 
 #include <filesystem>
+#include <memory>
 
 #include "messages.g.h"
 

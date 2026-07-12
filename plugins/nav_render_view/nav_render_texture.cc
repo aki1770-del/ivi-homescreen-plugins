@@ -1,5 +1,6 @@
 
 #include "nav_render_texture.h"
+#include <memory>
 
 #include "logging/logging.h"
 
