@@ -1,4 +1,5 @@
 #include "flutter_screen_capture.h"
+#include <memory>
 
 namespace flutter_webrtc_plugin {
 

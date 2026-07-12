@@ -1,5 +1,6 @@
 #include "flutter_peerconnection.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/scoped_ref_ptr.h"

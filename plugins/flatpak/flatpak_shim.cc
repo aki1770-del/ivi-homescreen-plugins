@@ -17,6 +17,7 @@
 #include "flatpak_shim.h"
 
 #include <filesystem>
+#include <memory>
 
 #include <cstdlib>
 

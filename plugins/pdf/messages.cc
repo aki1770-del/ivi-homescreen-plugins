@@ -14,6 +14,7 @@
 #include <flutter/method_call.h>
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
+#include <memory>
 
 #include <optional>
 #include <string>

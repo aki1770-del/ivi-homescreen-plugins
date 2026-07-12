@@ -23,6 +23,7 @@
 #include <flutter/encodable_value.h>
 #include <flutter/method_call.h>
 #include <flutter/method_channel.h>
+#include <memory>
 
 #include <string>
 

@@ -16,6 +16,7 @@
  */
 
 #include "portal_proxy.h"
+#include <memory>
 
 #include "logging/logging.h"
 

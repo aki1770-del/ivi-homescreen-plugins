@@ -1,6 +1,7 @@
 #include <asio/steady_timer.hpp>
 #include <fstream>
 #include <future>
+#include <memory>
 #include <thread>
 #include <utility>
 

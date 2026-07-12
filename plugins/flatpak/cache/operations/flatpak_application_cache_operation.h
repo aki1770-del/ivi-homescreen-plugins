@@ -19,6 +19,7 @@
 #define PLUGINS_FLATPAK_CACHE_APPLICATION_CACHE_OPERATION_H
 
 #include <chrono>
+#include <memory>
 
 #include "cache_operation_template.h"
 #include "encodablelist_cache_operation.h"

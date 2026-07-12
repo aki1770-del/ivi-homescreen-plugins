@@ -18,6 +18,7 @@
 
 #include <flutter/standard_message_codec.h>
 #include <plugins/common/common.h>
+#include <memory>
 
 #include <utility>
 

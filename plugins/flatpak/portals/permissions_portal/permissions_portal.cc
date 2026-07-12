@@ -18,6 +18,7 @@
 #include "permissions_portal.h"
 
 #include <iomanip>
+#include <memory>
 #include "asio/post.hpp"
 #include "flatpak/flatpak_shim.h"
 #include "logging/logging.h"
