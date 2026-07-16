@@ -16,6 +16,7 @@
 
 #include "layer_playground_vulkan.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -103,25 +104,38 @@ bool LayerPlaygroundVulkanRenderer::Render(int32_t width, int32_t height) {
   if (device_ == VK_NULL_HANDLE || width <= 0 || height <= 0) {
     return false;
   }
-  // Keep the image across sub-pixel layout fluctuation (the compositor scales
-  // the blit to the exact layer rect anyway) so a static view is not
-  // reallocated every frame.
-  constexpr int32_t kResizeSlack = 2;
-  const bool close_enough = image_ != VK_NULL_HANDLE &&
-                            std::abs(width - width_) <= kResizeSlack &&
-                            std::abs(height - height_) <= kResizeSlack;
-  if (close_enough) {
-    return painted_;  // static gradient, already filled at this size
+  ++gen_;
+  ReapRetired();  // free aged-out images off the hot path (no device drain)
+
+  // Grow-only: the compositor scales the whole image into the exact layer rect
+  // and the gradient is normalized (looks identical at any scale), so a larger
+  // image serves any smaller box. Reuse while the current image is big enough;
+  // only a box that exceeds it triggers a reallocation. An animated shrink — or
+  // a grow within the current size — does no work, so a preset transition no
+  // longer reallocates (and stalls) every frame.
+  const bool fits =
+      image_ != VK_NULL_HANDLE && width <= width_ && height <= height_;
+  if (fits) {
+    return painted_;
   }
+
+  const int32_t new_w =
+      image_ != VK_NULL_HANDLE ? std::max(width, width_) : width;
+  const int32_t new_h =
+      image_ != VK_NULL_HANDLE ? std::max(height, height_) : height;
+
+  // Retire the outgoing image instead of draining the device: a prior frame's
+  // compositor read may still be in flight, so hand it to ReapRetired to free a
+  // few generations later.
   if (image_ != VK_NULL_HANDLE) {
-    // Resizing: a prior frame's compositor blit may still read the old image.
-    // Drain before freeing (rare — a platform view's size is otherwise stable).
-    d().vkDeviceWaitIdle(device_);
+    retired_.push_back({image_, memory_, gen_});
+    image_ = VK_NULL_HANDLE;
+    memory_ = VK_NULL_HANDLE;
+    painted_ = false;
   }
-  DestroyImage();
   layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
-  width_ = width;
-  height_ = height;
+  width_ = new_w;
+  height_ = new_h;
 
   // Plain LINEAR host-visible image the CPU fills directly. initialLayout =
   // PREINITIALIZED so the host writes are preserved into the first GPU use
@@ -220,8 +234,32 @@ bool LayerPlaygroundVulkanRenderer::Render(int32_t width, int32_t height) {
   return true;
 }
 
+void LayerPlaygroundVulkanRenderer::ReapRetired() {
+  // A retired image can still be read by a compositor submit in flight when it
+  // is superseded; freeing it kRetireDepth generations later clears any such
+  // read (the dma-buf present path keeps only a few frames outstanding). Runs
+  // on the rasterizer thread that issues those submits, so no device drain
+  // needed.
+  constexpr uint64_t kRetireDepth = 4;
+  retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
+                                [this](const Retired& r) {
+                                  if (gen_ - r.gen < kRetireDepth) {
+                                    return false;
+                                  }
+                                  d().vkDestroyImage(device_, r.image, nullptr);
+                                  d().vkFreeMemory(device_, r.memory, nullptr);
+                                  return true;
+                                }),
+                 retired_.end());
+}
+
 LayerPlaygroundVulkanRenderer::~LayerPlaygroundVulkanRenderer() {
   if (device_ != VK_NULL_HANDLE) {
+    for (const auto& r : retired_) {
+      d().vkDestroyImage(device_, r.image, nullptr);
+      d().vkFreeMemory(device_, r.memory, nullptr);
+    }
+    retired_.clear();
     DestroyImage();
   }
 }

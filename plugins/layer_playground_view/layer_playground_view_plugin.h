@@ -145,6 +145,12 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
   // Pending size from on_resize / OnResize, applied next OnPresent.
   std::atomic<int32_t> pending_width_{0};
   std::atomic<int32_t> pending_height_{0};
+  // Per-view size seen at the last present, so the trace/size-change check is
+  // scoped to this view (not shared across every view on the rasterizer
+  // thread).
+  int32_t last_present_w_{0};
+  int32_t last_present_h_{0};
+  bool first_present_{true};
 
   // Optional Vulkan render path: non-null when the active backend is Vulkan
   // (no engine GL context). Reuses Flutter's device to write the gradient into

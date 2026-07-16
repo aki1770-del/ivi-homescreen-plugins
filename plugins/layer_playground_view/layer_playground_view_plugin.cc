@@ -423,19 +423,17 @@ bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
     target_w = static_cast<int32_t>(layer->size.width);
     target_h = static_cast<int32_t>(layer->size.height);
   }
-  static thread_local int32_t last_w = 0;
-  static thread_local int32_t last_h = 0;
-  static thread_local bool first_fire = true;
-  const bool size_changed = (target_w != last_w) || (target_h != last_h);
-  if (first_fire || size_changed) {
+  const bool size_changed =
+      (target_w != last_present_w_) || (target_h != last_present_h_);
+  if (first_present_ || size_changed) {
     IHS_TRACE(
         "[pv-trace] LayerPlaygroundView::OnPresent id={} target={}x{} "
         "tex={}x{} gl_init={} (first={}, size_changed={})",
         id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
-        first_fire, size_changed);
-    first_fire = false;
-    last_w = target_w;
-    last_h = target_h;
+        first_present_, size_changed);
+    first_present_ = false;
+    last_present_w_ = target_w;
+    last_present_h_ = target_h;
   }
   if (target_w <= 0 || target_h <= 0) {
     return true;
