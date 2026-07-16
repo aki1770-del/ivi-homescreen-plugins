@@ -36,6 +36,10 @@
 
 namespace plugin_layer_playground_view {
 
+#if BUILD_COMPOSITOR
+class LayerPlaygroundVulkanRenderer;
+#endif
+
 /**
  * Layer playground demo platform view.
  *
@@ -114,6 +118,11 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
   [[nodiscard]] int32_t GetGlTextureHeight() const override {
     return tex_height_;
   }
+  // Vulkan path: hand the compositor the VkImage rendered on Flutter's device.
+  [[nodiscard]] void* GetVulkanImage(int32_t* width,
+                                     int32_t* height) const override;
+  [[nodiscard]] uint32_t GetVulkanImageLayout() const override;
+  void SetVulkanImageLayout(uint32_t layout) override;
 #endif
 
  private:
@@ -136,6 +145,11 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
   // Pending size from on_resize / OnResize, applied next OnPresent.
   std::atomic<int32_t> pending_width_{0};
   std::atomic<int32_t> pending_height_{0};
+
+  // Optional Vulkan render path: non-null when the active backend is Vulkan
+  // (no engine GL context). Reuses Flutter's device to write the gradient into
+  // a VkImage instead of the GL FBO. See layer_playground_vulkan.h.
+  std::unique_ptr<LayerPlaygroundVulkanRenderer> vulkan_renderer_;
 
   void EnsureGlState(int32_t w, int32_t h);
   void DestroyGlState();
