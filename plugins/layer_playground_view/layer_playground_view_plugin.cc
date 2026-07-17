@@ -22,6 +22,11 @@
 #include "plugins/common/common.h"
 #include "view/flutter_view.h"
 
+#if BUILD_COMPOSITOR
+#include "backend/backend.h"
+#include "layer_playground_vulkan.h"
+#endif
+
 class FlutterView;
 class Display;
 
@@ -83,7 +88,8 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
   // is allocated lazily on the rasterizer thread the first time OnPresent
   // fires — the engine's context isn't current here on the platform thread.
   if (state && state->view_controller && state->view_controller->view) {
-    state->view_controller->view->RegisterCompositorSurface(
+    auto* view = state->view_controller->view;
+    view->RegisterCompositorSurface(
         id_, std::shared_ptr<ICompositorSurface>(this, [](ICompositorSurface*) {
           // Aliasing deleter: the plugin's lifetime is owned by the
           // PluginRegistrar, not by this shared_ptr. The compositor's
@@ -91,6 +97,27 @@ LayerPlaygroundViewPlugin::LayerPlaygroundViewPlugin(
         }));
     IHS_TRACE("[pv-trace] LayerPlaygroundView registered: id={} size={}x{}",
               id_, pending_width_.load(), pending_height_.load());
+
+    // If the active backend is Vulkan there is no engine GL context, so the GL
+    // path would fail. Reuse the backend's Vulkan device to render into a
+    // VkImage instead. GL stays the path on EGL backends.
+    if (auto* backend = view->GetBackend()) {
+      BackendVulkanContext vk{};
+      if (backend->GetVulkanContext(&vk)) {
+        auto renderer = std::make_unique<LayerPlaygroundVulkanRenderer>();
+        if (renderer->Init(static_cast<VkInstance>(vk.instance),
+                           static_cast<VkPhysicalDevice>(vk.physical_device),
+                           static_cast<VkDevice>(vk.device),
+                           static_cast<VkQueue>(vk.queue),
+                           vk.queue_family_index)) {
+          vulkan_renderer_ = std::move(renderer);
+          IHS_TRACE(
+              "[pv-trace] LayerPlaygroundView: Vulkan render path active "
+              "(reusing Flutter's device) id={}",
+              id_);
+        }
+      }
+    }
   } else {
     IHS_TRACE(
         "[pv-trace] LayerPlaygroundView could NOT register (state/view null): "
@@ -149,14 +176,24 @@ void LayerPlaygroundViewPlugin::on_touch(int32_t /* action */,
                                          const double* /* point_data */,
                                          void* /* data */) {}
 
-void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */,
-                                           void* /* data */) {
+void LayerPlaygroundViewPlugin::on_dispose(bool /* hybrid */, void* data) {
   // Compositor-owned shared_ptr drops via PlatformViewsHandler's
   // safety-net UnregisterCompositorSurface call. GL state is leaked
   // intentionally — destroying GL handles requires the engine's context
   // to be current on the rasterizer thread, and we have no way to
   // marshal that from the platform-thread dispose call. The engine's
   // context outlives the plugin and reclaims the resources at shutdown.
+#if BUILD_COMPOSITOR
+  // The Vulkan path, unlike GL, has no thread-affine context: its VkImage +
+  // memory can be freed here (the device is still alive at dispose), which also
+  // keeps them from outliving vkDestroyDevice. The images hold no in-flight GPU
+  // work (CPU-filled), so this is safe from the platform thread.
+  if (auto* plugin = static_cast<LayerPlaygroundViewPlugin*>(data)) {
+    plugin->vulkan_renderer_.reset();
+  }
+#else
+  (void)data;
+#endif
 }
 
 const platform_view_listener
@@ -386,23 +423,27 @@ bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
     target_w = static_cast<int32_t>(layer->size.width);
     target_h = static_cast<int32_t>(layer->size.height);
   }
-  static thread_local int32_t last_w = 0;
-  static thread_local int32_t last_h = 0;
-  static thread_local bool first_fire = true;
-  const bool size_changed = (target_w != last_w) || (target_h != last_h);
-  if (first_fire || size_changed) {
+  const bool size_changed =
+      (target_w != last_present_w_) || (target_h != last_present_h_);
+  if (first_present_ || size_changed) {
     IHS_TRACE(
         "[pv-trace] LayerPlaygroundView::OnPresent id={} target={}x{} "
         "tex={}x{} gl_init={} (first={}, size_changed={})",
         id_, target_w, target_h, tex_width_, tex_height_, gl_initialized_,
-        first_fire, size_changed);
-    first_fire = false;
-    last_w = target_w;
-    last_h = target_h;
+        first_present_, size_changed);
+    first_present_ = false;
+    last_present_w_ = target_w;
+    last_present_h_ = target_h;
   }
   if (target_w <= 0 || target_h <= 0) {
     return true;
   }
+
+  // Vulkan backend: render into a VkImage on Flutter's device instead of GL.
+  if (vulkan_renderer_) {
+    return vulkan_renderer_->Render(target_w, target_h);
+  }
+
   EnsureGlState(target_w, target_h);
   if (!gl_initialized_) {
     IHS_TRACE(
@@ -414,6 +455,30 @@ bool LayerPlaygroundViewPlugin::OnPresent(const FlutterLayer* layer) {
   DrawFrame();
   (void)layer;
   return true;
+}
+
+void* LayerPlaygroundViewPlugin::GetVulkanImage(int32_t* width,
+                                                int32_t* height) const {
+  if (!vulkan_renderer_ || vulkan_renderer_->image() == VK_NULL_HANDLE) {
+    return nullptr;
+  }
+  if (width) {
+    *width = vulkan_renderer_->width();
+  }
+  if (height) {
+    *height = vulkan_renderer_->height();
+  }
+  return reinterpret_cast<void*>(vulkan_renderer_->image());
+}
+
+uint32_t LayerPlaygroundViewPlugin::GetVulkanImageLayout() const {
+  return vulkan_renderer_ ? vulkan_renderer_->layout() : 0;
+}
+
+void LayerPlaygroundViewPlugin::SetVulkanImageLayout(uint32_t layout) {
+  if (vulkan_renderer_) {
+    vulkan_renderer_->set_layout(layout);
+  }
 }
 
 void LayerPlaygroundViewPlugin::OnResize(int32_t w, int32_t h) {
