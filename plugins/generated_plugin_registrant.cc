@@ -19,6 +19,14 @@
 
 #include "config/plugins.h"
 
+#if ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
+namespace plugin_layer_playground_view {
+// Registers the ihs_pv PlatformViewRegistry factory for the demo box view. A
+// no-op when the compositor is off. Defined in layer_playground_ihs_pv.cc.
+void RegisterIhsPvFactory();
+}  // namespace plugin_layer_playground_view
+#endif
+
 static constexpr char kKeyId[] = "id";
 static constexpr char kKeyViewType[] = "viewType";
 static constexpr char kKeyDirection[] = "direction";
@@ -107,6 +115,12 @@ void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine) {
 #if ENABLE_PLUGIN_WEBRTC
   WebrtcPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
+#if ENABLE_PLUGIN_LAYER_PLAYGROUND_VIEW
+  // Install the ihs_pv factory now that the platform-view host is up (this runs
+  // after SetUpCommonEngineState). Creates for "@views/simple-box-view-type"
+  // then route through the registry factory instead of the AOI path below.
+  plugin_layer_playground_view::RegisterIhsPvFactory();
 #endif
 }
 
