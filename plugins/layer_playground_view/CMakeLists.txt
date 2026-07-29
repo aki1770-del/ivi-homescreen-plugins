@@ -36,3 +36,9 @@ target_link_libraries(plugin_layer_playground_view PUBLIC
         # The ihs_pv producer allocates scanout-capable buffers via gbm.
         gbm
 )
+
+if (BUILD_COMPOSITOR)
+        # Direct-scanout stub (IVI_PV_DMABUF): allocates a scanout gbm_bo and
+        # exports it as a dma-buf for the DRM compositor's KMS-plane path.
+        target_link_libraries(plugin_layer_playground_view PUBLIC gbm)
+endif ()
