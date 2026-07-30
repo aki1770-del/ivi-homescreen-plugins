@@ -29,15 +29,28 @@
 // keeps compositing the last-submitted buffer every frame. Rendering a gradient
 // into the dma-buf (GL into an EGLImage FBO) is a later polish; the negotiate +
 // submit path is what this exercises.
+//
+// LP_PV_DMABUF_FOURCC=nv12 switches the submitted buffer to NV12 (the palette
+// color converted to BT.709 limited-range Y'CbCr), exercising the shell's YUV
+// direct-scanout path: the compositor marks it ContentType::Video and programs
+// the KMS plane CSC (COLOR_ENCODING/COLOR_RANGE) from the frame's
+// color_space/color_range. Default is the solid XRGB8888 box (the RGB path).
 
 #include "config/common.h"
 
 #if BUILD_COMPOSITOR
-#include <sys/mman.h>  // MAP_FAILED
+#include <fcntl.h>      // O_CLOEXEC
+#include <sys/ioctl.h>  // ioctl
+#include <sys/mman.h>   // mmap / munmap / MAP_FAILED
+
+#include <drm/drm.h>  // DRM_IOCTL_MODE_{CREATE,MAP,DESTROY}_DUMB, PRIME_HANDLE_TO_FD
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>  // getenv
+#include <cstring>  // memset
 #include <mutex>
+#include <string_view>
 
 #include <gbm.h>
 
@@ -73,6 +86,14 @@ constexpr uint32_t kBorder = 0xFF202020u;
 // resize while still picking up new buffers.
 constexpr uint32_t kBufferId = 0;
 
+// LP_PV_DMABUF_FOURCC=nv12 selects the YUV plane path; anything else (or unset)
+// keeps the XRGB8888 box. Read once per producer.
+bool WantNv12() {
+  const char* e = std::getenv("LP_PV_DMABUF_FOURCC");
+  return e != nullptr &&
+         (std::string_view(e) == "nv12" || std::string_view(e) == "NV12");
+}
+
 // Per-view producer. All entry points (Start from the factory, Resize/Dispose
 // from IhsPvCallbacks) run on the platform thread, as do ihs_pv_egl_context /
 // ihs_pv_negotiate / ihs_pv_submit — so no cross-thread synchronization of the
@@ -101,12 +122,18 @@ class Producer {
 
   void Resize(uint32_t width, uint32_t height) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (width == width_ && height == height_) {
-      return;
-    }
+    const bool size_changed = width != width_ || height != height_;
     width_ = width;
     height_ = height;
-    Produce();
+    // The RGB box is a static producer (submit once per size). NV12 resubmits
+    // on every present (the DRM compositor calls OnResize each frame) so it
+    // acts as a continuous producer: the host's GetDmabuf re-arms on each
+    // submit, so the frame keeps direct-scanning-out on a KMS plane (exercising
+    // the YUV plane CSC). A one-shot submit would be consumed by the first
+    // GL-fallback present and, being static, never return to scanout.
+    if (size_changed || want_nv12_) {
+      Produce();
+    }
   }
 
  private:
@@ -135,8 +162,10 @@ class Producer {
     return true;
   }
 
-  // Allocate a solid-color gbm buffer at the current size and submit it. Caller
-  // holds mutex_ (or is the single-threaded Start path).
+  // Allocate the current-size buffer and submit it. RGB goes through gbm; NV12
+  // goes through a DRM dumb buffer (gbm_bo_create can't allocate planar YUV on
+  // the drivers we run — vc4/amdgpu/vkms). Caller holds mutex_ (or is the
+  // single-threaded Start path).
   void Produce() {
     if (granted_kind_ != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
       // The software-shm floor is produced through ihs_pv_grant_shm_fd; wiring
@@ -155,10 +184,16 @@ class Producer {
       return;
     }
     auto* dev = static_cast<gbm_device*>(egl.gbm_device);
+    if (want_nv12_) {
+      ProduceNv12(dev);
+    } else {
+      ProduceRgb(dev);
+    }
+  }
 
-    // GBM_FORMAT_XRGB8888 == DRM_FORMAT_XRGB8888 (same fourcc); SCANOUT |
-    // LINEAR so the buffer is both KMS-scanout-capable and CPU-mappable to
-    // fill.
+  // Solid per-id XRGB8888 box through gbm. SCANOUT | LINEAR keeps it both
+  // KMS-scannable and CPU-mappable; GBM_FORMAT_XRGB8888 == DRM_FORMAT_XRGB8888.
+  void ProduceRgb(gbm_device* dev) {
     gbm_bo* bo = gbm_bo_create(dev, width_, height_, GBM_FORMAT_XRGB8888,
                                GBM_BO_USE_SCANOUT | GBM_BO_USE_LINEAR);
     if (bo == nullptr) {
@@ -167,13 +202,12 @@ class Producer {
                    width_, height_);
       return;
     }
-    FillSolid(bo);
-
     const int fd = gbm_bo_get_fd(bo);
     if (fd < 0) {
       gbm_bo_destroy(bo);
       return;
     }
+    FillSolid(bo);
 
     IhsFrame frame{};
     frame.struct_size = sizeof(frame);
@@ -184,9 +218,8 @@ class Producer {
     frame.plane_count = 1;
     frame.plane_fd[0] = fd;  // ownership passes to the registry on import
     frame.plane_offset[0] = gbm_bo_get_offset(bo, 0);
-    frame.plane_stride[0] = gbm_bo_get_stride(bo);
+    frame.plane_stride[0] = gbm_bo_get_stride_for_plane(bo, 0);
     frame.buffer_id = kBufferId;
-    // Implicit sync: gbm_bo_map/unmap completed the CPU write before submit.
     ihs_pv_submit(view_, &frame, /*acquire_fence_fd=*/-1,
                   /*out_release_fence_fd=*/nullptr);
 
@@ -197,6 +230,88 @@ class Producer {
       gbm_bo_destroy(bo_);
     }
     bo_ = bo;
+  }
+
+  // NV12 through a DRM dumb buffer: allocate one linear BO on the gbm device's
+  // scanout fd (Y rows then interleaved UV rows), fill it with the palette
+  // color as BT.709 limited Y'CbCr, PRIME-export it, and submit as NV12 so the
+  // shell programs the KMS plane CSC. Destroying the GEM handle right after
+  // export is safe — the exported dma-buf holds its own reference to the
+  // memory.
+  void ProduceNv12(gbm_device* dev) {
+    const int drm_fd = gbm_device_get_fd(dev);
+    if (drm_fd < 0) {
+      return;
+    }
+    // Y plane (height_ rows) + interleaved UV plane (height_/2 rows) at 8
+    // bits/sample; pitch is the shared per-row stride the driver picks.
+    drm_mode_create_dumb creq{};
+    creq.width = width_;
+    creq.height = height_ + height_ / 2;
+    creq.bpp = 8;
+    if (::ioctl(drm_fd, DRM_IOCTL_MODE_CREATE_DUMB, &creq) != 0) {
+      std::fprintf(stderr,
+                   "[layer_playground] CREATE_DUMB NV12 failed id=%d %ux%u\n",
+                   id_, width_, height_);
+      return;
+    }
+
+    drm_mode_map_dumb mreq{};
+    mreq.handle = creq.handle;
+    if (::ioctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &mreq) == 0) {
+      void* m = ::mmap(nullptr, creq.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                       drm_fd, static_cast<off_t>(mreq.offset));
+      if (m != MAP_FAILED) {
+        FillNv12(static_cast<uint8_t*>(m), creq.pitch);
+        ::munmap(m, creq.size);
+      } else {
+        std::fprintf(stderr, "[layer_playground] NV12 dumb mmap failed id=%d\n",
+                     id_);
+      }
+    }
+
+    drm_prime_handle ph{};
+    ph.handle = creq.handle;
+    ph.flags = O_CLOEXEC;
+    const bool exported =
+        ::ioctl(drm_fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &ph) == 0 && ph.fd >= 0;
+
+    // Drop the GEM handle now; the PRIME dma-buf keeps its own reference.
+    drm_mode_destroy_dumb dreq{};
+    dreq.handle = creq.handle;
+    ::ioctl(drm_fd, DRM_IOCTL_MODE_DESTROY_DUMB, &dreq);
+    if (!exported) {
+      std::fprintf(stderr,
+                   "[layer_playground] PRIME export NV12 failed id=%d\n", id_);
+      return;
+    }
+
+    IhsFrame frame{};
+    frame.struct_size = sizeof(frame);
+    frame.format.fourcc = GBM_FORMAT_NV12;  // == DRM_FORMAT_NV12
+    frame.format.modifier = 0;              // DRM_FORMAT_MOD_LINEAR
+    frame.width = width_;
+    frame.height = height_;
+    frame.color_space = 2;  // IHS_COLOR_SPACE_BT709
+    frame.color_range = 2;  // IHS_COLOR_RANGE_LIMITED
+    // Y and UV share one dma-buf; the same fd repeats per plane (the IhsFrame
+    // contract — the host dedups on close and dups per plane on import).
+    frame.plane_count = 2;
+    frame.plane_fd[0] = ph.fd;  // ownership passes to the registry on import
+    frame.plane_fd[1] = ph.fd;
+    frame.plane_offset[0] = 0;
+    frame.plane_stride[0] = creq.pitch;
+    frame.plane_offset[1] = creq.pitch * height_;
+    frame.plane_stride[1] = creq.pitch;
+    frame.buffer_id = kBufferId;
+    ihs_pv_submit(view_, &frame, /*acquire_fence_fd=*/-1,
+                  /*out_release_fence_fd=*/nullptr);
+
+    // NV12 keeps no gbm bo; drop any stale one from an earlier RGB submit.
+    if (bo_ != nullptr) {
+      gbm_bo_destroy(bo_);
+      bo_ = nullptr;
+    }
   }
 
   void FillSolid(gbm_bo* bo) const {
@@ -219,10 +334,40 @@ class Producer {
     gbm_bo_unmap(bo, map_data);
   }
 
+  // Write the view's palette color as BT.709 limited-range Y'CbCr into a linear
+  // NV12 buffer mapped at @base: the Y plane (height_ rows) then the
+  // interleaved UV plane (height_/2 rows), both at @pitch stride. If the plane
+  // CSC is programmed right the box decodes back to the RGB path's color — so
+  // this validates the CSC, not just placement.
+  void FillNv12(uint8_t* base, uint32_t pitch) const {
+    const uint32_t rgb = kPalette[static_cast<uint32_t>((id_ % 10 + 10) % 10)];
+    const auto r = static_cast<double>((rgb >> 16) & 0xFF);
+    const auto g = static_cast<double>((rgb >> 8) & 0xFF);
+    const auto b = static_cast<double>(rgb & 0xFF);
+    auto clamp8 = [](double v) {
+      return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v));
+    };
+    const uint8_t yv = clamp8(16.0 + 0.1826 * r + 0.6142 * g + 0.0620 * b);
+    const uint8_t cu = clamp8(128.0 - 0.1006 * r - 0.3386 * g + 0.4392 * b);
+    const uint8_t cv = clamp8(128.0 + 0.4392 * r - 0.3989 * g - 0.0403 * b);
+    for (uint32_t y = 0; y < height_; ++y) {
+      std::memset(base + static_cast<size_t>(y) * pitch, yv, width_);
+    }
+    uint8_t* uv = base + static_cast<size_t>(pitch) * height_;
+    for (uint32_t y = 0; y < height_ / 2; ++y) {
+      uint8_t* uvrow = uv + static_cast<size_t>(y) * pitch;
+      for (uint32_t x = 0; x < width_ / 2; ++x) {
+        uvrow[2 * x] = cu;
+        uvrow[2 * x + 1] = cv;
+      }
+    }
+  }
+
   IhsPlatformView* view_;
   int32_t id_;
   uint32_t width_;
   uint32_t height_;
+  const bool want_nv12_{WantNv12()};
   uint32_t granted_kind_{IHS_PV_KIND_NONE};
   gbm_bo* bo_{nullptr};
   std::mutex mutex_;
