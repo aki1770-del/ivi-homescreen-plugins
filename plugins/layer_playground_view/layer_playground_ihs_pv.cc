@@ -94,6 +94,15 @@ bool WantNv12() {
          (std::string_view(e) == "nv12" || std::string_view(e) == "NV12");
 }
 
+// LP_PV_DRM_PLANE=1 asks for the explicit DRM_PLANE grant instead of
+// TEXTURE_DMABUF_IMPORT, so ihs_pv_grant_drm_plane_id reports the KMS plane the
+// view is scanned out on (0 while GL-composited). Both kinds submit a dma-buf
+// the same way; this only changes which grant is requested (and the accessor).
+bool WantDrmPlane() {
+  const char* e = std::getenv("LP_PV_DRM_PLANE");
+  return e != nullptr && std::string_view(e) == "1";
+}
+
 // Per-view producer. All entry points (Start from the factory, Resize/Dispose
 // from IhsPvCallbacks) run on the platform thread, as do ihs_pv_egl_context /
 // ihs_pv_negotiate / ihs_pv_submit — so no cross-thread synchronization of the
@@ -140,10 +149,13 @@ class Producer {
   bool Negotiate() {
     IhsPvRequirements req{};
     req.struct_size = sizeof(req);
-    // Offer the zero-copy import and the universal floor; the scorer picks the
-    // best the active backend grants (dma-buf on wayland/drm-egl, shm floor on
-    // the software backend). No format list: a solid buffer takes any format.
-    req.kinds = IHS_PV_KIND_TEXTURE_DMABUF_IMPORT | IHS_PV_KIND_SOFTWARE_SHM;
+    // DRM_PLANE (when requested) or the zero-copy dma-buf import, plus the
+    // universal shm floor; the scorer picks the best the active backend grants
+    // (dma-buf/plane on drm-egl, shm floor on software). No format list: a
+    // solid buffer takes any format.
+    req.kinds = (want_drm_plane_ ? IHS_PV_KIND_DRM_PLANE
+                                 : IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) |
+                IHS_PV_KIND_SOFTWARE_SHM;
     req.formats = nullptr;
     req.format_count = 0;
     req.needs_alpha = 0;              // opaque box
@@ -167,10 +179,12 @@ class Producer {
   // the drivers we run — vc4/amdgpu/vkms). Caller holds mutex_ (or is the
   // single-threaded Start path).
   void Produce() {
-    if (granted_kind_ != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT) {
-      // The software-shm floor is produced through ihs_pv_grant_shm_fd; wiring
-      // that (and the host-side shm composite) is a separate step. On an
-      // EGL/Vulkan backend the grant is dma-buf import, so this is not hit.
+    // Both the dma-buf import and the DRM_PLANE grant submit a dma-buf the same
+    // way; only the shm floor needs a different path (ihs_pv_grant_shm_fd),
+    // which isn't wired yet. On an EGL/Vulkan backend the grant is one of the
+    // dma-buf kinds, so the early return is not hit there.
+    if (granted_kind_ != IHS_PV_KIND_TEXTURE_DMABUF_IMPORT &&
+        granted_kind_ != IHS_PV_KIND_DRM_PLANE) {
       return;
     }
     // Flutter hands a 1x1 placeholder at create; skip until a real resize.
@@ -188,6 +202,13 @@ class Producer {
       ProduceNv12(dev);
     } else {
       ProduceRgb(dev);
+    }
+    // Read back the DRM_PLANE grant accessor: the KMS plane this view is
+    // scanned out on (0 while GL-composited, or not a DRM_PLANE grant).
+    // Throttled so a continuous producer doesn't spam.
+    if (want_drm_plane_ && (produce_count_++ % 120) == 0) {
+      std::fprintf(stderr, "[layer_playground] id=%d drm_plane_id=%u\n", id_,
+                   ihs_pv_grant_drm_plane_id(view_));
     }
   }
 
@@ -368,6 +389,8 @@ class Producer {
   uint32_t width_;
   uint32_t height_;
   const bool want_nv12_{WantNv12()};
+  const bool want_drm_plane_{WantDrmPlane()};
+  uint32_t produce_count_{0};  // throttles the DRM_PLANE readback log
   uint32_t granted_kind_{IHS_PV_KIND_NONE};
   gbm_bo* bo_{nullptr};
   std::mutex mutex_;
