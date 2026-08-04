@@ -103,6 +103,32 @@ bool WantDrmPlane() {
   return e != nullptr && std::string_view(e) == "1";
 }
 
+// LP_PV_HDR=1 tags the NV12 frame as HDR10 (BT.2020 / PQ) with the mastering
+// metadata below, so the shell signals it on the connector's
+// HDR_OUTPUT_METADATA. Implies the NV12 (YUV) path.
+bool WantHdr() {
+  const char* e = std::getenv("LP_PV_HDR");
+  return e != nullptr && std::string_view(e) == "1";
+}
+
+// HDR10 mastering metadata for the LP_PV_HDR test frame: BT.2020 primaries +
+// D65 white (CIE xy in 0.00002 units), PQ transfer, 1000/0.0001 cd/m^2
+// mastering luminance, MaxCLL 1000 / MaxFALL 400. Positional aggregate init
+// (C++17): the field order matches IhsHdrMetadata.
+constexpr IhsHdrMetadata kHdr10{
+    sizeof(IhsHdrMetadata),  // struct_size
+    IHS_TRANSFER_PQ,         // transfer
+    {0, 0, 0, 0, 0, 0, 0},   // reserved[7]
+    {35400, 8500, 6550},     // display_primaries_x R,G,B (BT.2020)
+    {14600, 39850, 2300},    // display_primaries_y
+    15635,                   // white_point_x (D65)
+    16450,                   // white_point_y
+    1000,                    // max_display_mastering_luminance cd/m^2
+    1,                       // min_display_mastering_luminance 0.0001
+    1000,                    // max_content_light_level (MaxCLL)
+    400,                     // max_frame_average_light_level (MaxFALL)
+};
+
 // Per-view producer. All entry points (Start from the factory, Resize/Dispose
 // from IhsPvCallbacks) run on the platform thread, as do ihs_pv_egl_context /
 // ihs_pv_negotiate / ihs_pv_submit — so no cross-thread synchronization of the
@@ -313,8 +339,10 @@ class Producer {
     frame.format.modifier = 0;              // DRM_FORMAT_MOD_LINEAR
     frame.width = width_;
     frame.height = height_;
-    frame.color_space = 2;  // IHS_COLOR_SPACE_BT709
-    frame.color_range = 2;  // IHS_COLOR_RANGE_LIMITED
+    // HDR is BT.2020 + PQ with mastering metadata; SDR is BT.709. Both limited.
+    frame.color_space = want_hdr_ ? 3 : 2;  // BT2020 : BT709
+    frame.color_range = 2;                  // IHS_COLOR_RANGE_LIMITED
+    frame.hdr = want_hdr_ ? &kHdr10 : nullptr;
     // Y and UV share one dma-buf; the same fd repeats per plane (the IhsFrame
     // contract — the host dedups on close and dups per plane on import).
     frame.plane_count = 2;
@@ -388,7 +416,8 @@ class Producer {
   int32_t id_;
   uint32_t width_;
   uint32_t height_;
-  const bool want_nv12_{WantNv12()};
+  const bool want_hdr_{WantHdr()};
+  const bool want_nv12_{WantNv12() || want_hdr_};  // HDR rides the YUV path
   const bool want_drm_plane_{WantDrmPlane()};
   uint32_t produce_count_{0};  // throttles the DRM_PLANE readback log
   uint32_t granted_kind_{IHS_PV_KIND_NONE};
