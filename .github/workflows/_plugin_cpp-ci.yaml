@@ -7,6 +7,11 @@ on:
         description: "Name of the plugin to check"
         type: string
         required: true
+      homescreen-ref:
+        description: "The git ref of ivi-homescreen to build against (branch, tag, or commit)"
+        type: string
+        required: false
+        default: "v2.0"
       libcamera-enable:
         description: "Whether to enable libcamera support"
         type: boolean
@@ -41,6 +46,7 @@ jobs:
         uses: ./plugins_source/.github/actions/homescreen-build
         with:
           name: ${{ inputs.name }}
+          homescreen-ref: ${{ inputs.homescreen-ref }}
           plugins-ref: ${{ github.sha }}
           clang-version: ${{ inputs.clang-version }}
           libcamera-enable: ${{ inputs.libcamera-enable }}
@@ -113,6 +119,7 @@ jobs:
         uses: ./plugins_source/.github/actions/homescreen-build
         with:
           name: ${{ inputs.name }}
+          homescreen-ref: ${{ inputs.homescreen-ref }}
           plugins-ref: ${{ github.sha }}
           clang-version: ${{ inputs.clang-version }}
           libcamera-enable: ${{ inputs.libcamera-enable }}
@@ -168,6 +175,7 @@ jobs:
         uses: ./plugins_source/.github/actions/homescreen-build
         with:
           name: ${{ inputs.name }}
+          homescreen-ref: ${{ inputs.homescreen-ref }}
           plugins-ref: ${{ github.sha }}
           clang-version: ${{ inputs.clang-version }}
           libcamera-enable: ${{ inputs.libcamera-enable }}
@@ -232,6 +240,7 @@ jobs:
         uses: ./plugins_source/.github/actions/homescreen-build
         with:
           name: ${{ inputs.name }}
+          homescreen-ref: ${{ inputs.homescreen-ref }}
           plugins-ref: ${{ github.sha }}
           clang-version: ${{ inputs.clang-version }}
           libcamera-enable: ${{ inputs.libcamera-enable }}
