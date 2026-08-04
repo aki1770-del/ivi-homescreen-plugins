@@ -30,8 +30,4 @@ jobs:
     uses: ./.github/workflows/_plugin_cpp-ci.yaml
     with:
       name: "layer_playground_view"
-      # The ihs_pv HDR ABI (IhsHdrMetadata, IhsFrame.hdr) used by this plugin's
-      # LP_PV_HDR producer lives on ivi-homescreen v3.0, not v2.0. Build against
-      # v3.0 so the HDR path compiles.
-      homescreen-ref: "v3.0"
       

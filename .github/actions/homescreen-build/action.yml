@@ -8,7 +8,7 @@ inputs:
   homescreen-ref:
     description: "The git ref of ivi-homescreen to build against (branch, tag, or commit)"
     required: false
-    default: "v2.0"
+    default: "v3.0"
   plugins-ref:
     description: "The git ref of ivi-homescreen-plugins to build against (branch, tag, or commit). Ignored if building from the ivi-homescreen-plugins repo."
     required: false
