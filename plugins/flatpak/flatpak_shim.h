@@ -71,7 +71,8 @@ struct FlatpakShim : std::enable_shared_from_this<FlatpakShim> {
     messenger_ = nullptr;
     std::lock_guard<std::mutex> lock(worker_mutex_);
     for (auto& f : worker_futures_) {
-      if (f.valid()) f.wait();
+      if (f.valid())
+        f.wait();
     }
   }
 

@@ -59,7 +59,8 @@ namespace {
 struct WorkerGuard {
   std::shared_ptr<std::promise<void>> promise;
   ~WorkerGuard() {
-    if (promise) promise->set_value();
+    if (promise)
+      promise->set_value();
   }
 };
 }  // namespace
@@ -1202,11 +1203,13 @@ void FlatpakShim::ApplicationInstall(
             flatpak_ref_get_branch(found_ref_raw), nullptr, &check_error);
         if (check_ref) {
           ihs::log::info(
-              "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase 2.");
+              "[FlatpakPlugin] App was installed in Phase 1! Skipping Phase "
+              "2.");
           g_object_unref(check_ref);
           app_already_installed = true;
         }
-        if (check_error) g_clear_error(&check_error);
+        if (check_error)
+          g_clear_error(&check_error);
         g_object_unref(fresh_install);
       }
     }
@@ -1357,7 +1360,7 @@ void FlatpakShim::ApplicationInstall(
           verified = true;
         } else if (verify_error) {
           ihs::log::error("[FlatpakPlugin] Verification failed: {}",
-                        verify_error->message);
+                          verify_error->message);
           g_clear_error(&verify_error);
         }
         g_object_unref(fresh_installation);
