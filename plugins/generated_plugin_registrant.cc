@@ -64,6 +64,10 @@ void PluginsApiRegisterPlugins(FlutterDesktopEngineRef engine) {
   DesktopWindowLinuxPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
 #endif
+#if ENABLE_PLUGIN_GAMEPADS_LINUX
+  GamepadsLinuxPluginCApiRegisterWithRegistrar(
+      FlutterDesktopGetPluginRegistrar(engine, ""));
+#endif
 #if ENABLE_PLUGIN_GOOGLE_SIGN_IN
   GoogleSignInPluginCApiRegisterWithRegistrar(
       FlutterDesktopGetPluginRegistrar(engine, ""));
