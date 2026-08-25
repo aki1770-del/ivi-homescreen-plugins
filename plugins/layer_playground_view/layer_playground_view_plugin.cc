@@ -509,9 +509,10 @@ void LayerPlaygroundViewPlugin::SetVulkanImageLayout(uint32_t layout) {
   }
 }
 
-bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
+ICompositorSurface::DmabufState LayerPlaygroundViewPlugin::GetDmabuf(
+    Dmabuf* out) const {
   if (!out) {
-    return false;
+    return DmabufState::kNotScanoutCapable;
   }
   // Opt-in gate so the default GL-composite path is unchanged. Evaluated once.
   if (pv_dmabuf_enabled_ < 0) {
@@ -521,7 +522,7 @@ bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
               pv_dmabuf_enabled_, static_cast<const void*>(pv_gbm_device_));
   }
   if (pv_dmabuf_enabled_ == 0 || !pv_gbm_device_) {
-    return false;
+    return DmabufState::kNotScanoutCapable;
   }
 
   // Target the view's current extent. Flutter registers platform views at
@@ -531,7 +532,7 @@ bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
   const int32_t w = pending_width_.load();
   const int32_t h = pending_height_.load();
   if (w <= 1 || h <= 1) {
-    return false;
+    return DmabufState::kNoNewFrame;
   }
   if (pv_dmabuf_bo_ && (pv_dmabuf_w_ != w || pv_dmabuf_h_ != h)) {
     if (pv_dmabuf_fd_ >= 0) {
@@ -572,7 +573,7 @@ bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
       IHS_TRACE("[pv-trace] GetDmabuf gbm_bo_create failed id={} {}x{}", id_, w,
                 h);
       pv_dmabuf_enabled_ = 0;  // don't retry every present
-      return false;
+      return DmabufState::kNotScanoutCapable;
     }
 
     // A distinct opaque color per view id, so each native box is visually
@@ -683,7 +684,7 @@ bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
   }
 
   if (pv_dmabuf_fd_ < 0) {
-    return false;
+    return DmabufState::kNotScanoutCapable;
   }
   for (uint32_t i = 0; i < pv_dmabuf_planes_; ++i) {
     out->fd[i] = pv_dmabuf_fd_;  // one bo; planes differ by offset/stride
@@ -698,7 +699,7 @@ bool LayerPlaygroundViewPlugin::GetDmabuf(Dmabuf* out) const {
   out->color_space = pv_dmabuf_color_space_;  // 0 (DEFAULT) for RGB
   out->color_range = pv_dmabuf_color_range_;
   out->acquire_fence_fd = -1;  // CPU-filled, already visible
-  return true;
+  return DmabufState::kFrame;
 }
 
 void LayerPlaygroundViewPlugin::OnResize(int32_t w, int32_t h) {
