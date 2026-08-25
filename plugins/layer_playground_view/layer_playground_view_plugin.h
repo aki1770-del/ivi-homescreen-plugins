@@ -139,8 +139,10 @@ class LayerPlaygroundViewPlugin : public flutter::Plugin,
 
   // Direct-scanout stub: when IVI_PV_DMABUF is set, expose a solid-color
   // dma-buf so the DRM compositor routes this view onto a KMS overlay plane
-  // instead of GL-compositing it. Returns false (GL path) otherwise.
-  [[nodiscard]] bool GetDmabuf(Dmabuf* out) const override;
+  // instead of GL-compositing it. Otherwise reports why there is no frame --
+  // kNotScanoutCapable when the gate is off or a buffer cannot be produced (GL
+  // path), kNoNewFrame while the view is still at its pre-layout 1x1 extent.
+  [[nodiscard]] DmabufState GetDmabuf(Dmabuf* out) const override;
 #endif
 
  private:
