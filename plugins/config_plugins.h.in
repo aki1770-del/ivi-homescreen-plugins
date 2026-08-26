@@ -62,6 +62,11 @@
 #include "firebase_storage/include/firebase_storage/firebase_storage_plugin_c_api.h"
 #endif
 
+#cmakedefine01 ENABLE_PLUGIN_GAMEPADS_LINUX
+#if ENABLE_PLUGIN_GAMEPADS_LINUX
+#include "gamepads_linux/include/gamepads_linux/gamepads_linux_plugin_c_api.h"
+#endif
+
 #cmakedefine01 ENABLE_PLUGIN_FIREBASE_CORE
 #if ENABLE_PLUGIN_FIREBASE_CORE
 #include "firebase_core/include/firebase_core/firebase_core_plugin_c_api.h"

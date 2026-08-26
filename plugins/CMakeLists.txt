@@ -100,6 +100,11 @@ PLUGIN_OPTION(firebase_auth "Plugin Firebase Auth" OFF)
 
 PLUGIN_OPTION(firebase_storage "Plugin Firebase Storage" OFF)
 
+# Gamepad input over the `gamepads` package's channel, backed by SDL3. Needed
+# because libinput -- the shell's own input path -- deliberately ignores
+# joysticks and gamepads, and Wayland has no gamepad protocol either.
+PLUGIN_OPTION(gamepads_linux "Include Gamepads Linux plugin" OFF)
+
 PLUGIN_OPTION(go_router "Includes Go Router Plugin" ON)
 
 PLUGIN_OPTION(google_sign_in "Include Google Sign In manager" OFF)
