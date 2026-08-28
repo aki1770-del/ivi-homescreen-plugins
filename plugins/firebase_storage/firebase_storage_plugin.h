@@ -95,7 +95,7 @@ class FirebaseStoragePlugin : public flutter::Plugin,
       const PigeonStorageReference& reference,
       const std::vector<uint8_t>& data,
       const PigeonSettableMetadata& settable_meta_data,
-      uint64_t handle,
+      int64_t handle,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void ReferencePutString(
       const PigeonStorageFirebaseApp& app,
@@ -103,20 +103,20 @@ class FirebaseStoragePlugin : public flutter::Plugin,
       const std::string& data,
       int64_t format,
       const PigeonSettableMetadata& settable_meta_data,
-      uint64_t handle,
+      int64_t handle,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void ReferencePutFile(
       const PigeonStorageFirebaseApp& app,
       const PigeonStorageReference& reference,
       const std::string& file_path,
-      const PigeonSettableMetadata& settable_meta_data,
-      uint64_t handle,
+      const PigeonSettableMetadata* settable_meta_data,
+      int64_t handle,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void ReferenceDownloadFile(
       const PigeonStorageFirebaseApp& app,
       const PigeonStorageReference& reference,
       const std::string& file_path,
-      uint64_t handle,
+      int64_t handle,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void ReferenceUpdateMetadata(
       const PigeonStorageFirebaseApp& app,
@@ -124,15 +124,15 @@ class FirebaseStoragePlugin : public flutter::Plugin,
       const PigeonSettableMetadata& metadata,
       std::function<void(ErrorOr<PigeonFullMetaData> reply)> result) override;
   void TaskPause(const PigeonStorageFirebaseApp& app,
-                 uint64_t handle,
+                 int64_t handle,
                  std::function<void(ErrorOr<flutter::EncodableMap> reply)>
                      result) override;
   void TaskResume(const PigeonStorageFirebaseApp& app,
-                  uint64_t handle,
+                  int64_t handle,
                   std::function<void(ErrorOr<flutter::EncodableMap> reply)>
                       result) override;
   void TaskCancel(const PigeonStorageFirebaseApp& app,
-                  uint64_t handle,
+                  int64_t handle,
                   std::function<void(ErrorOr<flutter::EncodableMap> reply)>
                       result) override;
 
@@ -146,7 +146,10 @@ class FirebaseStoragePlugin : public flutter::Plugin,
 
  private:
   bool storageInitialized = false;
-  std::map<uint64_t, std::unique_ptr<::firebase::storage::Controller>>
+  // Keyed by the task handle the Dart side sends, which pigeon declares as
+  // `int` and generates as int64_t. Keeping the key unsigned meant every
+  // lookup went through an implicit sign conversion.
+  std::map<int64_t, std::unique_ptr<::firebase::storage::Controller>>
       controllers_;
 };
 

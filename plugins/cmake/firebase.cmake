@@ -16,13 +16,6 @@
 
 include_guard()
 
-if (NOT DEFINED FIREBASE_CPP_SDK_DIR)
-    message(FATAL_ERROR "FIREBASE_CPP_SDK_DIR is not set")
-endif ()
-if (NOT DEFINED FIREBASE_SDK_LIBDIR)
-    message(FATAL_ERROR "FIREBASE_SDK_LIBDIR is not set")
-endif ()
-
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UUID REQUIRED IMPORTED_TARGET uuid)
 pkg_check_modules(SECRET REQUIRED IMPORTED_TARGET libsecret-1)
@@ -30,9 +23,25 @@ pkg_check_modules(SECRET REQUIRED IMPORTED_TARGET libsecret-1)
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 include(FindThreads)
 
-add_library(firebase_sdk INTERFACE)
-
-target_include_directories(firebase_sdk INTERFACE
+#
+# The Firebase C++ SDK reaches us in one of two shapes.
+#
+# 1. Installed. Something built firebase-cpp-sdk with its install rules and
+#    staged the result into a prefix we search -- a cross sysroot, or a build
+#    overlay. Its package config names the include roots and, importantly, the
+#    library list that build actually produced, so the SDK version can move
+#    without editing this file.
+#
+# 2. In place. FIREBASE_CPP_SDK_DIR and FIREBASE_SDK_LIBDIR name a
+#    firebase-cpp-sdk source tree and its build tree directly. This is the
+#    historical arrangement and stays the default when both are set: it takes
+#    precedence over anything installed, so a developer pointing at a local
+#    build gets that local build.
+#
+# Either way the two branches converge on the same pair of variables below.
+#
+if (DEFINED FIREBASE_CPP_SDK_DIR AND DEFINED FIREBASE_SDK_LIBDIR)
+    set(FIREBASE_SDK_INCLUDE_DIRS
         ${FIREBASE_CPP_SDK_DIR}
         ${FIREBASE_CPP_SDK_DIR}/app/src/include
         ${FIREBASE_CPP_SDK_DIR}/auth/src/include
@@ -42,7 +51,7 @@ target_include_directories(firebase_sdk INTERFACE
         ${FIREBASE_SDK_LIBDIR}/external/src/firestore/Firestore/core/include
 )
 
-target_link_libraries(firebase_sdk INTERFACE
+    set(FIREBASE_SDK_LINK_LIBRARIES
         ${FIREBASE_SDK_LIBDIR}/app/libfirebase_app.a
         ${FIREBASE_SDK_LIBDIR}/app/rest/libfirebase_rest_lib.a
         ${FIREBASE_SDK_LIBDIR}/liblibuWS.a
@@ -129,6 +138,86 @@ target_link_libraries(firebase_sdk INTERFACE
         ${FIREBASE_SDK_LIBDIR}/external/src/boringssl/libssl.a
         ${FIREBASE_SDK_LIBDIR}/external/src/boringssl/libcrypto.a
         ${FIREBASE_SDK_LIBDIR}/external/src/zlib-build/libz.a
+)
+else ()
+    find_package(firebase_cpp_sdk CONFIG QUIET)
+    if (NOT firebase_cpp_sdk_FOUND)
+        message(FATAL_ERROR
+                "No Firebase C++ SDK found. Either set FIREBASE_CPP_SDK_DIR and "
+                "FIREBASE_SDK_LIBDIR to a firebase-cpp-sdk source tree and its "
+                "build tree, or install an SDK whose firebase_cpp_sdk-config.cmake "
+                "is reachable from CMAKE_PREFIX_PATH / the sysroot.")
+    endif ()
+    message(STATUS "Firebase C++ SDK ${firebase_cpp_sdk_VERSION}: ${FIREBASE_SDK_LIBDIR}")
+    set(FIREBASE_SDK_INCLUDE_DIRS ${firebase_cpp_sdk_INCLUDE_DIRS})
+    set(FIREBASE_SDK_LINK_LIBRARIES ${firebase_cpp_sdk_LIBRARIES})
+endif ()
+
+# Firestore's gRPC and protobuf resolve Abseil from the platform rather than
+# from the copy Firestore downloads: the release tarballs they are built from
+# carry empty third_party/abseil-cpp submodule directories, so their CMake falls
+# back to find_package(absl). That is a coherent choice -- Debian trixie and
+# Fedora both ship the release Firestore pins -- but it means the SDK's archives
+# reference Abseil without containing it, and the platform copy has to be on our
+# link line too. Requesting the umbrella components is enough; Abseil's own
+# config pulls the internal targets each of them needs.
+find_package(absl CONFIG QUIET)
+if (absl_FOUND)
+    message(STATUS "Abseil ${absl_VERSION} (for the Firebase C++ SDK's Firestore)")
+    set(FIREBASE_SDK_ABSL_LIBRARIES
+            absl::strings
+            absl::str_format
+            absl::cord
+            absl::time
+            absl::status
+            absl::statusor
+            absl::hash
+            absl::synchronization
+            absl::flags
+            absl::flags_parse
+            absl::log
+            absl::random_random
+            absl::base
+    )
+    # gRPC's CHECK macros land in Abseil's check-op machinery, which is not
+    # reachable through absl::log.
+    foreach (_absl_check_target absl::check absl::log_internal_check_op)
+        if (TARGET ${_absl_check_target})
+            list(APPEND FIREBASE_SDK_ABSL_LIBRARIES ${_absl_check_target})
+        endif ()
+    endforeach ()
+else ()
+    # An SDK that did bundle its own Abseil links without this; one that did not
+    # will fail with undefined absl:: symbols, which is a clearer signal than
+    # anything this file could invent here.
+    set(FIREBASE_SDK_ABSL_LIBRARIES "")
+endif ()
+
+# gRPC compiles in systemd socket activation wherever libsystemd is present at
+# its configure time, which on both a desktop distro and a PiOS sysroot it is.
+# The reference is real but shallow (sd_listen_fds and friends), so link it when
+# the platform has it and leave it out where it does not.
+pkg_check_modules(SYSTEMD IMPORTED_TARGET libsystemd)
+if (SYSTEMD_FOUND)
+    set(FIREBASE_SDK_SYSTEMD_LIBRARIES PkgConfig::SYSTEMD)
+else ()
+    set(FIREBASE_SDK_SYSTEMD_LIBRARIES "")
+endif ()
+
+add_library(firebase_sdk INTERFACE)
+
+target_include_directories(firebase_sdk INTERFACE ${FIREBASE_SDK_INCLUDE_DIRS})
+
+# The SDK is a pile of static archives with circular references between them
+# (firebase_app <-> firebase_rest_lib, and the whole gRPC/protobuf/absl set), so
+# a single pass in list order does not resolve. Grouping them lets the linker
+# iterate instead of requiring a hand-maintained topological order.
+target_link_libraries(firebase_sdk INTERFACE
+        -Wl,--start-group
+        ${FIREBASE_SDK_LINK_LIBRARIES}
+        -Wl,--end-group
+        ${FIREBASE_SDK_ABSL_LIBRARIES}
+        ${FIREBASE_SDK_SYSTEMD_LIBRARIES}
         PkgConfig::UUID
         PkgConfig::SECRET
         Threads::Threads

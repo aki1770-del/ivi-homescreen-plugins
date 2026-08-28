@@ -31,7 +31,7 @@ class CloudFirestorePlugin : public flutter::Plugin,
 
   CloudFirestorePlugin();
 
-  virtual ~CloudFirestorePlugin();
+  ~CloudFirestorePlugin() override;
 
   static std::string GetErrorCode(firebase::firestore::Error authError);
 
@@ -125,10 +125,27 @@ class CloudFirestorePlugin : public flutter::Plugin,
                       bool is_collection_group,
                       std::function<void(ErrorOr<flutter::EncodableList> reply)>
                           result) override;
-  virtual void WriteBatchCommit(
+  void WriteBatchCommit(
       const FirestorePigeonFirebaseApp& app,
       const flutter::EncodableList& writes,
       std::function<void(std::optional<FlutterError> reply)> result) override;
+  // Firestore Pipelines are not in the Firebase C++ SDK.
+  void ExecutePipeline(
+      const FirestorePigeonFirebaseApp& app,
+      const flutter::EncodableList& stages,
+      const flutter::EncodableMap* options,
+      std::function<void(ErrorOr<InternalPipelineSnapshot> reply)> result)
+      override;
+
+  // Persistent-cache index management has no Firebase C++ SDK equivalent.
+  //
+  // The type has to be qualified: pigeon gives the enum and this method the
+  // same name, and inside the class the method hides the type.
+  void PersistenceCacheIndexManagerRequest(
+      const FirestorePigeonFirebaseApp& app,
+      const cloud_firestore_linux::PersistenceCacheIndexManagerRequest& request,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+
   void QuerySnapshot(
       const FirestorePigeonFirebaseApp& app,
       const std::string& path,
@@ -136,11 +153,13 @@ class CloudFirestorePlugin : public flutter::Plugin,
       const PigeonQueryParameters& parameters,
       const PigeonGetOptions& options,
       bool include_metadata_changes,
+      const ListenSource& source,
       std::function<void(ErrorOr<std::string> reply)> result) override;
   void DocumentReferenceSnapshot(
       const FirestorePigeonFirebaseApp& app,
       const DocumentReferenceRequest& parameters,
       bool include_metadata_changes,
+      const ListenSource& source,
       std::function<void(ErrorOr<std::string> reply)> result) override;
 
   static flutter::BinaryMessenger* messenger_;

@@ -65,17 +65,19 @@ firebase::AppOptions PigeonFirebaseOptionsToAppOptions(
 }
 
 // Convert a AppOptions to PigeonInitializeOption
+//
+// The generated class has no default constructor -- its four required fields
+// are constructor arguments -- so the required set is passed in and only the
+// optional fields are filled in afterwards.
 PigeonFirebaseOptions optionsFromFIROptions(
     const firebase::AppOptions& options) {
-  PigeonFirebaseOptions pigeon_options = PigeonFirebaseOptions();
-  pigeon_options.set_api_key(options.api_key());
-  pigeon_options.set_app_id(options.app_id());
+  PigeonFirebaseOptions pigeon_options(options.api_key(), options.app_id(),
+                                       options.messaging_sender_id(),
+                                       options.project_id());
   if (options.database_url() != nullptr) {
     pigeon_options.set_database_u_r_l(options.database_url());
   }
   pigeon_options.set_tracking_id(nullptr);
-  pigeon_options.set_messaging_sender_id(options.messaging_sender_id());
-  pigeon_options.set_project_id(options.project_id());
   if (options.storage_bucket() != nullptr) {
     pigeon_options.set_storage_bucket(options.storage_bucket());
   }
@@ -83,11 +85,14 @@ PigeonFirebaseOptions optionsFromFIROptions(
 }
 
 // Convert a firebase::App to PigeonInitializeResponse
+//
+// plugin_constants is required and carries the per-plugin constant maps the
+// Dart side merges into FirebaseApp; this embedder publishes none, so it is
+// empty rather than absent.
 PigeonInitializeResponse AppToPigeonInitializeResponse(const App& app) {
-  PigeonInitializeResponse response = PigeonInitializeResponse();
-  response.set_name(app.name());
-  response.set_options(optionsFromFIROptions(app.options()));
-  return response;
+  return PigeonInitializeResponse(app.name(),
+                                  optionsFromFIROptions(app.options()),
+                                  flutter::EncodableMap{});
 }
 
 void FirebaseCorePlugin::InitializeApp(
