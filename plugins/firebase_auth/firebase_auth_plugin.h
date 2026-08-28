@@ -39,9 +39,9 @@ class FirebaseAuthPlugin : public flutter::Plugin,
   static std::string GetAuthErrorCode(AuthError authError);
   static FlutterError ParseError(const firebase::FutureBase& future);
 
-  static PigeonUserDetails ParseUserDetails(const firebase::auth::User user);
+  static PigeonUserDetails ParseUserDetails(firebase::auth::User user);
   static PigeonAdditionalUserInfo ParseAdditionalUserInfo(
-      const firebase::auth::AdditionalUserInfo user);
+      const firebase::auth::AdditionalUserInfo& user);
   static flutter::EncodableMap ConvertToEncodableMap(
       const std::map<firebase::Variant, firebase::Variant>& originalMap);
   static flutter::EncodableValue ConvertToEncodableValue(
@@ -197,6 +197,18 @@ class FirebaseAuthPlugin : public flutter::Plugin,
       const AuthPigeonFirebaseApp& app,
       const std::string& new_email,
       const PigeonActionCodeSettings* action_code_settings,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+
+  // Apple-only in the Firebase C++ SDK; there is no Linux implementation to
+  // call through to.
+  void RevokeAccessToken(
+      const AuthPigeonFirebaseApp& app,
+      const std::string& access_token,
+      std::function<void(std::optional<FlutterError> reply)> result) override;
+
+  // reCAPTCHA Enterprise is a mobile-only verification path.
+  void InitializeRecaptchaConfig(
+      const AuthPigeonFirebaseApp& app,
       std::function<void(std::optional<FlutterError> reply)> result) override;
 
   void RevokeTokenWithAuthorizationCode(

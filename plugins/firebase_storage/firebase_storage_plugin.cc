@@ -18,9 +18,11 @@
 #include <flutter/standard_method_codec.h>
 
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -447,7 +449,7 @@ class TaskStateListener : public Listener {
 
     flutter::EncodableMap event = flutter::EncodableMap();
     event[EncodableValue(kTaskStateName)] =
-        static_cast<int>(PigeonStorageTaskState::running);
+        static_cast<int>(PigeonStorageTaskState::kRunning);
     event[EncodableValue(kTaskAppName)] =
         controller->GetReference().storage()->app()->name();
     flutter::EncodableMap snapshot = flutter::EncodableMap();
@@ -467,7 +469,7 @@ class TaskStateListener : public Listener {
     // TODO error handling
     flutter::EncodableMap event = flutter::EncodableMap();
     event[EncodableValue(kTaskStateName)] =
-        static_cast<int>(PigeonStorageTaskState::paused);
+        static_cast<int>(PigeonStorageTaskState::kPaused);
     event[EncodableValue(kTaskAppName)] =
         controller->GetReference().storage()->app()->name();
     flutter::EncodableMap snapshot = flutter::EncodableMap();
@@ -518,7 +520,7 @@ class PutDataStreamHandler
       if (data_result.error() == firebase::storage::kErrorNone) {
         flutter::EncodableMap event = flutter::EncodableMap();
         event[EncodableValue(kTaskStateName)] =
-            static_cast<int>(PigeonStorageTaskState::success);
+            static_cast<int>(PigeonStorageTaskState::kSuccess);
         event[EncodableValue(kTaskAppName)] =
             std::string(storage_->app()->name());
         flutter::EncodableMap snapshot = flutter::EncodableMap();
@@ -588,7 +590,7 @@ class PutFileStreamHandler
       if (data_result.error() == firebase::storage::kErrorNone) {
         flutter::EncodableMap event = flutter::EncodableMap();
         event[EncodableValue(kTaskStateName)] =
-            static_cast<int>(PigeonStorageTaskState::success);
+            static_cast<int>(PigeonStorageTaskState::kSuccess);
         event[EncodableValue(kTaskAppName)] =
             std::string(storage_->app()->name());
         flutter::EncodableMap snapshot = flutter::EncodableMap();
@@ -658,7 +660,7 @@ class GetFileStreamHandler
       if (data_result.error() == firebase::storage::kErrorNone) {
         flutter::EncodableMap event = flutter::EncodableMap();
         event[EncodableValue(kTaskStateName)] =
-            static_cast<int>(PigeonStorageTaskState::success);
+            static_cast<int>(PigeonStorageTaskState::kSuccess);
         event[EncodableValue(kTaskAppName)] =
             std::string(storage_->app()->name());
         flutter::EncodableMap snapshot = flutter::EncodableMap();
@@ -702,7 +704,7 @@ void FirebaseStoragePlugin::ReferencePutData(
     const PigeonStorageReference& pigeon_reference,
     const std::vector<uint8_t>& data,
     const PigeonSettableMetadata& /* pigeon_meta_data */,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<std::string> reply)> result) {
   Storage* cpp_storage =
       GetCPPStorageFromPigeon(pigeon_app, pigeon_reference.bucket());
@@ -725,7 +727,7 @@ void FirebaseStoragePlugin::ReferencePutString(
     const std::string& data,
     int64_t /* format */,
     const PigeonSettableMetadata& /* settable_meta_data */,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<std::string> reply)> result) {
   Storage* cpp_storage =
       GetCPPStorageFromPigeon(pigeon_app, pigeon_reference.bucket());
@@ -746,8 +748,8 @@ void FirebaseStoragePlugin::ReferencePutFile(
     const PigeonStorageFirebaseApp& pigeon_app,
     const PigeonStorageReference& pigeon_reference,
     const std::string& file_path,
-    const PigeonSettableMetadata& /* settable_meta_data */,
-    uint64_t handle,
+    const PigeonSettableMetadata* /* settable_meta_data */,
+    int64_t handle,
     std::function<void(ErrorOr<std::string> reply)> result) {
   Storage* cpp_storage =
       GetCPPStorageFromPigeon(pigeon_app, pigeon_reference.bucket());
@@ -768,7 +770,7 @@ void FirebaseStoragePlugin::ReferenceDownloadFile(
     const PigeonStorageFirebaseApp& pigeon_app,
     const PigeonStorageReference& pigeon_reference,
     const std::string& file_path,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<std::string> reply)> result) {
   Storage* cpp_storage =
       GetCPPStorageFromPigeon(pigeon_app, pigeon_reference.bucket());
@@ -812,52 +814,77 @@ void FirebaseStoragePlugin::ReferenceUpdateMetadata(
   });
 }
 
+namespace {
+// The Controller for [handle], or null when the Dart side names a task this
+// plugin does not know about -- an out-of-order or repeated call, which must be
+// an error reply rather than a null dereference. `controllers_[handle]` would
+// otherwise insert an empty entry and the caller would dereference it.
+::firebase::storage::Controller* ControllerFor(
+    const std::map<int64_t, std::unique_ptr<::firebase::storage::Controller>>&
+        controllers,
+    int64_t handle) {
+  const auto it = controllers.find(handle);
+  return it == controllers.end() ? nullptr : it->second.get();
+}
+
+flutter::EncodableMap TaskSnapshot(
+    bool status,
+    const ::firebase::storage::Controller& controller) {
+  flutter::EncodableMap task_data;
+  task_data[flutter::EncodableValue("bytesTransferred")] =
+      controller.bytes_transferred();
+  task_data[flutter::EncodableValue("totalBytes")] =
+      controller.total_byte_count();
+  flutter::EncodableMap task_result;
+  task_result[flutter::EncodableValue("status")] = status;
+  task_result[flutter::EncodableValue("snapshot")] = task_data;
+  return task_result;
+}
+}  // namespace
+
 void FirebaseStoragePlugin::TaskPause(
     const PigeonStorageFirebaseApp& /* app */,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<flutter::EncodableMap> reply)> result) {
-  bool status = controllers_[handle]->Pause();
-  flutter::EncodableMap task_result = flutter::EncodableMap();
-  flutter::EncodableMap task_data = flutter::EncodableMap();
-  task_result[EncodableValue("status")] = status;
-  task_data[EncodableValue("bytesTransferred")] =
-      controllers_[handle]->bytes_transferred();
-  task_data[EncodableValue("totalBytes")] =
-      controllers_[handle]->total_byte_count();
-  task_result[EncodableValue("snapshot")] = task_data;
-  result(ErrorOr<flutter::EncodableMap>(task_result));
+  auto* controller = ControllerFor(controllers_, handle);
+  if (controller == nullptr) {
+    result(FlutterError("unknown-task",
+                        "No storage task for handle " + std::to_string(handle),
+                        flutter::EncodableValue()));
+    return;
+  }
+  const bool status = controller->Pause();
+  result(ErrorOr<flutter::EncodableMap>(TaskSnapshot(status, *controller)));
 }
 
 void FirebaseStoragePlugin::TaskResume(
     const PigeonStorageFirebaseApp& /* app */,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<flutter::EncodableMap> reply)> result) {
-  bool status = controllers_[handle]->Resume();
-  flutter::EncodableMap task_result = flutter::EncodableMap();
-  flutter::EncodableMap task_data = flutter::EncodableMap();
-  task_result[EncodableValue("status")] = status;
-  task_data[EncodableValue("bytesTransferred")] =
-      controllers_[handle]->bytes_transferred();
-  task_data[EncodableValue("totalBytes")] =
-      controllers_[handle]->total_byte_count();
-  task_result[EncodableValue("snapshot")] = task_data;
-  result(ErrorOr<flutter::EncodableMap>(task_result));
+  auto* controller = ControllerFor(controllers_, handle);
+  if (controller == nullptr) {
+    result(FlutterError("unknown-task",
+                        "No storage task for handle " + std::to_string(handle),
+                        flutter::EncodableValue()));
+    return;
+  }
+  const bool status = controller->Resume();
+  result(ErrorOr<flutter::EncodableMap>(TaskSnapshot(status, *controller)));
 }
 
 void FirebaseStoragePlugin::TaskCancel(
     const PigeonStorageFirebaseApp& /* app */,
-    uint64_t handle,
+    int64_t handle,
     std::function<void(ErrorOr<flutter::EncodableMap> reply)> result) {
-  bool status = controllers_[handle]->Cancel();
-  flutter::EncodableMap task_result = flutter::EncodableMap();
-  flutter::EncodableMap task_data = flutter::EncodableMap();
-  task_result[EncodableValue("status")] = status;
-  task_data[EncodableValue("bytesTransferred")] =
-      controllers_[handle]->bytes_transferred();
-  task_data[EncodableValue("totalBytes")] =
-      controllers_[handle]->total_byte_count();
-  task_result[EncodableValue("snapshot")] = task_data;
-  result(ErrorOr<flutter::EncodableMap>(task_result));
+  auto* controller = ControllerFor(controllers_, handle);
+  if (controller == nullptr) {
+    result(FlutterError("unknown-task",
+                        "No storage task for handle " + std::to_string(handle),
+                        flutter::EncodableValue()));
+    return;
+  }
+  const bool status = controller->Cancel();
+  result(ErrorOr<flutter::EncodableMap>(TaskSnapshot(status, *controller)));
 }
 
 }  // namespace firebase_storage_linux

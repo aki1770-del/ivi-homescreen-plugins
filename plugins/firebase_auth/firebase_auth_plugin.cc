@@ -124,13 +124,53 @@ firebase_auth_linux::FirebaseAuthPlugin::ConvertToEncodableValue(
 }
 
 PigeonAdditionalUserInfo FirebaseAuthPlugin::ParseAdditionalUserInfo(
-    const firebase::auth::AdditionalUserInfo additionalUserInfo) {
+    const firebase::auth::AdditionalUserInfo& additionalUserInfo) {
   // Cannot know if the user is new or not with current API
   PigeonAdditionalUserInfo result = PigeonAdditionalUserInfo(false);
   result.set_profile(ConvertToEncodableMap(additionalUserInfo.profile));
   result.set_provider_id(additionalUserInfo.provider_id);
   result.set_username(additionalUserInfo.user_name);
   return result;
+}
+
+// The user payload the auth event channels carry.
+//
+// This is not pigeon's own encoding of InternalUserDetails: the Dart side reads
+// it as a plain list and calls InternalUserInfo.decode() on element 0 itself
+// (see method_channel_firebase_auth.dart), so the user info has to arrive as a
+// raw field list rather than as a codec-tagged custom value. Pigeon keeps its
+// ToEncodableList() private, so the field order is spelled out here; it must
+// stay in step with InternalUserInfo in messages.g.cc.
+static flutter::EncodableList UserDetailsToEncodableList(
+    const PigeonUserDetails& details) {
+  using flutter::EncodableList;
+  using flutter::EncodableValue;
+
+  const auto& info = details.user_info();
+  const auto opt = [](const std::string* v) {
+    return v ? EncodableValue(*v) : EncodableValue();
+  };
+  const auto opt_i = [](const int64_t* v) {
+    return v ? EncodableValue(*v) : EncodableValue();
+  };
+
+  EncodableList user_info;
+  user_info.reserve(12);
+  user_info.emplace_back(info.uid());
+  user_info.push_back(opt(info.email()));
+  user_info.push_back(opt(info.display_name()));
+  user_info.push_back(opt(info.photo_url()));
+  user_info.push_back(opt(info.phone_number()));
+  user_info.emplace_back(info.is_anonymous());
+  user_info.emplace_back(info.is_email_verified());
+  user_info.push_back(opt(info.provider_id()));
+  user_info.push_back(opt(info.tenant_id()));
+  user_info.push_back(opt(info.refresh_token()));
+  user_info.push_back(opt_i(info.creation_timestamp()));
+  user_info.push_back(opt_i(info.last_sign_in_timestamp()));
+
+  return EncodableList{EncodableValue(std::move(user_info)),
+                       EncodableValue(details.provider_data())};
 }
 
 PigeonUserDetails FirebaseAuthPlugin::ParseUserDetails(
@@ -293,8 +333,7 @@ std::string FirebaseAuthPlugin::GetAuthErrorCode(AuthError authError) {
 
 FlutterError FirebaseAuthPlugin::ParseError(
     const firebase::FutureBase& completed_future) {
-  const AuthError errorCode =
-      static_cast<const AuthError>(completed_future.error());
+  const auto errorCode = static_cast<const AuthError>(completed_future.error());
 
   return FlutterError(FirebaseAuthPlugin::GetAuthErrorCode(errorCode),
                       completed_future.error_message());
@@ -319,9 +358,9 @@ class FlutterIdTokenListener : public firebase::auth::IdTokenListener {
 
     if (event_sink_) {
       if (user.is_valid()) {
-        event_sink_->Success(EncodableValue(
-            EncodableMap{{EncodableValue("user"),
-                          EncodableValue(userDetails.ToEncodableList())}}));
+        event_sink_->Success(EncodableValue(EncodableMap{
+            {EncodableValue("user"),
+             EncodableValue(UserDetailsToEncodableList(userDetails))}}));
       } else {
         event_sink_->Success(EncodableValue(EncodableMap{
             {EncodableValue("user"), EncodableValue(std::monostate{})}}));
@@ -336,7 +375,7 @@ class FlutterIdTokenListener : public firebase::auth::IdTokenListener {
 class IdTokenStreamHandler
     : public flutter::StreamHandler<flutter::EncodableValue> {
  public:
-  IdTokenStreamHandler(Auth* auth) {
+  explicit IdTokenStreamHandler(Auth* auth) {
     listener_ = nullptr;
     auth_ = auth;
   }
@@ -400,9 +439,9 @@ class FlutterAuthStateListener : public firebase::auth::AuthStateListener {
 
     if (event_sink_) {
       if (user.is_valid()) {
-        event_sink_->Success(EncodableValue(
-            EncodableMap{{EncodableValue("user"),
-                          EncodableValue(userDetails.ToEncodableList())}}));
+        event_sink_->Success(EncodableValue(EncodableMap{
+            {EncodableValue("user"),
+             EncodableValue(UserDetailsToEncodableList(userDetails))}}));
       } else {
         event_sink_->Success(EncodableValue(EncodableMap{
             {EncodableValue("user"), EncodableValue(std::monostate{})}}));
@@ -417,7 +456,7 @@ class FlutterAuthStateListener : public firebase::auth::AuthStateListener {
 class AuthStateStreamHandler
     : public flutter::StreamHandler<flutter::EncodableValue> {
  public:
-  AuthStateStreamHandler(Auth* auth) {
+  explicit AuthStateStreamHandler(Auth* auth) {
     listener_ = nullptr;
     auth_ = auth;
   }
@@ -609,7 +648,7 @@ firebase::auth::Credential getCredentialFromArguments(
     // knowledge cutoff in September 2021
     std::cout << "Email link authentication is not supported in Firebase C++ "
                  "SDK as of September 2021.\n";
-    return firebase::auth::Credential();
+    return {};
   }
 
   std::string idToken =
@@ -651,14 +690,14 @@ firebase::auth::Credential getCredentialFromArguments(
     // support creating OAuthProvider credentials directly
     std::cout << "Creating OAuthProvider credentials directly is not supported "
                  "in Firebase C++ SDK as of September 2021.\n";
-    return firebase::auth::Credential();
+    return {};
   }
 
   // If no known auth method matched
   printf(
       "Support for an auth provider with identifier '%s' is not implemented.\n",
       signInMethod.c_str());
-  return firebase::auth::Credential();
+  return {};
 }
 
 void FirebaseAuthPlugin::SignInWithCredential(
@@ -777,7 +816,7 @@ firebase::auth::FederatedOAuthProvider getProviderFromArguments(
     const PigeonSignInProvider& sign_in_provider) {
   firebase::auth::FederatedOAuthProviderData federatedOAuthProviderData =
       firebase::auth::FederatedOAuthProviderData(
-          sign_in_provider.provider_id().c_str(),
+          sign_in_provider.provider_id(),
           TransformEncodableList(*sign_in_provider.scopes()),
           TransformEncodableMap(*sign_in_provider.custom_parameters()));
   firebase::auth::FederatedOAuthProvider federatedAuthProvider =
@@ -825,7 +864,7 @@ flutter::EncodableList TransformStringList(
   flutter::EncodableList encodable_list;
 
   for (const auto& value : string_list) {
-    encodable_list.push_back(EncodableValue(value));
+    encodable_list.emplace_back(value);
   }
 
   return encodable_list;
@@ -1133,21 +1172,17 @@ void FirebaseAuthPlugin::UpdateEmail(
     const AuthPigeonFirebaseApp& app,
     const std::string& new_email,
     std::function<void(ErrorOr<PigeonUserDetails> reply)> result) {
-  firebase::auth::Auth* firebaseAuth = GetAuthFromPigeon(app);
-  firebase::auth::User user = firebaseAuth->current_user();
-
-  firebase::Future<void> future = user.UpdateEmail(new_email.c_str());
-
-  future.OnCompletion([result, firebaseAuth](
-                          const firebase::Future<void>& completed_future) {
-    // We are probably in a different thread right now.
-    if (completed_future.error() == 0) {
-      PigeonUserDetails user = ParseUserDetails(firebaseAuth->current_user());
-      result(user);
-    } else {
-      result(FirebaseAuthPlugin::ParseError(completed_future));
-    }
-  });
+  // User::UpdateEmail was deprecated and then removed from the Firebase C++
+  // SDK: changing an account's email without first proving control of the new
+  // address is no longer allowed. The supported replacement is
+  // verifyBeforeUpdateEmail, which is implemented below, so say so rather than
+  // failing with something the caller cannot act on.
+  result(FlutterError(
+      "operation-not-allowed",
+      "updateEmail is no longer supported by the Firebase C++ SDK. Use "
+      "verifyBeforeUpdateEmail, which sends a confirmation link to the new "
+      "address and applies the change once it is followed.",
+      EncodableValue(nullptr)));
 }
 
 void FirebaseAuthPlugin::UpdatePassword(
@@ -1252,9 +1287,40 @@ void FirebaseAuthPlugin::VerifyBeforeUpdateEmail(
     const std::string& new_email,
     const PigeonActionCodeSettings* /* action_code_settings */,
     std::function<void(std::optional<FlutterError> reply)> result) {
+  // The C++ SDK takes no action code settings for this call, so a caller that
+  // supplied them gets the project's default action URL rather than an error.
+  firebase::auth::Auth* firebaseAuth = GetAuthFromPigeon(app);
+  firebase::auth::User user = firebaseAuth->current_user();
+
+  firebase::Future<void> future =
+      user.SendEmailVerificationBeforeUpdatingEmail(new_email.c_str());
+
+  future.OnCompletion([result](const firebase::Future<void>& completed_future) {
+    // We are probably in a different thread right now.
+    if (completed_future.error() == 0) {
+      result(std::nullopt);
+    } else {
+      result(FirebaseAuthPlugin::ParseError(completed_future));
+    }
+  });
+}
+
+void FirebaseAuthPlugin::RevokeAccessToken(
+    const AuthPigeonFirebaseApp& app,
+    const std::string& access_token,
+    std::function<void(std::optional<FlutterError> reply)> result) {
+  result(
+      FlutterError("unimplemented",
+                   "RevokeAccessToken is not available on this platform yet.",
+                   EncodableValue(nullptr)));
+}
+
+void FirebaseAuthPlugin::InitializeRecaptchaConfig(
+    const AuthPigeonFirebaseApp& app,
+    std::function<void(std::optional<FlutterError> reply)> result) {
   result(FlutterError(
       "unimplemented",
-      "VerifyBeforeUpdateEmail is not available on this platform yet.",
+      "InitializeRecaptchaConfig is not available on this platform yet.",
       EncodableValue(nullptr)));
 }
 
